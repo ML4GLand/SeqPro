@@ -1,10 +1,4 @@
-import torch
 import numpy as np
-np.random.seed(13)
-from seqdata import SeqData
-from ._encoders import decode_seq
-from ._helpers import _token2one_hot
-
 
 # helper
 def _find_distance(seq1, seq2) -> int:
@@ -38,3 +32,13 @@ def edit_distance(seq1 : str, seq2 : str, dual : bool = False) -> int:
     f_edits = _find_distance(seq1, seq2)
     b_edits = _find_distance(seq1, seq2[::-1]) if dual else len(seq1)
     return min(f_edits, b_edits)
+
+# protein sequence handling
+DNA = ("A", "C", "G", "T")
+RNA = ("A", "C", "G", "U")
+AMINO_ACIDS = ("A", "R", "N", "D", "B", "C", "E", "Q", "Z", "G", "H",
+               "I", "L", "K", "M", "F", "P", "S", "T", "W", "Y", "V")
+
+alphabets = {"DNA": DNA,
+             "RNA": RNA,
+             "AMINO_ACIDS": AMINO_ACIDS}

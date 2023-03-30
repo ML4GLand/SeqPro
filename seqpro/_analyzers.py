@@ -1,15 +1,36 @@
 import numpy as np
-np.random.seed(13)
 
 # my own
-def gc_content_seq(seq, ohe=True):
+def len_seqs(seqs, ohe=False):
+    """Calculate the length of each sequence in a list.
+    
+    Parameters
+    ----------
+    seqs : list
+        List of sequences.
+    ohe : bool, optional
+        Whether to calculate the length of one-hot encoded sequences.
+        Default is False.
+        
+    Returns
+    -------
+    np.array
+        Array containing the length of each sequence.
+    """
+    if ohe:
+        return np.array([seq.shape[1] for seq in seqs])
+    else:
+        return np.array([len(seq) for seq in seqs])
+
+# my own
+def gc_content_seq(seq, ohe=False):
     if ohe:
         return np.sum(seq[1:3, :])/seq.shape[1]
     else:
         return (seq.count("G") + seq.count("C"))/len(seq)
 
 # my own
-def gc_content_seqs(seqs, ohe=True):
+def gc_content_seqs(seqs, ohe=False):
     if ohe:
         seq_len = seqs[0].shape[1]
         return np.sum(seqs[:, 1:3, :], axis=1).sum(axis=1)/seq_len
@@ -17,7 +38,7 @@ def gc_content_seqs(seqs, ohe=True):
         return np.array([gc_content_seq(seq) for seq in seqs])
 
 # my own
-def nucleotide_content_seq(seq, ohe=True, normalize=True):
+def nucleotide_content_seq(seq, ohe=False, normalize=True):
     if ohe:
         if normalize:
             return np.sum(seq, axis=1)/seq.shape[1]
@@ -30,14 +51,17 @@ def nucleotide_content_seq(seq, ohe=True, normalize=True):
             return np.array([seq.count(nuc) for nuc in "ACGT"])
             
 # my own
-def nucleotide_content_seqs(seqs, axis=0, ohe=True, normalize=True):
+def nucleotide_content_seqs(seqs, axis=0, ohe=False, normalize=True):
     if ohe:
         if normalize:
             return np.sum(seqs, axis=axis)/seqs.shape[0]
         else:
             return np.sum(seqs, axis=axis)
     else:
-        print("Not implemented yet")
+        if normalize:
+            return np.array([np.array([seq.count(nuc)/len(seq) for nuc in "ACGT"]) for seq in seqs])
+        else:
+            return np.array([np.array([seq.count(nuc) for nuc in "ACGT"]) for seq in seqs])
 
 # haydens
 def count_kmers_seq(seq : str, k : int, data = None) -> dict:

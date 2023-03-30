@@ -1,7 +1,40 @@
+import torch
 import numpy as np
-np.random.seed(13)
+from tqdm.auto import tqdm
+from ._helpers import COMPLEMENT_DNA, COMPLEMENT_RNA
 from ._helpers import _string_to_char_array, _one_hot2token, _char_array_to_string, _token2one_hot
 
+# my own
+def reverse_complement_seq(seq, vocab="DNA"):
+    """Reverse complement a single sequence."""
+    if isinstance(seq, str):
+        if vocab == "DNA":
+            return "".join(COMPLEMENT_DNA.get(base, base) for base in reversed(seq))
+        elif vocab == "RNA":
+            return "".join(COMPLEMENT_RNA.get(base, base) for base in reversed(seq))
+        else:
+            raise ValueError("Invalid vocab, only DNA or RNA are currently supported")
+    elif isinstance(seq, np.ndarray):
+        return torch.from_numpy(np.flip(seq, axis=(0, 1)).copy()).numpy()
+
+# my own
+def reverse_complement_seqs(seqs, vocab="DNA", verbose=True):
+    """Reverse complement set of sequences."""
+    if isinstance(seqs[0], str):
+        return np.array(
+            [
+                reverse_complement_seq(seq, vocab)
+                for i, seq in tqdm(
+                    enumerate(seqs),
+                    total=len(seqs),
+                    desc="Reverse complementing sequences",
+                    disable=not verbose,
+                )
+            ]
+        )
+    elif isinstance(seqs[0], np.ndarray):
+        return torch.from_numpy(np.flip(seqs, axis=(1, 2)).copy()).numpy()
+    
 # my own
 def shuffle_seq(seq,  one_hot=False, seed=None):
     np.random.seed(seed)
@@ -14,8 +47,10 @@ def shuffle_seq(seq,  one_hot=False, seed=None):
     
     if one_hot:
         shuffled_seq = np.eye(4)[shuffled_seq]
-        
-    return shuffled_seq
+        return shuffled_seq
+    
+    else:
+        return np.array("".join(shuffled_seq))
 
 # my own
 def shuffle_seqs(seqs, one_hot=False, seed=None):
