@@ -34,11 +34,21 @@ def edit_distance(seq1 : str, seq2 : str, dual : bool = False) -> int:
     return min(f_edits, b_edits)
 
 # protein sequence handling
-DNA = ("A", "C", "G", "T")
-RNA = ("A", "C", "G", "U")
-AMINO_ACIDS = ("A", "R", "N", "D", "B", "C", "E", "Q", "Z", "G", "H",
-               "I", "L", "K", "M", "F", "P", "S", "T", "W", "Y", "V")
+# vocabularies:
+DNA = ["A", "C", "G", "T"]
+RNA = ["A", "C", "G", "U"]
+AMINO_ACIDS = ["A", "R", "N", "D", "B", "C", "E", "Q", "Z", "G", "H",
+               "I", "L", "K", "M", "F", "P", "S", "T", "W", "Y", "V"]
+CODONS = ["AAA", "AAC", "AAG", "AAT", "ACA", "ACC", "ACG", "ACT", "AGA",
+          "AGC", "AGG", "AGT", "ATA", "ATC", "ATG", "ATT", "CAA", "CAC",
+          "CAG", "CAT", "CCA", "CCC", "CCG", "CCT", "CGA", "CGC", "CGG",
+          "CGT", "CTA", "CTC", "CTG", "CTT", "GAA", "GAC", "GAG", "GAT",
+          "GCA", "GCC", "GCG", "GCT", "GGA", "GGC", "GGG", "GGT", "GTA",
+          "GTC", "GTG", "GTT", "TAC", "TAT", "TCA", "TCC", "TCG", "TCT",
+          "TGC", "TGG", "TGT", "TTA", "TTC", "TTG", "TTT"]
+STOP_CODONS = ["TAG", "TAA", "TGA"]
 
-alphabets = {"DNA": DNA,
-             "RNA": RNA,
-             "AMINO_ACIDS": AMINO_ACIDS}
+# want to one-hot encode AA sequence and codons
+# https://github.com/gagneurlab/concise/blob/master/concise/preprocessing/sequence.py
+
+# Performing motif anal
