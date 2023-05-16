@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from ._analyzers import gc_content_seqs, nucleotide_content_seqs
 
+
 def plot_gc_content(seqs, title="", ax=None, figsize=(10, 5)):
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)
@@ -9,6 +10,7 @@ def plot_gc_content(seqs, title="", ax=None, figsize=(10, 5)):
     ax.hist(gc_contents, bins=100)
     ax.set_xlabel("GC content")
     ax.set_ylabel("Frequency")
+
 
 def plot_nucleotide_content(seqs, title="", ax=None, figsize=(10, 5)):
     if ax is None:

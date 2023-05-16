@@ -1,175 +1,107 @@
-import torch
+from typing import Optional, Union, cast
+
 import numpy as np
-from tqdm.auto import tqdm
-from ._helpers import COMPLEMENT_DNA, COMPLEMENT_RNA
-from ._helpers import _string_to_char_array, _one_hot2token, _char_array_to_string, _token2one_hot
+import ushuffle
+from numpy.typing import NDArray
 
-# my own
-def reverse_complement_seq(seq, vocab="DNA"):
-    """Reverse complement a single sequence."""
-    if isinstance(seq, str):
-        if vocab == "DNA":
-            return "".join(COMPLEMENT_DNA.get(base, base) for base in reversed(seq))
-        elif vocab == "RNA":
-            return "".join(COMPLEMENT_RNA.get(base, base) for base in reversed(seq))
-        else:
-            raise ValueError("Invalid vocab, only DNA or RNA are currently supported")
-    elif isinstance(seq, np.ndarray):
-        return torch.from_numpy(np.flip(seq, axis=(0, 1)).copy()).numpy()
+from ._alphabets import NucleotideAlphabet
+from ._utils import SeqType, _check_axes, cast_seqs
 
-# my own
-def reverse_complement_seqs(seqs, vocab="DNA", verbose=True):
-    """Reverse complement set of sequences."""
-    if isinstance(seqs[0], str):
-        return np.array(
-            [
-                reverse_complement_seq(seq, vocab)
-                for i, seq in tqdm(
-                    enumerate(seqs),
-                    total=len(seqs),
-                    desc="Reverse complementing sequences",
-                    disable=not verbose,
-                )
-            ]
-        )
-    elif isinstance(seqs[0], np.ndarray):
-        return torch.from_numpy(np.flip(seqs, axis=(1, 2)).copy()).numpy()
-    
-# my own
-def shuffle_seq(seq,  one_hot=False, seed=None):
-    np.random.seed(seed)
-    
-    if one_hot:
-        seq = np.argmax(seq, axis=-1)
-        
-    shuffled_idx = np.random.permutation(len(seq))
-    shuffled_seq = np.array([seq[i] for i in shuffled_idx], dtype=seq.dtype)
-    
-    if one_hot:
-        shuffled_seq = np.eye(4)[shuffled_seq]
-        return shuffled_seq
-    
-    else:
-        return np.array("".join(shuffled_seq))
 
-# my own
-def shuffle_seqs(seqs, one_hot=False, seed=None):
-    return np.array([shuffle_seq(seq, one_hot=one_hot, seed=seed) for seq in seqs])
-
-# modified dinuc_shuffle
-def dinuc_shuffle_seq(
-    seq, 
-    num_shufs=None, 
-    rng=None
+def reverse_complement(
+    seqs: SeqType,
+    alphabet: NucleotideAlphabet,
+    length_axis: Optional[int] = None,
+    ohe_axis: Optional[int] = None,
 ):
-    """
-    Creates shuffles of the given sequence, in which dinucleotide frequencies
-    are preserved.
-    If `seq` is a string, returns a list of N strings of length L, each one
-    being a shuffled version of `seq`. If `seq` is a 2D np array, then the
-    result is an N x L x D np array of shuffled versions of `seq`, also
-    one-hot encoded. If `num_shufs` is not specified, then the first dimension
-    of N will not be present (i.e. a single string will be returned, or an L x D
-    array).
+    return alphabet.reverse_complement(seqs, length_axis, ohe_axis)
+
+
+def shuffle(
+    seqs: SeqType, length_axis: Optional[int] = None, *, seed: Optional[int] = None
+) -> NDArray[Union[np.bytes_, np.uint8]]:
+    """Shuffle sequences.
+
     Parameters
     ----------
-    seq : str
-        The sequence to shuffle.
-    num_shufs : int, optional
-        The number of shuffles to create. If None, only one shuffle is created.
-    rng : np.random.RandomState, optional
-        The random number generator to use. If None, a new one is created.
+    seqs : SeqType
+    length_axis : Optional[int], optional
+        Axis that corresponds to the length of sequences.
+    seed : Optional[int], optional
+        Seed for shuffling.
+
     Returns
     -------
-    list of str or np.array
-        The shuffled sequences.
-    Note
-    ----
-    This function comes from DeepLIFT's dinuc_shuffle.py.
+    NDArray[bytes | uint8]
+        Shuffled sequences.
+
+    Raises
+    ------
+    ValueError
+        When not given a length axis and an array is passed in.
     """
-    if type(seq) is str or type(seq) is np.str_:
-        arr = _string_to_char_array(seq)
-    elif type(seq) is np.ndarray and len(seq.shape) == 2:
-        seq_len, one_hot_dim = seq.shape
-        arr = _one_hot2token(seq)
-    else:
-        raise ValueError("Expected string or one-hot encoded array")
-    if not rng:
-        rng = np.random.RandomState(rng)
+    _check_axes(seqs, length_axis, False)
 
-    # Get the set of all characters, and a mapping of which positions have which
-    # characters; use `tokens`, which are integer representations of the
-    # original characters
-    chars, tokens = np.unique(arr, return_inverse=True)
+    if isinstance(seqs, np.ndarray) and length_axis is None:
+        raise ValueError("Need a length axis to shuffle arrays.")
+    elif length_axis is None:
+        length_axis = -1
 
-    # For each token, get a list of indices of all the tokens that come after it
-    shuf_next_inds = []
-    for t in range(len(chars)):
-        mask = tokens[:-1] == t  # Excluding last char
-        inds = np.where(mask)[0]
-        shuf_next_inds.append(inds + 1)  # Add 1 for next token
+    seqs = cast_seqs(seqs)
 
-    if type(seq) is str or type(seq) is np.str_:
-        all_results = []
-    else:
-        all_results = np.empty(
-            (num_shufs if num_shufs else 1, seq_len, one_hot_dim), dtype=seq.dtype
-        )
+    rng = np.random.default_rng(seed)
+    return rng.permuted(seqs, axis=length_axis)
 
-    for i in range(num_shufs if num_shufs else 1):
-        # Shuffle the next indices
-        for t in range(len(chars)):
-            inds = np.arange(len(shuf_next_inds[t]))
-            inds[:-1] = rng.permutation(len(inds) - 1)  # Keep last index same
-            shuf_next_inds[t] = shuf_next_inds[t][inds]
 
-        counters = [0] * len(chars)
+def k_shuffle(
+    seqs: SeqType,
+    k: int,
+    length_axis: Optional[int] = None,
+    seed: Optional[int] = None,
+    alphabet: Optional[NucleotideAlphabet] = None,
+):
+    """Shuffle sequences while preserving k-let frequencies.
 
-        # Build the resulting array
-        ind = 0
-        result = np.empty_like(tokens)
-        result[0] = tokens[ind]
-        for j in range(1, len(tokens)):
-            t = tokens[ind]
-            ind = shuf_next_inds[t][counters[t]]
-            counters[t] += 1
-            result[j] = tokens[ind]
-
-        if type(seq) is str or type(seq) is np.str_:
-            all_results.append(_char_array_to_string(chars[result]))
-        else:
-            all_results[i] = _token2one_hot(chars[result])
-    return all_results if num_shufs else all_results[0]
-
-# modified dinuc_shuffle
-def dinuc_shuffle_seqs(seqs, num_shufs=None, rng=None):
-    """
-    Shuffle the sequences in `seqs` in the same way as `dinuc_shuffle_seq`.
-    If `num_shufs` is not specified, then the first dimension of N will not be
-    present (i.e. a single string will be returned, or an L x D array).
     Parameters
     ----------
-    seqs : np.ndarray
-        Array of sequences to shuffle
-    num_shufs : int, optional
-        Number of shuffles to create, by default None
-    rng : np.random.RandomState, optional
-        Random state to use for shuffling, by default None
+    seqs : SeqType
+    k : int
+        Size of k-lets to preserve frequencies of.
+    length_axis : Optional[int], optional
+        Axis that corresponds to the length of sequences.
+    seed : Optional[int], optional
+        Seed for shuffling. NOTE: this can only be set once and subsequent calls cannot
+        change the seed!
+
     Returns
     -------
-    np.ndarray
-        Array of shuffled sequences
-    Note
-    -------
-    This is taken from DeepLIFT
+    _type_
+        _description_
     """
-    if not rng:
-        rng = np.random.RandomState(rng)
+    # ! ushuffle.set_seed only works the first time it is called
+    if seed is not None:
+        ushuffle.set_seed(seed)
 
-    if type(seqs) is str or type(seqs) is np.str_:
-        seqs = [seqs]
+    _check_axes(seqs, length_axis, False)
 
-    all_results = []
-    for i in range(len(seqs)):
-        all_results.append(dinuc_shuffle_seq(seqs[i], num_shufs=num_shufs, rng=rng))
-    return np.array(all_results)
+    seqs = cast_seqs(seqs).copy()
+
+    if seqs.dtype == np.uint8:
+        seqs = cast(NDArray[np.uint8], seqs)
+        ohe = True
+        if alphabet is None:
+            raise ValueError("Need an alphabet to process OHE sequences.")
+        seqs = alphabet.ohe_to_bytes(seqs)
+    else:
+        ohe = False
+
+    with np.nditer(seqs.view("S3").ravel(), op_flags=["readwrite"]) as it:  # type: ignore
+        for seq in it:
+            seq[...] = ushuffle.shuffle(seq.tobytes(), k)  # type: ignore
+
+    if ohe:
+        assert alphabet is not None
+        seqs = cast(NDArray[np.bytes_], seqs)
+        seqs = alphabet.bytes_to_ohe(seqs)
+
+    return seqs
