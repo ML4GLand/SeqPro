@@ -1,5 +1,3 @@
-
-
 # def test_ascii_encode_seqs():
 #     # Test 1 - Check if the returned array has the expected shape and datatype
 #     seqs = ["abc", "def", "ghi"]
