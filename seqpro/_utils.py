@@ -49,12 +49,23 @@ def _check_axes(
     length_axis: Optional[Union[int, bool]] = None,
     ohe_axis: Optional[Union[int, bool]] = None,
 ):
-    if length_axis is None and isinstance(seqs, np.ndarray):
+    """Raise errors if length_axis or ohe_axis is missing when they're needed. Pass
+    False to corresponding axis to not check for it.
+
+    - Any ndarray => length axis required.
+    - Any OHE array => length and OHE axis required.
+    """
+    # bytes or OHE
+    if length_axis is None and isinstance(seqs, np.ndarray) and seqs.itemsize == 1:
         raise ValueError("Need a length axis to process an ndarray.")
+
+    # OHE
     if ohe_axis is None and isinstance(seqs, np.ndarray) and seqs.dtype == np.uint8:
         raise ValueError("Need an alphabet axis to process OHE sequences.")
+
+    # length_axis != ohe_axis
     if length_axis is not None and ohe_axis is not None and (length_axis == ohe_axis):
-        raise ValueError("Length and alphabet axis must be different.")
+        raise ValueError("Length and OHE axis must be different.")
 
 
 DTYPE = TypeVar("DTYPE", bound=np.generic)

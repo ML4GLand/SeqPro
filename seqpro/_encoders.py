@@ -94,6 +94,7 @@ def ohe(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.uint8]:
     return gufunc_ohe(seqs.view(np.uint8), alphabet.array.view(np.uint8))
 
 
+# TODO: test this
 def ohe_to_bytes(
     ohe_arr: NDArray[np.uint8],
     ohe_axis: int,

@@ -72,11 +72,6 @@ def k_shuffle(
     seed : Optional[int], optional
         Seed for shuffling. NOTE: this can only be set once and subsequent calls cannot
         change the seed!
-
-    Returns
-    -------
-    _type_
-        _description_
     """
     # ! ushuffle.set_seed only works the first time it is called
     if seed is not None:
@@ -85,6 +80,10 @@ def k_shuffle(
     _check_axes(seqs, length_axis, False)
 
     seqs = cast_seqs(seqs).copy()
+
+    # only get here if seqs was str or list[str]
+    if length_axis is None:
+        length_axis = -1
 
     if seqs.dtype == np.uint8:
         seqs = cast(NDArray[np.uint8], seqs)
@@ -95,7 +94,8 @@ def k_shuffle(
     else:
         ohe = False
 
-    with np.nditer(seqs.view("S3").ravel(), op_flags=["readwrite"]) as it:  # type: ignore
+    length = seqs.shape[length_axis]
+    with np.nditer(seqs.view(f"S{length}").ravel(), op_flags=["readwrite"]) as it:  # type: ignore
         for seq in it:
             seq[...] = ushuffle.shuffle(seq.tobytes(), k)  # type: ignore
 
