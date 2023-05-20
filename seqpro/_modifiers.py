@@ -105,3 +105,34 @@ def k_shuffle(
         seqs = alphabet.bytes_to_ohe(seqs)
 
     return seqs
+
+
+def bin_coverage(
+    coverage_array: NDArray, bin_width: int, length_axis: int, normalize=False
+) -> NDArray:
+    """Bin coverage by summing over non-overlapping windows.
+
+    Parameters
+    ----------
+    coverage_array : NDArray
+    bin_width : int
+        Width of the windows to sum over. Must be an even divisor of the length
+        of the coverage array. If not, raises an error. The length dimension is
+        assumed to be the second dimension.
+    length_axis: int
+    normalize : bool, default False
+        Whether to normalize by the length of the bin.
+
+    Returns
+    -------
+    binned_coverage : NDArray
+    """
+    length = coverage_array.shape[length_axis]
+    if length % bin_width != 0:
+        raise ValueError("Bin width must evenly divide length.")
+    binned_coverage = np.add.reduceat(
+        coverage_array, np.arange(0, length, bin_width), axis=length_axis
+    )
+    if normalize:
+        binned_coverage /= bin_width
+    return binned_coverage
