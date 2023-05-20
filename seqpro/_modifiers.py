@@ -1,8 +1,10 @@
-import torch
 import numpy as np
+import torch
 from tqdm.auto import tqdm
-from ._helpers import COMPLEMENT_DNA, COMPLEMENT_RNA
-from ._helpers import _string_to_char_array, _one_hot2token, _char_array_to_string, _token2one_hot
+
+from ._helpers import (COMPLEMENT_DNA, COMPLEMENT_RNA, _char_array_to_string,
+                       _one_hot2token, _string_to_char_array, _token2one_hot)
+
 
 # my own
 def reverse_complement_seq(seq, vocab="DNA"):
