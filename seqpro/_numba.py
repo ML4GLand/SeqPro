@@ -40,8 +40,8 @@ def gufunc_ohe_char_idx(
 ) -> NDArray[np.intp]:  # type: ignore
     """Get the index of each character in an OHE array, leaving unknown as -1.
 
-    For example, with an ACGT-coded OHE array, this maps an OHE array of [A, C, G, T, N]
-    to [0, 1, 2, 3, -1].
+    For example, with an ACGT-coded OHE array, this maps an OHE array equal to
+    [A, C, G, T, N] to [0, 1, 2, 3, -1].
 
     Parameters
     ----------
@@ -56,3 +56,30 @@ def gufunc_ohe_char_idx(
     res[0] = np.intp(-1)  # type: ignore
     for i in nb.prange(len(seq)):
         res[0] = i * seq[i]  # type: ignore
+
+
+@nb.guvectorize(
+    ["(u1[:], u1[:, :], u1[:], u1[:])"], "(k),(j,k),(j)->()", target="parallel"
+)
+def gufunc_translate(
+    seq: NDArray[np.uint8],
+    codons: NDArray[np.uint8],
+    aminos_acids: NDArray[np.uint8],
+    res: Optional[NDArray[np.uint8]] = None,
+) -> NDArray[np.uint8]:  # type: ignore
+    """Translate 3-mers into amino acids.
+
+    Parameters
+    ----------
+    seq : NDArray[np.uint8]
+        A k-mer or ndarray of k-mers.
+    codons : NDArray[np.uint8]
+        All unique k-mer codons as an (n, k) array.
+    aminos_acids : NDArray[np.uint8]
+        All amino acids corresponding to each codon, in matching order.
+    res : Optional[NDArray[np.uint8]], optional
+        Array to save the result in, by default None
+    """
+    for i in nb.prange(len(codons)):
+        if (seq == codons[i]).all():
+            res[0] = aminos_acids[i]  # type: ignore

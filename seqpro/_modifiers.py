@@ -108,8 +108,11 @@ def k_shuffle(
 
 
 def bin_coverage(
-    coverage_array: NDArray, bin_width: int, length_axis: int, normalize=False
-) -> NDArray:
+    coverage_array: NDArray[np.number],
+    bin_width: int,
+    length_axis: int,
+    normalize=False,
+) -> NDArray[np.number]:
     """Bin coverage by summing over non-overlapping windows.
 
     Parameters
