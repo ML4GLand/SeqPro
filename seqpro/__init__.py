@@ -1,12 +1,13 @@
-from ._alphabets import ALPHABETS, NucleotideAlphabet
-from ._analyzers import count_kmers_seq, gc_content, length, nucleotide_content
+from ._alphabets import ALPHABETS, AminoAlphabet, NucleotideAlphabet
+from ._analyzers import gc_content, length, nucleotide_content
 from ._cleaners import remove_N_seqs, remove_only_N_seqs, sanitize_seq, sanitize_seqs
 from ._encoders import ohe, ohe_to_bytes, pad_seqs, decode_seq, decode_seqs
-from ._modifiers import k_shuffle, reverse_complement, shuffle
-from ._utils import random_seq, random_seqs
+from ._modifiers import bin_coverage, k_shuffle, reverse_complement, shuffle
+from ._utils import cast_seqs, random_seq, random_seqs
 
 __all__ = [
-    "count_kmers_seq",
+    "cast_seqs",
+    "bin_coverage",
     "gc_content",
     "length",
     "nucleotide_content",
@@ -23,5 +24,6 @@ __all__ = [
     "random_seq",
     "random_seqs",
     "NucleotideAlphabet",
+    "AminoAlphabet",
     "ALPHABETS",
 ]

@@ -1,11 +1,17 @@
 from typing import Optional, Union
 
 import numpy as np
-import xarray as xr
 from numpy.typing import NDArray
 
 import seqpro as sp
 from seqpro._numba import gufunc_ohe
+
+try:
+    import xarray as xr
+except ImportError as e:
+    msg = "Can't use seqpro.xr without installing XArray.\n"
+    msg += e.msg
+    raise ImportError(msg)
 
 __all__ = ["ohe"]
 

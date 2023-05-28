@@ -1,10 +1,10 @@
-from typing import Dict, Optional, Union, cast
+from typing import Dict, List, Optional, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
-from ._numba import gufunc_ohe
-from ._utils import SeqType, _check_axes, cast_seqs
+from ._numba import gufunc_ohe, gufunc_translate
+from ._utils import SeqType, StrSeqType, _check_axes, cast_seqs
 
 
 class NucleotideAlphabet:
@@ -147,12 +147,194 @@ class NucleotideAlphabet:
             return self.rev_comp_byte(seqs, length_axis)  # type: ignore
 
 
-ALPHABETS = {
+class AminoAlphabet:
+    def __init__(self, codons: List[str], amino_acids: List[str]) -> None:
+        k = len(codons[0])
+        if any([len(c) != k for c in codons]):
+            raise ValueError("Got codons with varying lengths.")
+        if any([len(a) != 1 for a in amino_acids]):
+            raise ValueError("Got amino acid symbols that are multiple characters.")
+
+        self.codons = codons
+        self.amino_acids = amino_acids
+        self.codon_array = np.array(codons, "S")[..., None].view("S1")
+        self.aa_array = np.array(amino_acids, "S1")
+        self.codon_to_aa = dict(zip(codons, amino_acids))
+
+    def translate(
+        self, seqs: StrSeqType, length_axis: Optional[int] = None
+    ) -> NDArray[np.bytes_]:
+        _check_axes(seqs, length_axis, False)
+
+        seqs = cast_seqs(seqs)
+
+        k = self.codon_array.shape[-1]
+
+        if length_axis is None:
+            length_axis = -1
+
+        if seqs.shape[length_axis] % k != 0:
+            raise ValueError("Sequence length is not evenly divisible by codon length.")
+
+        if length_axis < 0:
+            length_axis = seqs.ndim + length_axis
+
+        n = seqs.shape[length_axis] // k
+        shape = *seqs.shape[:length_axis], n, k, *seqs.shape[length_axis + 1 :]
+        k_axis = length_axis + 1
+        strides = (
+            *seqs.strides[:length_axis],
+            k,
+            seqs.strides[length_axis],
+            *seqs.strides[length_axis + 1 :],
+        )
+        trimers = np.lib.stride_tricks.as_strided(seqs, shape=shape, strides=strides)
+
+        return gufunc_translate(
+            trimers.view("u1"),
+            self.codon_array.view("u1"),
+            self.aa_array.view("u1"),
+            axes=[(k_axis), (-2, -1), (-1), ()],  # type: ignore
+        ).view("S1")
+
+
+canonical_codons = [
+    "TTT",
+    "TTC",
+    "TTA",
+    "TTG",
+    "CTT",
+    "CTC",
+    "CTA",
+    "CTG",
+    "ATT",
+    "ATC",
+    "ATA",
+    "ATG",
+    "GTT",
+    "GTC",
+    "GTA",
+    "GTG",
+    "TCT",
+    "TCC",
+    "TCA",
+    "TCG",
+    "CCT",
+    "CCC",
+    "CCA",
+    "CCG",
+    "ACT",
+    "ACC",
+    "ACA",
+    "ACG",
+    "GCT",
+    "GCC",
+    "GCA",
+    "GCG",
+    "TAT",
+    "TAC",
+    "TAA",
+    "TAG",
+    "CAT",
+    "CAC",
+    "CAA",
+    "CAG",
+    "AAT",
+    "AAC",
+    "AAA",
+    "AAG",
+    "GAT",
+    "GAC",
+    "GAA",
+    "GAG",
+    "TGT",
+    "TGC",
+    "TGA",
+    "TGG",
+    "CGT",
+    "CGC",
+    "CGA",
+    "CGG",
+    "AGT",
+    "AGC",
+    "AGA",
+    "AGG",
+    "GGT",
+    "GGC",
+    "GGA",
+    "GGG",
+]
+
+# NOTE the "*" character is termination i.e. STOP codon
+canonical_amino_acids = [
+    "F",
+    "F",
+    "L",
+    "L",
+    "L",
+    "L",
+    "L",
+    "L",
+    "I",
+    "I",
+    "I",
+    "M",
+    "V",
+    "V",
+    "V",
+    "V",
+    "S",
+    "S",
+    "S",
+    "S",
+    "P",
+    "P",
+    "P",
+    "P",
+    "T",
+    "T",
+    "T",
+    "T",
+    "A",
+    "A",
+    "A",
+    "A",
+    "Y",
+    "Y",
+    "*",
+    "*",
+    "H",
+    "H",
+    "Q",
+    "Q",
+    "N",
+    "N",
+    "K",
+    "K",
+    "D",
+    "D",
+    "E",
+    "E",
+    "C",
+    "C",
+    "*",
+    "W",
+    "R",
+    "R",
+    "R",
+    "R",
+    "S",
+    "S",
+    "R",
+    "R",
+    "G",
+    "G",
+    "G",
+    "G",
+]
+
+ALPHABETS: Dict[str, Union[NucleotideAlphabet, AminoAlphabet]] = {
     "DNA": NucleotideAlphabet(alphabet="ACGT", complement="TGCA"),
     "RNA": NucleotideAlphabet(alphabet="ACGU", complement="UGCA"),
+    "AA": AminoAlphabet(canonical_codons, canonical_amino_acids),
 }
-
-
-class AminoAlphabet:
-    def __init__(self) -> None:
-        raise NotImplementedError

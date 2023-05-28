@@ -117,7 +117,7 @@ def ohe_to_bytes(
     -------
     NDArray[np.bytes_]
     """
-    idx = gufunc_ohe_char_idx(ohe_arr, axis=ohe_axis)
+    idx = gufunc_ohe_char_idx(ohe_arr, axis=ohe_axis)  # type: ignore
 
     if ohe_axis < 0:
         ohe_axis_idx = ohe_arr.ndim + ohe_axis
