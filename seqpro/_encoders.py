@@ -1,12 +1,14 @@
-from typing import Literal, Optional, Union, cast
+from typing import Literal, Optional, Union, cast, List
 
+import torch
 import numpy as np
 from numpy.typing import NDArray
 
 from ._alphabets import NucleotideAlphabet
 from ._numba import gufunc_ohe, gufunc_ohe_char_idx, gufunc_pad_both, gufunc_pad_left
 from ._utils import SeqType, StrSeqType, _check_axes, array_slice, cast_seqs
-
+from ._helpers import _get_vocab, _sequencize, _one_hot2token
+from tqdm.auto import tqdm
 
 def pad_seqs(
     seqs: SeqType,
@@ -127,3 +129,45 @@ def ohe_to_bytes(
     _alphabet = np.concatenate([alphabet.array, [unknown_char.encode("ascii")]])
 
     return _alphabet[idx].reshape(shape)
+
+# my own
+def decode_seq(
+    arr: np.ndarray,
+    vocab: str = "DNA",
+    neutral_value: int = -1,
+    neutral_char: str = "N"
+) -> str:
+    """Convert a single one-hot encoded array back to string"""
+    if isinstance(arr, torch.Tensor):
+        arr = arr.numpy()
+    return _sequencize(
+        tvec=_one_hot2token(arr, neutral_value),
+        vocab=vocab,
+        neutral_value=neutral_value,
+        neutral_char=neutral_char,
+    )
+
+# my own
+def decode_seqs(
+    arr: np.ndarray,
+    vocab: str = "DNA",
+    neutral_char: str = "N",
+    neutral_value: int = -1,
+    verbose: bool = True
+) -> np.ndarray:
+    """Convert a one-hot encoded array back to set of sequences"""
+    arr_list: List[np.ndarray] = [
+        decode_seq(
+            arr=arr[i],
+            vocab=vocab,
+            neutral_value=neutral_value,
+            neutral_char=neutral_char,
+        )
+        for i in tqdm(
+            range(len(arr)),
+            total=len(arr),
+            desc="Decoding sequences",
+            disable=not verbose,
+        )
+    ]
+    return np.array(arr_list)
