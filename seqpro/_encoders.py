@@ -3,9 +3,9 @@ from typing import Literal, Optional, Union, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ._alphabets import NucleotideAlphabet
-from ._numba import gufunc_ohe, gufunc_ohe_char_idx, gufunc_pad_both, gufunc_pad_left
+from ._numba import gufunc_pad_both, gufunc_pad_left
 from ._utils import SeqType, StrSeqType, _check_axes, array_slice, cast_seqs
+from .alphabets._alphabets import NucleotideAlphabet
 
 
 def pad_seqs(
@@ -90,13 +90,23 @@ def pad_seqs(
 
 
 def ohe(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.uint8]:
-    seqs = cast_seqs(seqs)
-    return gufunc_ohe(seqs.view(np.uint8), alphabet.array.view(np.uint8))
+    """One hot encode a nucleotide sequence.
+
+    Parameters
+    ----------
+    seqs : str, list[str], ndarray[str, bytes]
+    alphabet : NucleotideAlphabet
+
+    Returns
+    -------
+    NDArray[np.uint8]
+        Ohe hot encoded nucleotide sequences.
+    """
+    return alphabet.ohe(seqs)
 
 
-# TODO: test this
 def ohe_to_bytes(
-    ohe_arr: NDArray[np.uint8],
+    seqs: NDArray[np.uint8],
     ohe_axis: int,
     alphabet: NucleotideAlphabet,
     unknown_char: str = "N",
@@ -105,7 +115,7 @@ def ohe_to_bytes(
 
     Parameters
     ----------
-    ohe_arr : NDArray[np.uint8]
+    seqs : NDArray[np.uint8]
     ohe_axis : int
     alphabet : NucleotideAlphabet
     unknown_char : str, optional
@@ -115,15 +125,6 @@ def ohe_to_bytes(
     -------
     NDArray[np.bytes_]
     """
-    idx = gufunc_ohe_char_idx(ohe_arr, axis=ohe_axis)  # type: ignore
-
-    if ohe_axis < 0:
-        ohe_axis_idx = ohe_arr.ndim + ohe_axis
-    else:
-        ohe_axis_idx = ohe_axis
-
-    shape = *ohe_arr.shape[:ohe_axis_idx], *ohe_arr.shape[ohe_axis_idx + 1 :]
-
-    _alphabet = np.concatenate([alphabet.array, [unknown_char.encode("ascii")]])
-
-    return _alphabet[idx].reshape(shape)
+    return alphabet.ohe_to_bytes(
+        seqs=seqs, ohe_axis=ohe_axis, unknown_char=unknown_char
+    )
