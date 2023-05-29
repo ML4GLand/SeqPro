@@ -39,7 +39,7 @@ def k_shuffle(
         Alphabet, needed for OHE sequence input.
     """
 
-    _check_axes(seqs, length_axis, 10)
+    _check_axes(seqs, length_axis, False)
 
     seqs = cast_seqs(seqs)
 
