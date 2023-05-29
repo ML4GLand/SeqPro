@@ -1,4 +1,4 @@
-from typing import Optional, cast
+from typing import Optional, Tuple, cast
 
 import numpy as np
 import ushuffle
@@ -38,6 +38,7 @@ def k_shuffle(
     k: int,
     *,
     length_axis: Optional[int] = None,
+    ohe_axis: Optional[int] = None,
     seed: Optional[int] = None,
     alphabet: Optional[NucleotideAlphabet] = None,
 ):
@@ -50,13 +51,16 @@ def k_shuffle(
         Size of k-lets to preserve frequencies of.
     length_axis : Optional[int], optional
         Axis that corresponds to the length of sequences.
+    ohe_axes : Optional[int], optional
+        Axis that corresponds to the one hot encoding, should be the same size as the
+        length of the alphabet.
     seed : Optional[int], optional
         Seed for shuffling.
     alphabet : Optional[NucleotideAlphabet], optional
         Alphabet, needed for OHE sequence input.
     """
 
-    _check_axes(seqs, length_axis, False)
+    _check_axes(seqs, length_axis, ohe_axis)
 
     seqs = cast_seqs(seqs)
 
@@ -77,11 +81,12 @@ def k_shuffle(
     seqs = seqs.copy()
 
     if seqs.dtype == np.uint8:
+        assert ohe_axis is not None
         seqs = cast(NDArray[np.uint8], seqs)
         ohe = True
         if alphabet is None:
             raise ValueError("Need an alphabet to process OHE sequences.")
-        seqs = alphabet.ohe_to_bytes(seqs)
+        seqs = alphabet.ohe_to_bytes(seqs, ohe_axis=ohe_axis)
     else:
         ohe = False
 
@@ -91,9 +96,10 @@ def k_shuffle(
             seq[...] = ushuffle.shuffle(seq.tobytes(), k)  # type: ignore
 
     if ohe:
+        assert ohe_axis is not None
         assert alphabet is not None
         seqs = cast(NDArray[np.bytes_], seqs)
-        seqs = alphabet.bytes_to_ohe(seqs)
+        seqs = alphabet.ohe(seqs).swapaxes(-1, ohe_axis)
 
     return seqs
 
@@ -130,3 +136,24 @@ def bin_coverage(
     if normalize:
         binned_coverage /= bin_width
     return binned_coverage
+
+
+def random_seqs(
+    shape: Tuple[int, ...], alphabet: NucleotideAlphabet, seed: Optional[int] = None
+):
+    """Generate random nucleotide sequences.
+
+    Parameters
+    ----------
+    shape : tuple[int]
+        Shape of sequences to generate
+    alphabet : NucleotideAlphabet
+        Alphabet to sample nucleotides from.
+
+    Returns
+    -------
+    ndarray
+        Randomly generated sequences.
+    """
+    rng = np.random.default_rng(seed)
+    return rng.choice(alphabet.array, size=shape)

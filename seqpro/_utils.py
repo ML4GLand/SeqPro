@@ -78,58 +78,5 @@ DTYPE = TypeVar("DTYPE", bound=np.generic)
 def array_slice(
     a: NDArray[DTYPE], axis: int, start: int, end: int, step=1
 ) -> NDArray[DTYPE]:
+    """Slice an array from a dynamic axis."""
     return a[(slice(None),) * (axis % a.ndim) + (slice(start, end, step),)]
-
-
-def random_base(alphabet=["A", "G", "C", "T"]):
-    """Generate a random base from the AGCT alpahbet.
-
-    Parameters
-    ----------
-    alphabet : list, optional
-        List of bases to choose from (default is ["A", "G", "C", "T"]).
-
-    Returns
-    -------
-    str
-        Randomly chosen base.
-    """
-    return np.random.choice(alphabet)
-
-
-def random_seq(seq_len, alphabet=["A", "G", "C", "T"]):
-    """Generate a random sequence of length seq_len.
-
-    Parameters
-    ----------
-    seq_len : int
-        Length of sequence to return.
-    alphabet : list, optional
-        List of bases to choose from (default is ["A", "G", "C", "T"]).
-
-    Returns
-    -------
-    str
-        Randomly generated sequence.
-    """
-    return "".join([random_base(alphabet) for i in range(seq_len)])
-
-
-def random_seqs(seq_num, seq_len, alphabet=["A", "G", "C", "T"]):
-    """Generate seq_num random sequences of length seq_len.
-
-    Parameters
-    ----------
-    seq_num (int):
-        number of sequences to return
-    seq_len (int):
-        length of sequence to return
-    alphabet : list, optional
-        List of bases to choose from (default is ["A", "G", "C", "T"]).
-
-    Returns
-    -------
-    numpy array
-        Array of randomly generated sequences.
-    """
-    return np.array([random_seq(seq_len, alphabet) for i in range(seq_num)])

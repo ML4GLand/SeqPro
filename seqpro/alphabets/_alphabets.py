@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Union, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from .._numba import gufunc_ohe, gufunc_translate
+from .._numba import gufunc_ohe, gufunc_ohe_char_idx, gufunc_translate
 from .._utils import SeqType, StrSeqType, _check_axes, cast_seqs
 
 
@@ -60,44 +60,52 @@ class NucleotideAlphabet:
             if maybe_complement != complement:
                 raise ValueError("Reverse of alphabet does not yield the complement.")
 
-    def bytes_to_ohe(self, arr: NDArray[np.bytes_]) -> NDArray[np.uint8]:
-        """Convert an array of byte strings or characters to a one hot encoded array.
+    def ohe(self, seqs: StrSeqType) -> NDArray[np.uint8]:
+        """One hot encode a nucleotide sequence.
 
         Parameters
         ----------
-        arr : ndarray[bytes]
-            Array of dtype |S1
+        seqs : str, list[str], ndarray[str, bytes]
 
         Returns
         -------
-        ndarray[uint8]
-            If arr has shape (a b), this will return an array of shape
-            (a b length_of_alphabet)
+        NDArray[np.uint8]
+            Ohe hot encoded nucleotide sequences.
         """
-        return gufunc_ohe(arr.view(np.uint8), self.array.view(np.uint8))
+        seqs = cast_seqs(seqs)
+        return gufunc_ohe(seqs.view(np.uint8), self.array.view(np.uint8))
 
     def ohe_to_bytes(
-        self, ohe_arr: NDArray[np.uint8], ohe_axis=-1
+        self,
+        seqs: NDArray[np.uint8],
+        ohe_axis: int,
+        unknown_char: str = "N",
     ) -> NDArray[np.bytes_]:
-        """Convert a one hot encoded array to an array of nucleotides (bytes aka S1)
+        """Convert an OHE array to an S1 byte array.
 
         Parameters
         ----------
-        ohe_arr : NDArray[np.uint8]
-        ohe_axis : int, optional
-            One hot encoding axis, by default -1
+        seqs : NDArray[np.uint8]
+        ohe_axis : int
+        unknown_char : str, optional
+            Single character to use for unknown values, by default "N"
 
         Returns
         -------
-        ndarray[bytes]
+        NDArray[np.bytes_]
         """
-        idx = ohe_arr.nonzero()[ohe_axis]
+        idx = gufunc_ohe_char_idx(seqs, axis=ohe_axis)  # type: ignore
+
         if ohe_axis < 0:
-            ohe_axis_idx = ohe_arr.ndim + ohe_axis
+            ohe_axis_idx = seqs.ndim + ohe_axis
         else:
             ohe_axis_idx = ohe_axis
-        shape = *ohe_arr.shape[:ohe_axis_idx], *ohe_arr.shape[ohe_axis_idx + 1 :]
-        return self.array[idx].reshape(shape)
+
+        shape = *seqs.shape[:ohe_axis_idx], *seqs.shape[ohe_axis_idx + 1 :]
+
+        _alphabet = np.concatenate([self.array, [unknown_char.encode("ascii")]])
+
+        return _alphabet[idx].reshape(shape)
 
     def complement_bytes(self, byte_arr: NDArray[np.bytes_]) -> NDArray[np.bytes_]:
         """Get reverse complement of byte (S1) array.

@@ -55,7 +55,8 @@ def gufunc_ohe_char_idx(
     """
     res[0] = np.intp(-1)  # type: ignore
     for i in nb.prange(len(seq)):
-        res[0] = i * seq[i]  # type: ignore
+        if seq[i] == 1:
+            res[0] = i  # type: ignore
 
 
 @nb.guvectorize(
