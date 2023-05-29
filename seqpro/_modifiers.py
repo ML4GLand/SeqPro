@@ -4,8 +4,8 @@ import numpy as np
 import ushuffle
 from numpy.typing import NDArray
 
-from ._alphabets import NucleotideAlphabet
 from ._utils import SeqType, _check_axes, cast_seqs
+from .alphabets._alphabets import NucleotideAlphabet
 
 
 def reverse_complement(
@@ -14,12 +14,29 @@ def reverse_complement(
     length_axis: Optional[int] = None,
     ohe_axis: Optional[int] = None,
 ):
+    """Reverse complement a sequence.
+
+    Parameters
+    ----------
+    seqs : str, list[str], ndarray[str, bytes, uint8]
+    alphabet : NucleotideAlphabet
+    length_axis : Optional[int], optional
+        Length axis, by default None
+    ohe_axis : Optional[int], optional
+        One hot encoding axis, by default None
+
+    Returns
+    -------
+    ndarray[bytes, uint8]
+        Array of bytes (S1) or uint8 for string or OHE input, respectively.
+    """
     return alphabet.reverse_complement(seqs, length_axis, ohe_axis)
 
 
 def k_shuffle(
     seqs: SeqType,
     k: int,
+    *,
     length_axis: Optional[int] = None,
     seed: Optional[int] = None,
     alphabet: Optional[NucleotideAlphabet] = None,

@@ -3,8 +3,8 @@ from typing import Dict, List, Optional, Union, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ._numba import gufunc_ohe, gufunc_translate
-from ._utils import SeqType, StrSeqType, _check_axes, cast_seqs
+from .._numba import gufunc_ohe, gufunc_translate
+from .._utils import SeqType, StrSeqType, _check_axes, cast_seqs
 
 
 class NucleotideAlphabet:
@@ -79,6 +79,18 @@ class NucleotideAlphabet:
     def ohe_to_bytes(
         self, ohe_arr: NDArray[np.uint8], ohe_axis=-1
     ) -> NDArray[np.bytes_]:
+        """Convert a one hot encoded array to an array of nucleotides (bytes aka S1)
+
+        Parameters
+        ----------
+        ohe_arr : NDArray[np.uint8]
+        ohe_axis : int, optional
+            One hot encoding axis, by default -1
+
+        Returns
+        -------
+        ndarray[bytes]
+        """
         idx = ohe_arr.nonzero()[ohe_axis]
         if ohe_axis < 0:
             ohe_axis_idx = ohe_arr.ndim + ohe_axis
@@ -88,13 +100,11 @@ class NucleotideAlphabet:
         return self.array[idx].reshape(shape)
 
     def complement_bytes(self, byte_arr: NDArray[np.bytes_]) -> NDArray[np.bytes_]:
-        """Get reverse complement of byte (string) array.
+        """Get reverse complement of byte (S1) array.
 
         Parameters
         ----------
         byte_arr : ndarray[bytes]
-            Array of shape `(..., length)` to complement. In other words, elements of
-            the array should be single characters.
         """
         # NOTE: a vectorized implementation using np.unique is NOT faster even for
         # longer alphabets like IUPAC DNA/RNA. Another micro-optimization to try would
@@ -107,12 +117,11 @@ class NucleotideAlphabet:
     def rev_comp_byte(
         self, byte_arr: NDArray[np.bytes_], length_axis: int
     ) -> NDArray[np.bytes_]:
-        """Get reverse complement of byte (string) array.
+        """Get reverse complement of byte (S1) array.
 
         Parameters
         ----------
         byte_arr : ndarray[bytes]
-            Array of shape (regions [samples] [ploidy] length) to complement.
         """
         out = self.complement_bytes(byte_arr)
         return np.flip(out, length_axis)
@@ -131,15 +140,28 @@ class NucleotideAlphabet:
         length_axis: Optional[int] = None,
         ohe_axis: Optional[int] = None,
     ) -> NDArray[Union[np.bytes_, np.uint8]]:
+        """Reverse complement a sequence.
+
+        Parameters
+        ----------
+        seqs : str, list[str], ndarray[str, bytes, uint8]
+        length_axis : Optional[int], optional
+            Length axis, by default None
+        ohe_axis : Optional[int], optional
+            One hot encoding axis, by default None
+
+        Returns
+        -------
+        ndarray[bytes, uint8]
+            Array of bytes (S1) or uint8 for string or OHE input, respectively.
+        """
         _check_axes(seqs, length_axis, ohe_axis)
 
         seqs = cast_seqs(seqs)
 
         if seqs.dtype == np.uint8:  # OHE
-            if ohe_axis is None:
-                raise ValueError("Must specify an OHE axis")
-            elif length_axis is None:
-                raise ValueError("Must specify a length axis.")
+            assert length_axis is not None
+            assert ohe_axis is not None
             return np.flip(seqs, axis=(length_axis, ohe_axis))
         else:
             if length_axis is None:
@@ -196,145 +218,3 @@ class AminoAlphabet:
             self.aa_array.view("u1"),
             axes=[(k_axis), (-2, -1), (-1), ()],  # type: ignore
         ).view("S1")
-
-
-canonical_codons = [
-    "TTT",
-    "TTC",
-    "TTA",
-    "TTG",
-    "CTT",
-    "CTC",
-    "CTA",
-    "CTG",
-    "ATT",
-    "ATC",
-    "ATA",
-    "ATG",
-    "GTT",
-    "GTC",
-    "GTA",
-    "GTG",
-    "TCT",
-    "TCC",
-    "TCA",
-    "TCG",
-    "CCT",
-    "CCC",
-    "CCA",
-    "CCG",
-    "ACT",
-    "ACC",
-    "ACA",
-    "ACG",
-    "GCT",
-    "GCC",
-    "GCA",
-    "GCG",
-    "TAT",
-    "TAC",
-    "TAA",
-    "TAG",
-    "CAT",
-    "CAC",
-    "CAA",
-    "CAG",
-    "AAT",
-    "AAC",
-    "AAA",
-    "AAG",
-    "GAT",
-    "GAC",
-    "GAA",
-    "GAG",
-    "TGT",
-    "TGC",
-    "TGA",
-    "TGG",
-    "CGT",
-    "CGC",
-    "CGA",
-    "CGG",
-    "AGT",
-    "AGC",
-    "AGA",
-    "AGG",
-    "GGT",
-    "GGC",
-    "GGA",
-    "GGG",
-]
-
-# NOTE the "*" character is termination i.e. STOP codon
-canonical_amino_acids = [
-    "F",
-    "F",
-    "L",
-    "L",
-    "L",
-    "L",
-    "L",
-    "L",
-    "I",
-    "I",
-    "I",
-    "M",
-    "V",
-    "V",
-    "V",
-    "V",
-    "S",
-    "S",
-    "S",
-    "S",
-    "P",
-    "P",
-    "P",
-    "P",
-    "T",
-    "T",
-    "T",
-    "T",
-    "A",
-    "A",
-    "A",
-    "A",
-    "Y",
-    "Y",
-    "*",
-    "*",
-    "H",
-    "H",
-    "Q",
-    "Q",
-    "N",
-    "N",
-    "K",
-    "K",
-    "D",
-    "D",
-    "E",
-    "E",
-    "C",
-    "C",
-    "*",
-    "W",
-    "R",
-    "R",
-    "R",
-    "R",
-    "S",
-    "S",
-    "R",
-    "R",
-    "G",
-    "G",
-    "G",
-    "G",
-]
-
-ALPHABETS: Dict[str, Union[NucleotideAlphabet, AminoAlphabet]] = {
-    "DNA": NucleotideAlphabet(alphabet="ACGT", complement="TGCA"),
-    "RNA": NucleotideAlphabet(alphabet="ACGU", complement="UGCA"),
-    "AA": AminoAlphabet(canonical_codons, canonical_amino_acids),
-}

@@ -3,9 +3,9 @@ from typing import Literal, Optional, Union, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ._alphabets import NucleotideAlphabet
 from ._numba import gufunc_ohe, gufunc_ohe_char_idx, gufunc_pad_both, gufunc_pad_left
 from ._utils import SeqType, StrSeqType, _check_axes, array_slice, cast_seqs
+from .alphabets._alphabets import NucleotideAlphabet
 
 
 def pad_seqs(
@@ -90,6 +90,18 @@ def pad_seqs(
 
 
 def ohe(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.uint8]:
+    """One hot encode a nucleotide sequence.
+
+    Parameters
+    ----------
+    seqs : str, list[str], ndarray[str, bytes]
+    alphabet : NucleotideAlphabet
+
+    Returns
+    -------
+    NDArray[np.uint8]
+        Ohe hot encoded nucleotide sequences.
+    """
     seqs = cast_seqs(seqs)
     return gufunc_ohe(seqs.view(np.uint8), alphabet.array.view(np.uint8))
 

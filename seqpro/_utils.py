@@ -64,7 +64,11 @@ def _check_axes(
         raise ValueError("Need an alphabet axis to process OHE sequences.")
 
     # length_axis != ohe_axis
-    if length_axis is not None and ohe_axis is not None and (length_axis == ohe_axis):
+    if (
+        isinstance(length_axis, int)
+        and isinstance(ohe_axis, int)
+        and (length_axis == ohe_axis)
+    ):
         raise ValueError("Length and OHE axis must be different.")
 
 

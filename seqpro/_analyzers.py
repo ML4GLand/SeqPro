@@ -3,8 +3,8 @@ from typing import List, Optional, Union
 import numpy as np
 from numpy.typing import NDArray
 
-from ._alphabets import NucleotideAlphabet
 from ._utils import SeqType, _check_axes, cast_seqs
+from .alphabets._alphabets import NucleotideAlphabet
 
 
 def length(seqs: Union[str, List[str]]) -> NDArray[np.integer]:
