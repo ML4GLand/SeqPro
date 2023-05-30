@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, cast
+from typing import Optional, Tuple, Union, cast
 
 import numpy as np
 import ushuffle
@@ -21,9 +21,9 @@ def reverse_complement(
     seqs : str, list[str], ndarray[str, bytes, uint8]
     alphabet : NucleotideAlphabet
     length_axis : Optional[int], optional
-        Length axis, by default None
+        Needed for array input. Length axis, by default None
     ohe_axis : Optional[int], optional
-        One hot encoding axis, by default None
+        Needed for OHE input. One hot encoding axis, by default None
 
     Returns
     -------
@@ -41,7 +41,7 @@ def k_shuffle(
     ohe_axis: Optional[int] = None,
     seed: Optional[int] = None,
     alphabet: Optional[NucleotideAlphabet] = None,
-):
+) -> NDArray[Union[np.bytes_, np.uint8]]:
     """Shuffle sequences while preserving k-let frequencies.
 
     Parameters
@@ -50,10 +50,10 @@ def k_shuffle(
     k : int
         Size of k-lets to preserve frequencies of.
     length_axis : Optional[int], optional
-        Axis that corresponds to the length of sequences.
+        Needed for array input. Axis that corresponds to the length of sequences.
     ohe_axes : Optional[int], optional
-        Axis that corresponds to the one hot encoding, should be the same size as the
-        length of the alphabet.
+        Needed for OHE input. Axis that corresponds to the one hot encoding, should be
+        the same size as the length of the alphabet.
     seed : Optional[int], optional
         Seed for shuffling.
     alphabet : Optional[NucleotideAlphabet], optional
@@ -139,16 +139,20 @@ def bin_coverage(
 
 
 def random_seqs(
-    shape: Tuple[int, ...], alphabet: NucleotideAlphabet, seed: Optional[int] = None
+    shape: Union[int, Tuple[int, ...]],
+    alphabet: NucleotideAlphabet,
+    seed: Optional[int] = None,
 ):
     """Generate random nucleotide sequences.
 
     Parameters
     ----------
-    shape : tuple[int]
+    shape : int, tuple[int]
         Shape of sequences to generate
     alphabet : NucleotideAlphabet
         Alphabet to sample nucleotides from.
+    seed : int, optional
+        Random seed.
 
     Returns
     -------

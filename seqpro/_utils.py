@@ -61,7 +61,7 @@ def _check_axes(
 
     # OHE
     if ohe_axis is None and isinstance(seqs, np.ndarray) and seqs.dtype == np.uint8:
-        raise ValueError("Need an alphabet axis to process OHE sequences.")
+        raise ValueError("Need an one hot encoding axis to process OHE sequences.")
 
     # length_axis != ohe_axis
     if (

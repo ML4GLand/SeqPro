@@ -24,10 +24,13 @@ def pad_seqs(
         How to pad. If padding on both sides and an odd amount of padding is needed, 1
         more pad value will be on the right side.
     pad_val : str, optional
-        Single character to pad sequences with. Ignored for OHE sequences.
+        Single character to pad sequences with. Needed for string input. Ignored for OHE
+        sequences.
     length : int, optional
-        Length to pad or truncate sequences to. If not given, uses length of longest
-        sequence.
+        Needed for character or OHE array input. Length to pad or truncate sequences to.
+        If not given, uses the length of longest sequence.
+    length_axis : Optional[int]
+        Needed for array input.
 
     Returns
     -------
@@ -70,9 +73,9 @@ def pad_seqs(
 
         if length_diff == 0:
             return seqs
-        elif length_diff > 0:
+        elif length_diff > 0:  # longer than needed, truncate
             seqs = array_slice(seqs, length_axis, 0, length)
-        else:
+        else:  # shorter than needed, pad
             pad_arr_shape = (
                 *seqs.shape[:length_axis],
                 -length_diff,
