@@ -1,10 +1,10 @@
-from typing import List, Optional, Union
+from typing import List, Optional, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
-from ._alphabets import NucleotideAlphabet
 from ._utils import SeqType, _check_axes, cast_seqs
+from .alphabets._alphabets import NucleotideAlphabet
 
 
 def length(seqs: Union[str, List[str]]) -> NDArray[np.integer]:
@@ -30,25 +30,26 @@ def gc_content(
     length_axis: Optional[int] = None,
     alphabet: Optional[NucleotideAlphabet] = None,
     ohe_axis: Optional[int] = None,
-) -> NDArray[np.integer]:
+) -> NDArray[Union[np.integer, np.float64]]:
     """Compute the number or proportion of G & C nucleotides.
 
     Parameters
     ----------
     seqs : str, list[str], ndarray[str, bytes, uint8]
     normalize : bool, default True
-        True -> return proportions
-        False -> return counts
+        True => return proportions
+        False => return counts
     length_axis : Optional[int]
         Needed if seqs is an array.
-    alphabet : Optional[SequenceAlphabet]
+    alphabet : Optional[NucleotideAlphabet]
         Needed if seqs is OHE.
     ohe_axis : Optional[int]
         Needed if seqs is OHE.
 
     Returns
     -------
-    NDArray[np.integer]
+    NDArray[int, float]
+        Returns integers if unnormalized, otherwise floats.
     """
     _check_axes(seqs, length_axis, ohe_axis)
 
@@ -63,11 +64,17 @@ def gc_content(
         assert ohe_axis is not None
 
         gc_idx = np.flatnonzero(np.isin(alphabet.array, np.array([b"C", b"G"])))
-        gc_content = np.take(seqs, gc_idx, ohe_axis).sum((length_axis, ohe_axis))
+        gc_content = cast(
+            NDArray[np.integer],
+            np.take(seqs, gc_idx, ohe_axis).sum((length_axis, ohe_axis)),
+        )
     else:
-        gc_content = np.isin(seqs, np.array([b"C", b"G"])).sum(length_axis)
+        gc_content = cast(
+            NDArray[np.integer], np.isin(seqs, np.array([b"C", b"G"])).sum(length_axis)
+        )
 
     if normalize:
+        gc_content = gc_content.astype(np.float64)
         gc_content /= seqs.shape[length_axis]
 
     return gc_content
@@ -78,21 +85,22 @@ def nucleotide_content(
     normalize=True,
     length_axis: Optional[int] = None,
     alphabet: Optional[NucleotideAlphabet] = None,
-):
+) -> NDArray[Union[np.integer, np.float64]]:
     """Compute the number or proportion of each nucleotide.
 
     Parameters
     ----------
     seqs : str, list[str], ndarray[str, bytes, uint8]
     normalize : bool, default True
-        True -> return proportions
-        False -> return counts
+        True => return proportions
+        False => return counts
     length_axis : Optional[int]
         Needed if seqs is an array.
 
     Returns
     -------
-    NDArray[np.integer]
+    NDArray[int, float]
+        Returns integers if unnormalized, otherwise floats.
     """
     _check_axes(seqs, length_axis, False)
 
@@ -102,17 +110,19 @@ def nucleotide_content(
         length_axis = -1
 
     if seqs.dtype == np.uint8:  # OHE
-        nuc_content = seqs.sum(length_axis)
+        nuc_content = cast(NDArray[np.integer], seqs.sum(length_axis))
     else:
         if alphabet is None:
             raise ValueError("Need an alphabet to analyze string nucleotide content.")
         nuc_content = np.zeros(
-            (*seqs.shape[:length_axis], *seqs.shape[length_axis + 1 :], len(alphabet))
+            (*seqs.shape[:length_axis], *seqs.shape[length_axis + 1 :], len(alphabet)),
+            dtype=np.int64,
         )
         for i, nuc in enumerate(alphabet.array):
             nuc_content[..., i] = (seqs == nuc).sum(length_axis)
 
     if normalize:
+        nuc_content = nuc_content.astype(np.float64)
         nuc_content /= seqs.shape[length_axis]
 
     return nuc_content
@@ -136,11 +146,10 @@ def count_kmers_seq(seq: str, k: int) -> dict:
     """
     assert len(seq) >= k, "Length of seq must be greater than that of k."
 
-    _seq = np.array([seq], "S").view("S1")
-    kmers = np.lib.stride_tricks.sliding_window_view(_seq, k)
+    _seq = np.frombuffer(seq, "S1")
+    kmers = np.lib.stride_tricks.sliding_window_view(_seq, k).view(f"S{k}")
     kmers, counts = np.unique(kmers, return_counts=True)
-    kmers = (b"".join(kmer).decode("ascii") for kmer in kmers)
-    out = dict(zip(kmers, counts))
+    out = dict(zip(kmers.astype(str), counts))
 
     return out
 
@@ -169,6 +178,8 @@ def _count_kmers(
     counts : ndarray[int]
         Counts of all possible k-mers for each input sequence.
     """
+    raise NotImplementedError
+
     _check_axes(seqs, length_axis, False)
 
     seqs = cast_seqs(seqs)
