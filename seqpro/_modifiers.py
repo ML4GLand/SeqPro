@@ -86,7 +86,7 @@ def k_shuffle(
         ohe = True
         if alphabet is None:
             raise ValueError("Need an alphabet to process OHE sequences.")
-        seqs = alphabet.ohe_to_bytes(seqs, ohe_axis=ohe_axis)
+        seqs = alphabet.decode_ohe(seqs, ohe_axis=ohe_axis)
     else:
         ohe = False
 

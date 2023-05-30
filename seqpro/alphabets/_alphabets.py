@@ -75,7 +75,7 @@ class NucleotideAlphabet:
         seqs = cast_seqs(seqs)
         return gufunc_ohe(seqs.view(np.uint8), self.array.view(np.uint8))
 
-    def ohe_to_bytes(
+    def decode_ohe(
         self,
         seqs: NDArray[np.uint8],
         ohe_axis: int,

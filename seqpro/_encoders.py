@@ -3,7 +3,7 @@ from typing import Literal, Optional, Union, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ._numba import gufunc_pad_both, gufunc_pad_left
+from ._numba import gufunc_char_idx, gufunc_pad_both, gufunc_pad_left
 from ._utils import SeqType, StrSeqType, _check_axes, array_slice, cast_seqs
 from .alphabets._alphabets import NucleotideAlphabet
 
@@ -108,7 +108,7 @@ def ohe(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.uint8]:
     return alphabet.ohe(seqs)
 
 
-def ohe_to_bytes(
+def decode_ohe(
     seqs: NDArray[np.uint8],
     ohe_axis: int,
     alphabet: NucleotideAlphabet,
@@ -128,6 +128,44 @@ def ohe_to_bytes(
     -------
     NDArray[np.bytes_]
     """
-    return alphabet.ohe_to_bytes(
-        seqs=seqs, ohe_axis=ohe_axis, unknown_char=unknown_char
-    )
+    return alphabet.decode_ohe(seqs=seqs, ohe_axis=ohe_axis, unknown_char=unknown_char)
+
+
+def tokenize(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.integer]:
+    """Tokenize nucleotides. Replaces each nucleotide with its index in the alphabet.
+    Nucleotides not in the alphabet are replaced with -1.
+
+    Parameters
+    ----------
+    seqs : StrSeqType
+    alphabet : NucleotideAlphabet
+
+    Returns
+    -------
+    NDArray[int]
+        Sequences of tokens (integers)
+    """
+    seqs = cast_seqs(seqs)
+    return gufunc_char_idx(seqs.view(np.uint8), alphabet.array.view(np.uint8))
+
+
+def decode_tokens(
+    tokens: NDArray[np.integer], alphabet: NucleotideAlphabet, unknown_char: str = "N"
+) -> NDArray[np.bytes_]:
+    """Untokenize nucleotides. Replaces each token/index with its corresponding
+    nucleotide in the alphabet.
+
+    Parameters
+    ----------
+    ids : NDArray[np.integer]
+    alphabet : NucleotideAlphabet
+    unknown_char : str, optional
+        Character to replace unknown tokens with, by default 'N'
+
+    Returns
+    -------
+    NDArray[bytes] aka S1
+        Sequences of nucleotides
+    """
+    chars = cast_seqs(alphabet.alphabet + unknown_char)
+    return chars[tokens]
