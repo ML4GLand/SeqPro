@@ -5,11 +5,15 @@ dist/seqpro-0.0.1.tar.gz
 seqpro/__init__.py
 seqpro/_analyzers.py
 seqpro/_cleaners.py
+seqpro/_comparisons.py
 seqpro/_encoders.py
 seqpro/_experimental.py
 seqpro/_helpers.py
 seqpro/_modifiers.py
+seqpro/_utils.py
+seqpro/_visualizers.py
 seqpro.egg-info/PKG-INFO
 seqpro.egg-info/SOURCES.txt
 seqpro.egg-info/dependency_links.txt
 seqpro.egg-info/top_level.txt
+tests/tests.py
