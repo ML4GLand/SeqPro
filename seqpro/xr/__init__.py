@@ -8,12 +8,10 @@ from seqpro.alphabets import NucleotideAlphabet
 
 try:
     import xarray as xr
-except ImportError as e:
-    msg = "Need to install XArray to use seqpro.xr.\n"
-    msg += e.msg
-    raise ImportError(msg)
+except ImportError:
+    raise ImportError("Need to install XArray to use seqpro.xr")
 
-__all__ = ["ohe"]
+__all__ = ["ohe", "bin_coverage"]
 
 
 def ohe(
@@ -56,9 +54,34 @@ def bin_coverage(
     coverage: Union[xr.DataArray, xr.Dataset],
     bin_width: int,
     length_dim: str,
-    binned_dim: str,
+    binned_dim="_bin",
     normalize=False,
 ) -> Union[xr.DataArray, xr.Dataset]:
+    """Bin coverage to a lower resolution by summing across non-overlapping windows.
+
+    Parameters
+    ----------
+    coverage : Union[xr.DataArray, xr.Dataset]
+        Array of coverage.
+    bin_width : int
+        Size of the bins (aka windows)
+    length_dim : str
+        Name of the length dimension.
+    binned_dim : str, optional
+        Name of the binned dimension, by default '_bin'
+    normalize : bool, optional
+        Whether to divide by bin width, by default False
+
+    Returns
+    -------
+    Union[xr.DataArray, xr.Dataset]
+        DataArray or Dataset of binned coverage.
+
+    Raises
+    ------
+    ValueError
+        If the length is not evenly divisible by the bin width.
+    """
     length = coverage.sizes[length_dim]
     if length % bin_width != 0:
         raise ValueError("Bin width must evenly divide length.")
