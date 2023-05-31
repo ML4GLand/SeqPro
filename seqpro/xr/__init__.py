@@ -50,3 +50,30 @@ def ohe(
     )
 
     return out
+
+
+def bin_coverage(
+    coverage: Union[xr.DataArray, xr.Dataset],
+    bin_width: int,
+    length_dim: str,
+    binned_dim: str,
+    normalize=False,
+) -> Union[xr.DataArray, xr.Dataset]:
+    length = coverage.sizes[length_dim]
+    if length % bin_width != 0:
+        raise ValueError("Bin width must evenly divide length.")
+
+    def _bin(x):
+        return np.add.reduceat(x, np.arange(0, length, bin_width), axis=-1)
+
+    binned_coverage = xr.apply_ufunc(
+        _bin,
+        coverage,
+        input_core_dims=[[length_dim]],
+        output_core_dims=[[binned_dim]],
+        dask="parallelized",
+    )
+
+    if normalize:
+        binned_coverage = binned_coverage / bin_width
+    return binned_coverage

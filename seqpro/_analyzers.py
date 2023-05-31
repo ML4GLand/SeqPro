@@ -74,8 +74,7 @@ def gc_content(
         )
 
     if normalize:
-        gc_content = gc_content.astype(np.float64)
-        gc_content /= seqs.shape[length_axis]
+        gc_content = gc_content / seqs.shape[length_axis]
 
     return gc_content
 
@@ -122,8 +121,7 @@ def nucleotide_content(
             nuc_content[..., i] = (seqs == nuc).sum(length_axis)
 
     if normalize:
-        nuc_content = nuc_content.astype(np.float64)
-        nuc_content /= seqs.shape[length_axis]
+        nuc_content = nuc_content / seqs.shape[length_axis]
 
     return nuc_content
 
@@ -146,7 +144,7 @@ def count_kmers_seq(seq: str, k: int) -> dict:
     """
     assert len(seq) >= k, "Length of seq must be greater than that of k."
 
-    _seq = np.frombuffer(seq, "S1")
+    _seq = np.frombuffer(seq.encode("ascii"), "S1")
     kmers = np.lib.stride_tricks.sliding_window_view(_seq, k).view(f"S{k}")
     kmers, counts = np.unique(kmers, return_counts=True)
     out = dict(zip(kmers.astype(str), counts))

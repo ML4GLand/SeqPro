@@ -105,7 +105,7 @@ def k_shuffle(
 
 
 def bin_coverage(
-    coverage_array: NDArray[np.number],
+    coverage: NDArray[np.number],
     bin_width: int,
     length_axis: int,
     normalize=False,
@@ -127,11 +127,11 @@ def bin_coverage(
     -------
     binned_coverage : NDArray
     """
-    length = coverage_array.shape[length_axis]
+    length = coverage.shape[length_axis]
     if length % bin_width != 0:
         raise ValueError("Bin width must evenly divide length.")
     binned_coverage = np.add.reduceat(
-        coverage_array, np.arange(0, length, bin_width), axis=length_axis
+        coverage, np.arange(0, length, bin_width), axis=length_axis
     )
     if normalize:
         binned_coverage /= bin_width
