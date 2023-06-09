@@ -1,3 +1,11 @@
+try:
+    import importlib.metadata as importlib_metadata
+except ModuleNotFoundError:
+    import importlib_metadata
+
+package_name = "seqpro"
+__version__ = importlib_metadata.version(package_name)
+
 from ._alphabets import ALPHABETS, AminoAlphabet, NucleotideAlphabet
 from ._analyzers import gc_content, length, nucleotide_content
 from ._cleaners import remove_N_seqs, remove_only_N_seqs, sanitize_seq, sanitize_seqs

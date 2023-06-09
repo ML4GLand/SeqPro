@@ -39,6 +39,8 @@ def pad_seqs(
 
     string_input = isinstance(seqs, (str, list)) or (
         isinstance(seqs, np.ndarray) and seqs.dtype.kind == "U"
+    ) or (
+        isinstance(seqs, np.ndarray) and seqs.dtype.type == np.object_
     )
 
     seqs = cast_seqs(seqs)
