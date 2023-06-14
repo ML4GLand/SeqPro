@@ -134,6 +134,7 @@ def translate(
         seqs,
         input_core_dims=[[length_dim]],
         output_core_dims=[[aa_length_dim]],
+        dask="parallelized",
     )
 
     return aa_seqs
