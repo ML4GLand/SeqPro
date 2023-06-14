@@ -158,22 +158,18 @@ def jitter(
 
     if length_axis < 0:
         length_axis = len(shape) + length_axis
-    n_starts = np.product((*shape[:length_axis], *shape[length_axis + 1 :]))
-    starts = rng.integers(0, max_jitter + 1, n_starts)
+    starts = rng.integers(
+        0, max_jitter + 1, (*shape[:length_axis], *shape[length_axis + 1 :])
+    )
 
     length = shape[length_axis]
     jittered_length = length - (2 * max_jitter)
 
     sliced_arrs = []
     for arr in arrays:
-        arr = arr.swapaxes(-1, length_axis)
-        init_shape = arr.shape
-        arr = arr.reshape(-1, length)
         sliced = np.empty_like(arr)
-        gufunc_slice_along_dim(arr, starts, jittered_length, sliced)
-        sliced = sliced.reshape(init_shape)[..., :jittered_length].swapaxes(
-            -1, length_axis
-        )
+        gufunc_slice_along_dim(arr, starts, jittered_length, sliced, axis=length_axis)
+        sliced = sliced[..., :jittered_length]
         if len(arrays) == 1:
             return sliced
         else:
