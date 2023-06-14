@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union, cast
+from typing import Optional, Tuple, Union, cast
 
 import numpy as np
 import ushuffle
@@ -92,7 +92,9 @@ def k_shuffle(
         ohe = False
 
     length = seqs.shape[length_axis]
-    with np.nditer(seqs.view(f"S{length}").ravel(), op_flags=["readwrite"]) as it:  # type: ignore
+    with np.nditer(
+        seqs.view(f"S{length}").ravel(), op_flags=["readwrite"]  # type: ignore
+    ) as it:
         for seq in it:
             seq[...] = ushuffle.shuffle(seq.tobytes(), k)  # type: ignore
 
@@ -140,42 +142,69 @@ def bin_coverage(
 
 
 def jitter(
-    arrays: Union[NDArray, List[NDArray]],
+    *arrays: NDArray,
     max_jitter: int,
     length_axis: int,
+    jitter_axes: Union[int, Tuple[int, ...]],
     seed: Optional[int] = None,
 ):
-    if isinstance(arrays, np.ndarray):
-        arrays = [arrays]
+    """Randomly jitter data from arrays, using the same jitter across arrays.
 
-    shape = arrays[0].shape
-    if len(arrays) > 1:
-        for arr in arrays[1:]:
-            if arr.shape != shape:
-                raise RuntimeError("Arrays must have the same shape.")
+    Parameters
+    ----------
+    arrays : Union[NDArray, List[NDArray]]
+    max_jitter : int
+        Maximum jitter amount.
+    length_axis : int
+    jitter_axes : Tuple[int, ...]
+        Each element along the jitter axes will be jittered *differently*. Thus, if
+        jitter_axes = 0, then every slice of data along axis 0 would be jittered
+        differently. If jitter_axes = (0, 1), then data along axes 0 and 1 would be
+        jittered differently.
+    seed : Optional[int], optional
+        Random seed, by default None
+
+    Returns
+    -------
+    arrays
+        Jittered arrays. Will have a new length equal to length - 2*max_jitter.
+    """
+    if isinstance(jitter_axes, int):
+        jitter_axes = (jitter_axes,)
+
+    destination_axes = list(range(-len(jitter_axes) - 1, 0))
+    arrays = [
+        np.moveaxis(a, [*jitter_axes, length_axis], destination_axes) for a in arrays
+    ]
+
+    try:
+        np.broadcast(*arrays)  # check that arrays are broadcasting
+    except ValueError as e:
+        raise ValueError(
+            "Arrays must have the same shape in the jitter and length axes."
+        ) from e
+
+    jitter_axes_shape = [d for i, d in enumerate(arrays[0].shape) if i in jitter_axes]
+    length = arrays[0].shape[length_axis]
 
     rng = np.random.default_rng(seed)
+    starts = rng.integers(0, max_jitter + 1, jitter_axes_shape)
 
-    if length_axis < 0:
-        length_axis = len(shape) + length_axis
-    starts = rng.integers(
-        0, max_jitter + 1, (*shape[:length_axis], *shape[length_axis + 1 :])
-    )
-
-    length = shape[length_axis]
     jittered_length = length - (2 * max_jitter)
+    if jittered_length <= 0:
+        raise ValueError("Jittered length is <= 0")
 
     sliced_arrs = []
     for arr in arrays:
         sliced = np.empty_like(arr)
-        gufunc_slice_along_dim(arr, starts, jittered_length, sliced, axis=length_axis)
+        gufunc_slice_along_dim(
+            arr, starts, jittered_length, sliced, axis=-1  # type: ignore
+        )
         sliced = sliced[..., :jittered_length]
-        if len(arrays) == 1:
-            return sliced
-        else:
-            sliced_arrs.append(sliced)
+        sliced = np.moveaxis(sliced, destination_axes, [*jitter_axes, length_axis])
+        sliced_arrs.append(sliced)
 
-    return sliced_arrs
+    return tuple(sliced_arrs)
 
 
 def random_seqs(

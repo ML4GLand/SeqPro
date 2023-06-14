@@ -26,7 +26,7 @@ def ohe(
     seqs : Union[xr.DataArray, xr.Dataset]
     alphabet : NucleotideAlphabet
     ohe_dim : Optional[str], optional
-        Name to give the one hot encoding dimension, by default "_ohe"
+        Name to give the new one hot encoding dimension, by default "_ohe"
 
     Returns
     -------
@@ -95,6 +95,7 @@ def bin_coverage(
         input_core_dims=[[length_dim]],
         output_core_dims=[[binned_dim]],
         dask="parallelized",
+        dask_gufunc_kwargs={},
     )
 
     if normalize:
@@ -138,3 +139,76 @@ def translate(
     )
 
     return aa_seqs
+
+
+# * This function doesn't seem possible to implement with xarray.apply_ufunc using the
+# * current implementation of sp.jitter. This is because tuples of DataArrays don't get
+# * converted to tuples of NumPy arrays before getting passed to `func` in apply_ufunc.
+# * Passing in unpacked DataArrays or Datasets causes `func` to be applied to each
+# * separately.
+# def jitter(
+#     data: Union[xr.DataArray, xr.Dataset],
+#     max_jitter: int,
+#     length_dim: str,
+#     jitter_dims: Union[str, List[str]],
+#     jitter_length_dim: Optional[str] = None,
+#     seed: Optional[int] = None,
+# ) -> Union[xr.DataArray, xr.Dataset]:
+#     if isinstance(jitter_dims, str):
+#         jitter_dims = [jitter_dims]
+
+#     if jitter_length_dim is None:
+#         jitter_length_dim = f'_jittered_{length_dim.strip("_")}'
+
+#     if isinstance(data, xr.Dataset):
+#         _data = list(data.data_vars.values())
+#     else:
+#         _data = [data]
+
+#     for a in _data:
+#         a = a.transpose(..., *jitter_dims, length_dim)
+
+#     func = partial(
+#         sp_jitter,
+#         max_jitter=max_jitter,
+#         length_axis=-1,
+#         jitter_axes=tuple(range(-len(jitter_dims) - 1, -1)),
+#         seed=seed,
+#     )
+
+#     jittered = xr.apply_ufunc(
+#         func,
+#         *_data,
+#         input_core_dims=[*(([length_dim],) * len(_data))],
+#         output_core_dims=[*(([jitter_length_dim],) * len(_data))],
+#         dask="parallelized",
+#         output_dtypes=[a.dtype for a in _data],
+#         dask_gufunc_kwargs={
+#             'output_sizes': {
+#                 jitter_length_dim: _data[0].sizes[length_dim] - 2*max_jitter
+#             },
+#         },
+#     )
+
+#     if isinstance(data, xr.Dataset):
+#         jittered = []
+#         for a, b in zip(jittered, data.data_vars.values()):
+#             dims = []
+#             for d in b.dims:
+#                 if d == length_dim:
+#                     dims.append(jitter_length_dim)
+#                 else:
+#                     dims.append(d)
+#             arr = a.rename(b.name).transpose(*dims)
+#             jittered.append(arr)
+#         return xr.merge(jittered)
+#     else:
+#         dims = []
+#         for d in data.dims:
+#             if d == length_dim:
+#                 dims.append(jitter_length_dim)
+#             else:
+#                 dims.append(d)
+#         jittered.rename(data.name).transpose(dims)
+
+#     return jittered

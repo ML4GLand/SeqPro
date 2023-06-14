@@ -1,7 +1,7 @@
-from typing import Literal, Optional, Union, cast, List
+from typing import List, Literal, Optional, Union, cast
 
-import torch
 import numpy as np
+import torch
 from numpy.typing import NDArray
 
 from ._numba import gufunc_char_idx, gufunc_pad_both, gufunc_pad_left
@@ -133,6 +133,7 @@ def decode_ohe(
     """
     return alphabet.decode_ohe(seqs=seqs, ohe_axis=ohe_axis, unknown_char=unknown_char)
 
+
 def tokenize(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.integer]:
     """Tokenize nucleotides. Replaces each nucleotide with its index in the alphabet.
     Nucleotides not in the alphabet are replaced with -1.
@@ -149,6 +150,7 @@ def tokenize(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.integ
     """
     seqs = cast_seqs(seqs)
     return gufunc_char_idx(seqs.view(np.uint8), alphabet.array.view(np.uint8))
+
 
 def decode_tokens(
     tokens: NDArray[np.integer], alphabet: NucleotideAlphabet, unknown_char: str = "N"
