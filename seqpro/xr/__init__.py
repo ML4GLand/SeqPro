@@ -3,8 +3,8 @@ from typing import Union
 import numpy as np
 from numpy.typing import NDArray
 
-from seqpro._numba import gufunc_ohe
-from seqpro.alphabets import NucleotideAlphabet
+from seqpro._numba import gufunc_ohe, gufunc_translate
+from seqpro.alphabets import AminoAlphabet, NucleotideAlphabet
 
 try:
     import xarray as xr
@@ -100,3 +100,40 @@ def bin_coverage(
     if normalize:
         binned_coverage = binned_coverage / bin_width
     return binned_coverage
+
+
+def translate(
+    seqs: Union[xr.DataArray, xr.Dataset],
+    alphabet: AminoAlphabet,
+    length_dim: str,
+    aa_length_dim="_aa_length",
+) -> Union[xr.DataArray, xr.Dataset]:
+    k = alphabet.codon_array.shape[-1]
+
+    if seqs.sizes[length_dim] % k != 0:
+        raise ValueError("Sequence length is not evenly divisible by codon length.")
+
+    def _translate(seqs):
+        n = seqs.shape[-1] // k
+        shape = *seqs.shape[:-1], n, k
+        strides = (
+            *seqs.strides[:-1],
+            k,
+            seqs.strides[-1],
+        )
+        trimers = np.lib.stride_tricks.as_strided(seqs, shape=shape, strides=strides)
+        return gufunc_translate(
+            trimers.view(np.uint8),
+            alphabet.codon_array.view(np.uint8),
+            alphabet.aa_array.view(np.uint8),
+            axes=[(-1), (-2, -1), (-1), ()],  # type: ignore
+        ).view("S1")
+
+    aa_seqs = xr.apply_ufunc(
+        _translate,
+        seqs,
+        input_core_dims=[[length_dim]],
+        output_core_dims=[[aa_length_dim]],
+    )
+
+    return aa_seqs

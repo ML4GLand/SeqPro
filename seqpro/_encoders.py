@@ -39,8 +39,10 @@ def pad_seqs(
     """
     _check_axes(seqs, length_axis, False)
 
-    string_input = isinstance(seqs, (str, list)) or (
-        isinstance(seqs, np.ndarray) and seqs.dtype.kind == "U"
+    string_input = (
+        isinstance(seqs, (str, list))
+        or (isinstance(seqs, np.ndarray) and seqs.dtype.kind == "U")
+        or (isinstance(seqs, np.ndarray) and seqs.dtype.type == np.object_)
     )
 
     seqs = cast_seqs(seqs)

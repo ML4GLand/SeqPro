@@ -1,9 +1,10 @@
-from typing import Optional, Tuple, Union, cast
+from typing import List, Optional, Tuple, Union, cast
 
 import numpy as np
 import ushuffle
 from numpy.typing import NDArray
 
+from ._numba import gufunc_slice_along_dim
 from ._utils import SeqType, _check_axes, cast_seqs
 from .alphabets._alphabets import NucleotideAlphabet
 
@@ -136,6 +137,49 @@ def bin_coverage(
     if normalize:
         binned_coverage /= bin_width
     return binned_coverage
+
+
+def jitter(
+    arrays: Union[NDArray, List[NDArray]],
+    max_jitter: int,
+    length_axis: int,
+    seed: Optional[int] = None,
+):
+    if isinstance(arrays, np.ndarray):
+        arrays = [arrays]
+
+    shape = arrays[0].shape
+    if len(arrays) > 1:
+        for arr in arrays[1:]:
+            if arr.shape != shape:
+                raise RuntimeError("Arrays must have the same shape.")
+
+    rng = np.random.default_rng(seed)
+
+    if length_axis < 0:
+        length_axis = len(shape) + length_axis
+    n_starts = np.product((*shape[:length_axis], *shape[length_axis + 1 :]))
+    starts = rng.integers(0, max_jitter + 1, n_starts)
+
+    length = shape[length_axis]
+    jittered_length = length - (2 * max_jitter)
+
+    sliced_arrs = []
+    for arr in arrays:
+        arr = arr.swapaxes(-1, length_axis)
+        init_shape = arr.shape
+        arr = arr.reshape(-1, length)
+        sliced = np.empty_like(arr)
+        gufunc_slice_along_dim(arr, starts, jittered_length, sliced)
+        sliced = sliced.reshape(init_shape)[..., :jittered_length].swapaxes(
+            -1, length_axis
+        )
+        if len(arrays) == 1:
+            return sliced
+        else:
+            sliced_arrs.append(sliced)
+
+    return sliced_arrs
 
 
 def random_seqs(
