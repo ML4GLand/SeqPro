@@ -4,7 +4,7 @@ import numpy as np
 import ushuffle
 from numpy.typing import NDArray
 
-from ._numba import gufunc_slice_along_dim
+from ._numba import gufunc_jitter_helper
 from ._utils import SeqType, _check_axes, cast_seqs
 from .alphabets._alphabets import NucleotideAlphabet
 
@@ -152,15 +152,17 @@ def jitter(
 
     Parameters
     ----------
-    arrays : Union[NDArray, List[NDArray]]
+    *arrays : NDArray
+        Arrays to be jittered. They must have the same sizez jitter and length
+        axes.
     max_jitter : int
         Maximum jitter amount.
     length_axis : int
     jitter_axes : Tuple[int, ...]
-        Each element along the jitter axes will be jittered *differently*. Thus, if
-        jitter_axes = 0, then every slice of data along axis 0 would be jittered
-        differently. If jitter_axes = (0, 1), then data along axes 0 and 1 would be
-        jittered differently.
+        Each element along the jitter axes will be randomly jittered *independently*.
+        Thus, if jitter_axes = 0, then every slice of data along axis 0 would be
+        jittered independently. If jitter_axes = (0, 1), then each element along axes 0
+        and 1 would be randomly jittered independently.
     seed : Optional[int], optional
         Random seed, by default None
 
@@ -177,29 +179,21 @@ def jitter(
         np.moveaxis(a, [*jitter_axes, length_axis], destination_axes) for a in arrays
     ]
 
-    try:
-        np.broadcast(*arrays)  # check that arrays are broadcasting
-    except ValueError as e:
-        raise ValueError(
-            "Arrays must have the same shape in the jitter and length axes."
-        ) from e
-
-    jitter_axes_shape = [d for i, d in enumerate(arrays[0].shape) if i in jitter_axes]
-    length = arrays[0].shape[length_axis]
+    jitter_axes_shape = arrays[0].shape[-len(destination_axes) : -1]
+    for arr in arrays:
+        if arr.shape[-len(destination_axes) : -1] != jitter_axes_shape:
+            raise ValueError("Got arrays with different sized jitter axes.")
+        if arr.shape[-1] - 2 * max_jitter <= 0:
+            raise ValueError("Jittered length is <= 0")
 
     rng = np.random.default_rng(seed)
     starts = rng.integers(0, max_jitter + 1, jitter_axes_shape)
 
-    jittered_length = length - (2 * max_jitter)
-    if jittered_length <= 0:
-        raise ValueError("Jittered length is <= 0")
-
     sliced_arrs = []
     for arr in arrays:
+        jittered_length = arr.shape[-1] - 2 * max_jitter
         sliced = np.empty_like(arr)
-        gufunc_slice_along_dim(
-            arr, starts, jittered_length, sliced, axis=-1  # type: ignore
-        )
+        gufunc_jitter_helper(arr, starts, max_jitter, sliced, axis=-1)  # type: ignore
         sliced = sliced[..., :jittered_length]
         sliced = np.moveaxis(sliced, destination_axes, [*jitter_axes, length_axis])
         sliced_arrs.append(sliced)

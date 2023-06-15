@@ -104,10 +104,11 @@ def gufunc_translate(
 
 
 @nb.guvectorize("(n),(),()->(n)", nopython=True)
-def gufunc_slice_along_dim(
+def gufunc_jitter_helper(
     arr: NDArray,
     start: Union[int, NDArray[np.integer]],
-    length: int,
+    max_jitter: Union[int, NDArray[np.integer]],
     res: NDArray,
 ):
-    res[:length] = arr[start : start + length]
+    new_length = len(arr) - 2 * max_jitter
+    res[:new_length] = arr[start : start + new_length]
