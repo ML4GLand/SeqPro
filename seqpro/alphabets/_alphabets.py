@@ -179,16 +179,36 @@ class NucleotideAlphabet:
 
 class AminoAlphabet:
     def __init__(self, codons: List[str], amino_acids: List[str]) -> None:
+        """Construct an alphabet of amino acids and their mappings to codons.
+
+        Parameters
+        ----------
+        codons : List[str]
+            List of codons.
+        amino_acids : List[str]
+            List of amino acids, in the same order
+
+        Raises
+        ------
+        ValueError
+            _description_
+        ValueError
+            _description_
+        """
         k = len(codons[0])
         if any([len(c) != k for c in codons]):
             raise ValueError("Got codons with varying lengths.")
         if any([len(a) != 1 for a in amino_acids]):
             raise ValueError("Got amino acid symbols that are multiple characters.")
+        if len(codons) != len(amino_acids):
+            raise ValueError(
+                "Got different number of codons and amino acids for mapping."
+            )
 
         self.codons = codons
-        self.amino_acids = amino_acids
+        self.amino_acids = list(set(amino_acids))
         self.codon_array = np.array(codons, "S")[..., None].view("S1")
-        self.aa_array = np.array(amino_acids, "S1")
+        self.aa_array = np.array(self.amino_acids, "S1")
         self.codon_to_aa = dict(zip(codons, amino_acids))
 
     def translate(
@@ -198,31 +218,32 @@ class AminoAlphabet:
 
         seqs = cast_seqs(seqs)
 
-        k = self.codon_array.shape[-1]
+        codon_size = self.codon_array.shape[-1]
 
         if length_axis is None:
             length_axis = -1
 
-        if seqs.shape[length_axis] % k != 0:
+        if seqs.shape[length_axis] % codon_size != 0:
             raise ValueError("Sequence length is not evenly divisible by codon length.")
 
         if length_axis < 0:
             length_axis = seqs.ndim + length_axis
 
-        n = seqs.shape[length_axis] // k
-        shape = *seqs.shape[:length_axis], n, k, *seqs.shape[length_axis + 1 :]
-        k_axis = length_axis + 1
+        # get k-mers (codons)
+        n = seqs.shape[length_axis] // codon_size
+        shape = *seqs.shape[:length_axis], n, codon_size, *seqs.shape[length_axis + 1 :]
+        codon_axis = length_axis + 1
         strides = (
             *seqs.strides[:length_axis],
-            k,
+            codon_size,
             seqs.strides[length_axis],
             *seqs.strides[length_axis + 1 :],
         )
-        trimers = np.lib.stride_tricks.as_strided(seqs, shape=shape, strides=strides)
+        codons = np.lib.stride_tricks.as_strided(seqs, shape=shape, strides=strides)
 
         return gufunc_translate(
-            trimers.view("u1"),
-            self.codon_array.view("u1"),
-            self.aa_array.view("u1"),
-            axes=[(k_axis), (-2, -1), (-1), ()],  # type: ignore
+            codons.view(np.uint8),
+            self.codon_array.view(np.uint8),
+            self.aa_array.view(np.uint8),
+            axes=[codon_axis, (-2, -1), (-1), ()],  # type: ignore
         ).view("S1")

@@ -9,6 +9,7 @@ RNA = ["A", "C", "G", "U"]
 COMPLEMENT_DNA = {"A": "T", "C": "G", "G": "C", "T": "A"}
 COMPLEMENT_RNA = {"A": "U", "C": "G", "G": "C", "U": "A"}
 
+
 # exact concise
 def _get_vocab(vocab):
     if vocab == "DNA":
