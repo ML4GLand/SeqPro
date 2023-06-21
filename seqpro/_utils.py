@@ -61,10 +61,14 @@ def _check_axes(
 
     # OHE
     if ohe_axis is None and isinstance(seqs, np.ndarray) and seqs.dtype == np.uint8:
-        raise ValueError("Need an alphabet axis to process OHE sequences.")
+        raise ValueError("Need an one hot encoding axis to process OHE sequences.")
 
     # length_axis != ohe_axis
-    if length_axis is not None and ohe_axis is not None and (length_axis == ohe_axis):
+    if (
+        isinstance(length_axis, int)
+        and isinstance(ohe_axis, int)
+        and (length_axis == ohe_axis)
+    ):
         raise ValueError("Length and OHE axis must be different.")
 
 
@@ -74,6 +78,7 @@ DTYPE = TypeVar("DTYPE", bound=np.generic)
 def array_slice(
     a: NDArray[DTYPE], axis: int, start: int, end: int, step=1
 ) -> NDArray[DTYPE]:
+    """Slice an array from a dynamic axis."""
     return a[(slice(None),) * (axis % a.ndim) + (slice(start, end, step),)]
 
 

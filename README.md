@@ -5,9 +5,11 @@
 import seqpro as sp
 ```
 
-SeqPro is a Python package for processing genomic sequences. It provides a set of tools for cleaning, modifiying, encoding,  and analyzing genomic sequences. SeqPro currently supports processing DNA/RNA sequences, but will be extended to support protein sequences in the future. SeqPro is meant to be used in conjunction with other packages for sequence-to-function modeling in the ML4GLand project, including SeqData, EUGENe, MotifData, and SeqExplainer.
+SeqPro is a Python package for processing genomic sequences. It provides a set of tools for cleaning, modifiying, encoding, and analyzing genomic sequences. SeqPro currently supports processing DNA/RNA sequences, with limited support for protein sequences. SeqPro is fully functional on its own but is also heavily utilized throughout the other packages in the ML4GLand project, including SeqData, EUGENe, MotifData, and SeqExplainer.
 
-Most functions in SeqPro take in NumPy arrays of sequences as input and have two versions. One for acting on a single seq (`_seq()`) and one for acting on a list of sequences (`_seqs()`).
+All functions in SeqPro take as input a string, a list of strings, a NumPy array of strings, or a NumPy array of single character bytes (S1) or one-hot encoded arrays. There is also emerging integration with XArray through the `seqpro.xr` submodule.
+
+Computational bottelnecks or code that is impossible to vectorize with NumPy alone are accelerated with Numba e.g. padding sequences, one-hot encoding, converting from one-hot encoding to nucleotides, etc.
 
 ## Sequence cleaners (`cleaners`)
 
@@ -23,31 +25,20 @@ sp.sanitize_seqs(seqs)
 ### Reverse complement sequences
 
 ```python
-sp.reverse_complement_seqs(seqs)
+sp.reverse_complement(seqs)
 ```
 
-### Shuffle sequences
+### K-let frequency preserving shuffles
 ```python
-
-sp.shuffle_seqs(seqs)
-sp.dinucleotide_shuffle_seqs(seqs)
+sp.k_shuffle(seqs, k=2)
 ```
 
 ## Sequence encoders (`encoders`)
 
-### Ascii encoding
-
-```python
-sp.ascii_encode_seqs(seqs)
-sp.ascii_decode_seqs(seqs)
-```
-
 ## One-hot encoding
 
 ```python
-sp.ohe_seqs(seqs)
-sp.ohe_seqs(seqs, order=2)
-sp.decode_seqs(ohe_seqs)
+sp.ohe(seqs)
 ```
 
 ## Sequence analysis (`analyzers`)
@@ -55,8 +46,8 @@ sp.decode_seqs(ohe_seqs)
 ### Calculate sequence properties (e.g. GC content)
 
 ```python
-sp.gc_content_seqs(seqs)
-sp.nucleotide_content_seqs(seqs)
+sp.gc_content(seqs)
+sp.nucleotide_content(seqs)
 ```
 
 ## Visaulize sequence properties (`visualizers`)
@@ -71,7 +62,7 @@ sp.plot_gc_content(seqs)
 ```bash
 python
 numpy
-torch
+numba
 ```
 
 # More to come!
@@ -83,28 +74,3 @@ torch
 ### Preparing features for MPRA activity prediction
 
 ### Motif enrichment analysis with HOMER/DEM/cisTarget
-
-## Functionality
-
-### Extract k-mers from sequences
-
-```python
-sp.extract_kmers(seqs, k)
-sp.extract_gapped_kmers(seqs, k, g)
-```
-
-
-        
-### Sequence annotations
-
-  - Known genomic features
-  - Overlap with different epigenomics data
-
-# Acknowledgements
-
-1. concise
-2. dinuc shuffle
-3. 
-
-# References
-1. 

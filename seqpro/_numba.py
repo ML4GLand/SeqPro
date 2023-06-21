@@ -55,7 +55,20 @@ def gufunc_ohe_char_idx(
     """
     res[0] = np.intp(-1)  # type: ignore
     for i in nb.prange(len(seq)):
-        res[0] = i * seq[i]  # type: ignore
+        if seq[i] == 1:
+            res[0] = i  # type: ignore
+
+
+@nb.guvectorize(["(u1, u1[:], intp[:])"], "(),(n)->()", target="parallel")
+def gufunc_char_idx(
+    seq: NDArray[np.uint8],
+    alphabet: NDArray[np.uint8],
+    res: Optional[NDArray[np.intp]] = None,
+) -> NDArray[np.intp]:  # type: ignore
+    res[0] = np.intp(-1)  # type: ignore
+    for i in nb.prange(len(alphabet)):
+        if seq == alphabet[i]:
+            res[0] = i  # type: ignore
 
 
 @nb.guvectorize(
