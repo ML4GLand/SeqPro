@@ -1,7 +1,6 @@
 from typing import List, Literal, Optional, Union, cast
 
 import numpy as np
-import torch
 from numpy.typing import NDArray
 
 from ._numba import gufunc_char_idx, gufunc_pad_both, gufunc_pad_left

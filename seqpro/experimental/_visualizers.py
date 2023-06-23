@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 
-from ._analyzers import gc_content_seqs, nucleotide_content_seqs
+from .._analyzers import gc_content_seqs, nucleotide_content_seqs
 
 
 def plot_gc_content(seqs, title="", ax=None, figsize=(10, 5)):

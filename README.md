@@ -7,9 +7,15 @@ import seqpro as sp
 
 SeqPro is a Python package for processing genomic sequences. It provides a set of tools for cleaning, modifiying, encoding, and analyzing genomic sequences. SeqPro currently supports processing DNA/RNA sequences, with limited support for protein sequences. SeqPro is fully functional on its own but is also heavily utilized throughout the other packages in the ML4GLand project, including SeqData, EUGENe, MotifData, and SeqExplainer.
 
-All functions in SeqPro take as input a string, a list of strings, a NumPy array of strings, or a NumPy array of single character bytes (S1) or one-hot encoded arrays. There is also emerging integration with XArray through the `seqpro.xr` submodule.
+All functions in SeqPro take as input a string, a list of strings, a NumPy array of strings, a NumPy array of single character bytes (S1), or one-hot encoded arrays. There is also emerging integration with XArray through the `seqpro.xr` submodule.
 
 Computational bottelnecks or code that is impossible to vectorize with NumPy alone are accelerated with Numba e.g. padding sequences, one-hot encoding, converting from one-hot encoding to nucleotides, etc.
+
+# Installation
+
+```bash
+pip install seqpro
+```
 
 ## Sequence cleaners (`cleaners`)
 
@@ -48,13 +54,6 @@ sp.ohe(seqs)
 ```python
 sp.gc_content(seqs)
 sp.nucleotide_content(seqs)
-```
-
-## Visaulize sequence properties (`visualizers`)
-
-```python
-sp.plot_nucleotide_content(seqs)
-sp.plot_gc_content(seqs)
 ```
 
 # Requirements
