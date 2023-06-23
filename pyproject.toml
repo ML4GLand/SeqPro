@@ -1,16 +1,18 @@
 [tool.poetry]
 name = "seqpro"
-version = "0.1.0"
+version = "0.1.1"
 description = "Sequence processing toolkit"
 authors = ["Adam Klie <aklie@ucsd.edu>"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
 numba = "^0.57.0"
-numpy = "^1.23.5"
+numpy = "~1.23.5"
 cython = "^0.29.35"
-ushuffle = "^1.1.2"
 matplotlib = {version = "^3.6.2", extras = ["dev"]}
+
+[tool.poetry.extras]
+dev = ["matplotlib"]
 
 [tool.poetry.dev-dependencies]
 

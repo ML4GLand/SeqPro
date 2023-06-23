@@ -1,7 +1,7 @@
 from typing import Optional, Tuple, Union, cast
 
 import numpy as np
-import ushuffle
+
 from numpy.typing import NDArray
 
 from ._numba import gufunc_jitter_helper
@@ -60,7 +60,11 @@ def k_shuffle(
     alphabet : Optional[NucleotideAlphabet], optional
         Alphabet, needed for OHE sequence input.
     """
-
+    try:
+        import ushuffle
+    except ImportError:
+        raise ImportError("Please install ushuffle to use this function (pip install ushuffle))")
+    
     _check_axes(seqs, length_axis, ohe_axis)
 
     seqs = cast_seqs(seqs)
