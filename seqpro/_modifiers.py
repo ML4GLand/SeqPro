@@ -1,177 +1,230 @@
+from typing import Optional, Tuple, Union, cast
+
 import numpy as np
-import torch
-from tqdm.auto import tqdm
 
-from ._helpers import (COMPLEMENT_DNA, COMPLEMENT_RNA, _char_array_to_string,
-                       _one_hot2token, _string_to_char_array, _token2one_hot)
+from numpy.typing import NDArray
+
+from ._numba import gufunc_jitter_helper
+from ._utils import SeqType, _check_axes, cast_seqs
+from .alphabets._alphabets import NucleotideAlphabet
 
 
-# my own
-def reverse_complement_seq(seq, vocab="DNA"):
-    """Reverse complement a single sequence."""
-    if isinstance(seq, str):
-        if vocab == "DNA":
-            return "".join(COMPLEMENT_DNA.get(base, base) for base in reversed(seq))
-        elif vocab == "RNA":
-            return "".join(COMPLEMENT_RNA.get(base, base) for base in reversed(seq))
-        else:
-            raise ValueError("Invalid vocab, only DNA or RNA are currently supported")
-    elif isinstance(seq, np.ndarray):
-        return torch.from_numpy(np.flip(seq, axis=(0, 1)).copy()).numpy()
-
-# my own
-def reverse_complement_seqs(seqs, vocab="DNA", verbose=True):
-    """Reverse complement set of sequences."""
-    if isinstance(seqs[0], str):
-        return np.array(
-            [
-                reverse_complement_seq(seq, vocab)
-                for i, seq in tqdm(
-                    enumerate(seqs),
-                    total=len(seqs),
-                    desc="Reverse complementing sequences",
-                    disable=not verbose,
-                )
-            ]
-        )
-    elif isinstance(seqs[0], np.ndarray):
-        return torch.from_numpy(np.flip(seqs, axis=(1, 2)).copy()).numpy()
-    
-# my own
-def shuffle_seq(seq,  one_hot=False, seed=None):
-    np.random.seed(seed)
-    
-    if one_hot:
-        seq = np.argmax(seq, axis=-1)
-        
-    shuffled_idx = np.random.permutation(len(seq))
-    shuffled_seq = np.array([seq[i] for i in shuffled_idx], dtype=seq.dtype)
-    
-    if one_hot:
-        shuffled_seq = np.eye(4)[shuffled_seq]
-        return shuffled_seq
-    
-    else:
-        return np.array("".join(shuffled_seq))
-
-# my own
-def shuffle_seqs(seqs, one_hot=False, seed=None):
-    return np.array([shuffle_seq(seq, one_hot=one_hot, seed=seed) for seq in seqs])
-
-# modified dinuc_shuffle
-def dinuc_shuffle_seq(
-    seq, 
-    num_shufs=None, 
-    rng=None
+def reverse_complement(
+    seqs: SeqType,
+    alphabet: NucleotideAlphabet,
+    length_axis: Optional[int] = None,
+    ohe_axis: Optional[int] = None,
 ):
-    """
-    Creates shuffles of the given sequence, in which dinucleotide frequencies
-    are preserved.
-    If `seq` is a string, returns a list of N strings of length L, each one
-    being a shuffled version of `seq`. If `seq` is a 2D np array, then the
-    result is an N x L x D np array of shuffled versions of `seq`, also
-    one-hot encoded. If `num_shufs` is not specified, then the first dimension
-    of N will not be present (i.e. a single string will be returned, or an L x D
-    array).
+    """Reverse complement a sequence.
+
     Parameters
     ----------
-    seq : str
-        The sequence to shuffle.
-    num_shufs : int, optional
-        The number of shuffles to create. If None, only one shuffle is created.
-    rng : np.random.RandomState, optional
-        The random number generator to use. If None, a new one is created.
+    seqs : str, list[str], ndarray[str, bytes, uint8]
+    alphabet : NucleotideAlphabet
+    length_axis : Optional[int], optional
+        Needed for array input. Length axis, by default None
+    ohe_axis : Optional[int], optional
+        Needed for OHE input. One hot encoding axis, by default None
+
     Returns
     -------
-    list of str or np.array
-        The shuffled sequences.
-    Note
-    ----
-    This function comes from DeepLIFT's dinuc_shuffle.py.
+    ndarray[bytes, uint8]
+        Array of bytes (S1) or uint8 for string or OHE input, respectively.
     """
-    if type(seq) is str or type(seq) is np.str_:
-        arr = _string_to_char_array(seq)
-    elif type(seq) is np.ndarray and len(seq.shape) == 2:
-        seq_len, one_hot_dim = seq.shape
-        arr = _one_hot2token(seq)
-    else:
-        raise ValueError("Expected string or one-hot encoded array")
-    if not rng:
-        rng = np.random.RandomState(rng)
+    return alphabet.reverse_complement(seqs, length_axis, ohe_axis)
 
-    # Get the set of all characters, and a mapping of which positions have which
-    # characters; use `tokens`, which are integer representations of the
-    # original characters
-    chars, tokens = np.unique(arr, return_inverse=True)
 
-    # For each token, get a list of indices of all the tokens that come after it
-    shuf_next_inds = []
-    for t in range(len(chars)):
-        mask = tokens[:-1] == t  # Excluding last char
-        inds = np.where(mask)[0]
-        shuf_next_inds.append(inds + 1)  # Add 1 for next token
+def k_shuffle(
+    seqs: SeqType,
+    k: int,
+    *,
+    length_axis: Optional[int] = None,
+    ohe_axis: Optional[int] = None,
+    seed: Optional[int] = None,
+    alphabet: Optional[NucleotideAlphabet] = None,
+) -> NDArray[Union[np.bytes_, np.uint8]]:
+    """Shuffle sequences while preserving k-let frequencies.
 
-    if type(seq) is str or type(seq) is np.str_:
-        all_results = []
-    else:
-        all_results = np.empty(
-            (num_shufs if num_shufs else 1, seq_len, one_hot_dim), dtype=seq.dtype
-        )
-
-    for i in range(num_shufs if num_shufs else 1):
-        # Shuffle the next indices
-        for t in range(len(chars)):
-            inds = np.arange(len(shuf_next_inds[t]))
-            inds[:-1] = rng.permutation(len(inds) - 1)  # Keep last index same
-            shuf_next_inds[t] = shuf_next_inds[t][inds]
-
-        counters = [0] * len(chars)
-
-        # Build the resulting array
-        ind = 0
-        result = np.empty_like(tokens)
-        result[0] = tokens[ind]
-        for j in range(1, len(tokens)):
-            t = tokens[ind]
-            ind = shuf_next_inds[t][counters[t]]
-            counters[t] += 1
-            result[j] = tokens[ind]
-
-        if type(seq) is str or type(seq) is np.str_:
-            all_results.append(_char_array_to_string(chars[result]))
-        else:
-            all_results[i] = _token2one_hot(chars[result])
-    return all_results if num_shufs else all_results[0]
-
-# modified dinuc_shuffle
-def dinuc_shuffle_seqs(seqs, num_shufs=None, rng=None):
-    """
-    Shuffle the sequences in `seqs` in the same way as `dinuc_shuffle_seq`.
-    If `num_shufs` is not specified, then the first dimension of N will not be
-    present (i.e. a single string will be returned, or an L x D array).
     Parameters
     ----------
-    seqs : np.ndarray
-        Array of sequences to shuffle
-    num_shufs : int, optional
-        Number of shuffles to create, by default None
-    rng : np.random.RandomState, optional
-        Random state to use for shuffling, by default None
+    seqs : SeqType
+    k : int
+        Size of k-lets to preserve frequencies of.
+    length_axis : Optional[int], optional
+        Needed for array input. Axis that corresponds to the length of sequences.
+    ohe_axes : Optional[int], optional
+        Needed for OHE input. Axis that corresponds to the one hot encoding, should be
+        the same size as the length of the alphabet.
+    seed : Optional[int], optional
+        Seed for shuffling.
+    alphabet : Optional[NucleotideAlphabet], optional
+        Alphabet, needed for OHE sequence input.
+    """
+    try:
+        import ushuffle
+    except ImportError:
+        raise ImportError("Please install ushuffle to use this function (pip install ushuffle))")
+    
+    _check_axes(seqs, length_axis, ohe_axis)
+
+    seqs = cast_seqs(seqs)
+
+    # only get here if seqs was str or list[str]
+    if length_axis is None:
+        length_axis = -1
+
+    if k == 1:
+        rng = np.random.default_rng(seed)
+        return rng.permuted(seqs, axis=length_axis)
+
+    if seed is not None:
+        import importlib
+
+        importlib.reload(ushuffle)
+        ushuffle.set_seed(seed)
+
+    seqs = seqs.copy()
+
+    if seqs.dtype == np.uint8:
+        assert ohe_axis is not None
+        seqs = cast(NDArray[np.uint8], seqs)
+        ohe = True
+        if alphabet is None:
+            raise ValueError("Need an alphabet to process OHE sequences.")
+        seqs = alphabet.decode_ohe(seqs, ohe_axis=ohe_axis)
+    else:
+        ohe = False
+
+    length = seqs.shape[length_axis]
+    with np.nditer(
+        seqs.view(f"S{length}").ravel(), op_flags=["readwrite"]  # type: ignore
+    ) as it:
+        for seq in it:
+            seq[...] = ushuffle.shuffle(seq.tobytes(), k)  # type: ignore
+
+    if ohe:
+        assert ohe_axis is not None
+        assert alphabet is not None
+        seqs = cast(NDArray[np.bytes_], seqs)
+        seqs = alphabet.ohe(seqs).swapaxes(-1, ohe_axis)
+
+    return seqs
+
+
+def bin_coverage(
+    coverage: NDArray[np.number],
+    bin_width: int,
+    length_axis: int,
+    normalize=False,
+) -> NDArray[np.number]:
+    """Bin coverage by summing over non-overlapping windows.
+
+    Parameters
+    ----------
+    coverage_array : NDArray
+    bin_width : int
+        Width of the windows to sum over. Must be an even divisor of the length
+        of the coverage array. If not, raises an error. The length dimension is
+        assumed to be the second dimension.
+    length_axis: int
+    normalize : bool, default False
+        Whether to normalize by the length of the bin.
+
     Returns
     -------
-    np.ndarray
-        Array of shuffled sequences
-    Note
-    -------
-    This is taken from DeepLIFT
+    binned_coverage : NDArray
     """
-    if not rng:
-        rng = np.random.RandomState(rng)
+    length = coverage.shape[length_axis]
+    if length % bin_width != 0:
+        raise ValueError("Bin width must evenly divide length.")
+    binned_coverage = np.add.reduceat(
+        coverage, np.arange(0, length, bin_width), axis=length_axis
+    )
+    if normalize:
+        binned_coverage /= bin_width
+    return binned_coverage
 
-    if type(seqs) is str or type(seqs) is np.str_:
-        seqs = [seqs]
 
-    all_results = []
-    for i in range(len(seqs)):
-        all_results.append(dinuc_shuffle_seq(seqs[i], num_shufs=num_shufs, rng=rng))
-    return np.array(all_results)
+def jitter(
+    *arrays: NDArray,
+    max_jitter: int,
+    length_axis: int,
+    jitter_axes: Union[int, Tuple[int, ...]],
+    seed: Optional[int] = None,
+):
+    """Randomly jitter data from arrays, using the same jitter across arrays.
+
+    Parameters
+    ----------
+    *arrays : NDArray
+        Arrays to be jittered. They must have the same sizez jitter and length
+        axes.
+    max_jitter : int
+        Maximum jitter amount.
+    length_axis : int
+    jitter_axes : Tuple[int, ...]
+        Each element along the jitter axes will be randomly jittered *independently*.
+        Thus, if jitter_axes = 0, then every slice of data along axis 0 would be
+        jittered independently. If jitter_axes = (0, 1), then each element along axes 0
+        and 1 would be randomly jittered independently.
+    seed : Optional[int], optional
+        Random seed, by default None
+
+    Returns
+    -------
+    arrays
+        Jittered arrays. Will have a new length equal to length - 2*max_jitter.
+    """
+    if isinstance(jitter_axes, int):
+        jitter_axes = (jitter_axes,)
+
+    destination_axes = list(range(-len(jitter_axes) - 1, 0))
+    arrays = [
+        np.moveaxis(a, [*jitter_axes, length_axis], destination_axes) for a in arrays
+    ]
+
+    jitter_axes_shape = arrays[0].shape[-len(destination_axes) : -1]
+    for arr in arrays:
+        if arr.shape[-len(destination_axes) : -1] != jitter_axes_shape:
+            raise ValueError("Got arrays with different sized jitter axes.")
+        if arr.shape[-1] - 2 * max_jitter <= 0:
+            raise ValueError("Jittered length is <= 0")
+
+    rng = np.random.default_rng(seed)
+    starts = rng.integers(0, max_jitter + 1, jitter_axes_shape)
+
+    sliced_arrs = []
+    for arr in arrays:
+        jittered_length = arr.shape[-1] - 2 * max_jitter
+        sliced = np.empty_like(arr)
+        gufunc_jitter_helper(arr, starts, max_jitter, sliced, axis=-1)  # type: ignore
+        sliced = sliced[..., :jittered_length]
+        sliced = np.moveaxis(sliced, destination_axes, [*jitter_axes, length_axis])
+        sliced_arrs.append(sliced)
+
+    return tuple(sliced_arrs)
+
+
+def random_seqs(
+    shape: Union[int, Tuple[int, ...]],
+    alphabet: NucleotideAlphabet,
+    seed: Optional[int] = None,
+):
+    """Generate random nucleotide sequences.
+
+    Parameters
+    ----------
+    shape : int, tuple[int]
+        Shape of sequences to generate
+    alphabet : NucleotideAlphabet
+        Alphabet to sample nucleotides from.
+    seed : int, optional
+        Random seed.
+
+    Returns
+    -------
+    ndarray
+        Randomly generated sequences.
+    """
+    rng = np.random.default_rng(seed)
+    return rng.choice(alphabet.array, size=shape)

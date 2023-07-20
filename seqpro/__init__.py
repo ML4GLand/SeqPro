@@ -1,36 +1,37 @@
-from ._utils import (
-    random_seq,
-    random_seqs 
-)
-from ._cleaners import (
-    remove_only_N_seqs, 
-    remove_N_seqs,
-    sanitize_seq, 
-    sanitize_seqs
-)
-from ._encoders import (
-    ascii_encode_seq,
-    ascii_encode_seqs,
-    ascii_decode_seq,
-    ascii_decode_seqs,
-    ohe_seq,
-    ohe_seqs,
-    decode_seq,
-    decode_seqs,
-)
-from ._modifiers import (
-    reverse_complement_seq,
-    reverse_complement_seqs,
-    shuffle_seq,
-    shuffle_seqs,
-    dinuc_shuffle_seq,
-    dinuc_shuffle_seqs
-)
-from ._analyzers import (
-    len_seqs,
-    gc_content_seq,
-    gc_content_seqs,
-    nucleotide_content_seq,
-    nucleotide_content_seqs,
-    count_kmers_seq
-)
+try:
+    import importlib.metadata as importlib_metadata
+except ModuleNotFoundError:
+    import importlib_metadata
+
+package_name = "seqpro"
+__version__ = importlib_metadata.version(package_name)
+
+from . import alphabets
+from ._analyzers import gc_content, length, nucleotide_content
+from ._cleaners import remove_N_seqs, remove_only_N_seqs, sanitize_seq, sanitize_seqs
+from ._encoders import decode_ohe, ohe, pad_seqs
+from ._modifiers import bin_coverage, jitter, k_shuffle, random_seqs, reverse_complement
+from ._utils import cast_seqs
+from .alphabets import AminoAlphabet, NucleotideAlphabet
+
+__all__ = [
+    "cast_seqs",
+    "bin_coverage",
+    "gc_content",
+    "length",
+    "nucleotide_content",
+    "remove_N_seqs",
+    "remove_only_N_seqs",
+    "sanitize_seq",
+    "sanitize_seqs",
+    "ohe",
+    "decode_ohe",
+    "pad_seqs",
+    "k_shuffle",
+    "reverse_complement",
+    "random_seqs",
+    "NucleotideAlphabet",
+    "AminoAlphabet",
+    "alphabets",
+    "jitter",
+]

@@ -8,8 +8,9 @@ def _find_distance(seq1, seq2) -> int:
             edits += 1
     return edits
 
+
 # analyzers?
-def edit_distance(seq1 : str, seq2 : str, dual : bool = False) -> int:
+def edit_distance(seq1: str, seq2: str, dual: bool = False) -> int:
     """
     Calculates the nucleotide edit distance between two sequences.
 
@@ -33,19 +34,98 @@ def edit_distance(seq1 : str, seq2 : str, dual : bool = False) -> int:
     b_edits = _find_distance(seq1, seq2[::-1]) if dual else len(seq1)
     return min(f_edits, b_edits)
 
+
 # protein sequence handling
 # vocabularies:
 DNA = ["A", "C", "G", "T"]
 RNA = ["A", "C", "G", "U"]
-AMINO_ACIDS = ["A", "R", "N", "D", "B", "C", "E", "Q", "Z", "G", "H",
-               "I", "L", "K", "M", "F", "P", "S", "T", "W", "Y", "V"]
-CODONS = ["AAA", "AAC", "AAG", "AAT", "ACA", "ACC", "ACG", "ACT", "AGA",
-          "AGC", "AGG", "AGT", "ATA", "ATC", "ATG", "ATT", "CAA", "CAC",
-          "CAG", "CAT", "CCA", "CCC", "CCG", "CCT", "CGA", "CGC", "CGG",
-          "CGT", "CTA", "CTC", "CTG", "CTT", "GAA", "GAC", "GAG", "GAT",
-          "GCA", "GCC", "GCG", "GCT", "GGA", "GGC", "GGG", "GGT", "GTA",
-          "GTC", "GTG", "GTT", "TAC", "TAT", "TCA", "TCC", "TCG", "TCT",
-          "TGC", "TGG", "TGT", "TTA", "TTC", "TTG", "TTT"]
+AMINO_ACIDS = [
+    "A",
+    "R",
+    "N",
+    "D",
+    "B",
+    "C",
+    "E",
+    "Q",
+    "Z",
+    "G",
+    "H",
+    "I",
+    "L",
+    "K",
+    "M",
+    "F",
+    "P",
+    "S",
+    "T",
+    "W",
+    "Y",
+    "V",
+]
+CODONS = [
+    "AAA",
+    "AAC",
+    "AAG",
+    "AAT",
+    "ACA",
+    "ACC",
+    "ACG",
+    "ACT",
+    "AGA",
+    "AGC",
+    "AGG",
+    "AGT",
+    "ATA",
+    "ATC",
+    "ATG",
+    "ATT",
+    "CAA",
+    "CAC",
+    "CAG",
+    "CAT",
+    "CCA",
+    "CCC",
+    "CCG",
+    "CCT",
+    "CGA",
+    "CGC",
+    "CGG",
+    "CGT",
+    "CTA",
+    "CTC",
+    "CTG",
+    "CTT",
+    "GAA",
+    "GAC",
+    "GAG",
+    "GAT",
+    "GCA",
+    "GCC",
+    "GCG",
+    "GCT",
+    "GGA",
+    "GGC",
+    "GGG",
+    "GGT",
+    "GTA",
+    "GTC",
+    "GTG",
+    "GTT",
+    "TAC",
+    "TAT",
+    "TCA",
+    "TCC",
+    "TCG",
+    "TCT",
+    "TGC",
+    "TGG",
+    "TGT",
+    "TTA",
+    "TTC",
+    "TTG",
+    "TTT",
+]
 STOP_CODONS = ["TAG", "TAA", "TGA"]
 
 # want to one-hot encode AA sequence and codons

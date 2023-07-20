@@ -1,4 +1,5 @@
 import numpy as np
+
 np.random.seed(13)
 
 
@@ -7,6 +8,7 @@ DNA = ["A", "C", "G", "T"]
 RNA = ["A", "C", "G", "U"]
 COMPLEMENT_DNA = {"A": "T", "C": "G", "G": "C", "T": "A"}
 COMPLEMENT_RNA = {"A": "U", "C": "G", "G": "C", "U": "A"}
+
 
 # exact concise
 def _get_vocab(vocab):
@@ -17,6 +19,7 @@ def _get_vocab(vocab):
     else:
         raise ValueError("Invalid vocab, only DNA or RNA are currently supported")
 
+
 # exact concise
 def _get_vocab_dict(vocab):
     """
@@ -25,6 +28,7 @@ def _get_vocab_dict(vocab):
     """
     return {l: i for i, l in enumerate(vocab)}
 
+
 # exact concise
 def _get_index_dict(vocab):
     """
@@ -32,19 +36,20 @@ def _get_index_dict(vocab):
     """
     return {i: l for i, l in enumerate(vocab)}
 
+
 # modified concise
 def _tokenize(seq, vocab="DNA", neutral_vocab=["N"]):
     """
     Convert sequence to integers based on a vocab
     Parameters
     ----------
-    seq: 
+    seq:
         sequence to encode
-    vocab: 
+    vocab:
         vocabulary to use
-    neutral_vocab: 
+    neutral_vocab:
         neutral vocabulary -> assign those values to -1
-    
+
     Returns
     -------
         List of length `len(seq)` with integers from `-1` to `len(vocab) - 1`
@@ -68,15 +73,17 @@ def _tokenize(seq, vocab="DNA", neutral_vocab=["N"]):
         for i in range(len(seq) // nchar)
     ]
 
+
 # my own
 def _sequencize(tvec, vocab="DNA", neutral_value=-1, neutral_char="N"):
     """
     Converts a token vector into a sequence of symbols of a vocab.
     """
-    vocab = _get_vocab(vocab) 
+    vocab = _get_vocab(vocab)
     index_dict = _get_index_dict(vocab)
     index_dict[neutral_value] = neutral_char
     return "".join([index_dict[i] for i in tvec])
+
 
 # modified concise
 def _token2one_hot(tvec, vocab="DNA", fill_value=None):
@@ -103,6 +110,7 @@ def _token2one_hot(tvec, vocab="DNA", fill_value=None):
         arr[:, tvec_range[tvec < 0]] = fill_value
     return arr.astype(np.int8) if fill_value is None else arr.astype(np.float16)
 
+
 # modified dinuc_shuffle
 def _one_hot2token(one_hot, neutral_value=-1, consensus=False):
     """
@@ -114,7 +122,7 @@ def _one_hot2token(one_hot, neutral_value=-1, consensus=False):
         L x D one-hot encoding
     neutral_value : int, optional
         Value to use for neutral values.
-    
+
     Returns
     -------
     np.array
@@ -123,9 +131,10 @@ def _one_hot2token(one_hot, neutral_value=-1, consensus=False):
     if consensus:
         return np.argmax(one_hot, axis=0)
     tokens = np.tile(neutral_value, one_hot.shape[1])  # Vector of all D
-    seq_inds, dim_inds = np.where(one_hot.transpose()==1)
+    seq_inds, dim_inds = np.where(one_hot.transpose() == 1)
     tokens[seq_inds] = dim_inds
     return tokens
+
 
 # pad and subset, exact concise
 def _pad(seq, max_seq_len, value="N", align="end"):
@@ -149,6 +158,7 @@ def _pad(seq, max_seq_len, value="N", align="end"):
 
     return value * n_left + seq + value * n_right
 
+
 # exact concise
 def _trim(seq, maxlen, align="end"):
     seq_len = len(seq)
@@ -166,13 +176,9 @@ def _trim(seq, maxlen, align="end"):
     else:
         raise ValueError("align can be of: end, start or center")
 
+
 # modified concise
-def _pad_sequences(
-    seqs, 
-    maxlen=None, 
-    align="end", 
-    value="N"
-):
+def _pad_sequences(seqs, maxlen=None, align="end", value="N"):
     """
     Pads sequences to the same length.
     Parameters
@@ -206,6 +212,7 @@ def _pad_sequences(
 
     if max_seq_len < maxlen:
         import warnings
+
         warnings.warn(
             f"Maximum sequence length ({max_seq_len}) is smaller than maxlen ({maxlen})."
         )
@@ -219,10 +226,15 @@ def _pad_sequences(
         raise ValueError("maxlen needs to be dividable by len(value)")
 
     padded_seqs = [
-        _trim(_pad(seq, max(max_seq_len, maxlen), value=value, align=align), maxlen, align=align)
-        for seq in seqs 
+        _trim(
+            _pad(seq, max(max_seq_len, maxlen), value=value, align=align),
+            maxlen,
+            align=align,
+        )
+        for seq in seqs
     ]
     return padded_seqs
+
 
 # my own
 def _is_overlapping(a, b):
@@ -231,6 +243,7 @@ def _is_overlapping(a, b):
         return True
     else:
         return False
+
 
 # my own
 def _merge_intervals(intervals):
@@ -249,6 +262,7 @@ def _merge_intervals(intervals):
             merged_list.append(intervals[i])
     return merged_list
 
+
 # my own
 def _hamming_distance(string1, string2):
     """Find hamming distance between two strings. Returns inf if they are different lengths"""
@@ -260,6 +274,7 @@ def _hamming_distance(string1, string2):
         if string1[i] != string2[i]:
             distance += 1
     return distance
+
 
 # my own
 def _collapse_pos(positions):
@@ -275,6 +290,7 @@ def _collapse_pos(positions):
     ranges.append((start, positions[-1] + 2))
     return ranges
 
+
 # exact dinuc_shuffle
 def _string_to_char_array(seq):
     """
@@ -283,6 +299,7 @@ def _string_to_char_array(seq):
     """
     return np.frombuffer(bytearray(seq, "utf8"), dtype=np.int8)
 
+
 # exact dinuc_shuffle
 def _char_array_to_string(arr):
     """
@@ -290,6 +307,7 @@ def _char_array_to_string(arr):
     e.g. [65, 67, 71, 84] becomes "ACGT".
     """
     return arr.tostring().decode("ascii")
+
 
 # exact dinuc_shuffle
 def _one_hot_to_tokens(one_hot):
@@ -303,6 +321,7 @@ def _one_hot_to_tokens(one_hot):
     seq_inds, dim_inds = np.where(one_hot)
     tokens[seq_inds] = dim_inds
     return tokens
+
 
 # exact dinuc_shuffle
 def _tokens_to_one_hot(tokens, one_hot_dim):

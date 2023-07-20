@@ -1,0 +1,11 @@
+name: seqpro
+channels:
+  - bioconda
+  - conda-forge
+  - no-defaults
+dependencies:
+  - matplotlib
+  - numba
+  - numpy
+  - cyushuffle
+  - xarray

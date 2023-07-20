@@ -1,6 +1,6 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
-setup(name = 'seqpro', packages = find_packages())
+setup(name="seqpro", packages=find_packages())
 
 with open("README.md", "r") as readme_file:
     readme = readme_file.read()
@@ -9,9 +9,9 @@ requirements = []
 
 setup(
     name="seqpro",
-    version="0.0.1",
+    version="0.1.1",
     author="Adam Klie",
-    author_email="aklie@eng.ucsd.edu",
+    author_email="aklie@.ucsd.edu",
     description="Sequence processing toolkit",
     long_description=readme,
     long_description_content_type="text/markdown",
