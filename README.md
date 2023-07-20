@@ -56,20 +56,8 @@ sp.gc_content(seqs)
 sp.nucleotide_content(seqs)
 ```
 
-# Requirements
-
-```bash
-python
-numpy
-numba
-```
-
 # More to come!
 
 ## Tutorials
 
 ### Preparing sequences for sequence-to-function models
-
-### Preparing features for MPRA activity prediction
-
-### Motif enrichment analysis with HOMER/DEM/cisTarget
