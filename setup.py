@@ -9,7 +9,7 @@ requirements = []
 
 setup(
     name="seqpro",
-    version="0.1.1",
+    version="0.1.3",
     author="Adam Klie",
     author_email="aklie@.ucsd.edu",
     description="Sequence processing toolkit",
