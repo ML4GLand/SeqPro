@@ -1,7 +1,6 @@
-from typing import List, Literal, Optional, Union, cast
+from typing import Literal, Optional, Union, cast
 
 import numpy as np
-import torch
 from numpy.typing import NDArray
 
 from ._numba import gufunc_char_idx, gufunc_pad_both, gufunc_pad_left
@@ -16,14 +15,16 @@ def pad_seqs(
     length: Optional[int] = None,
     length_axis: Optional[int] = None,
 ) -> NDArray[Union[np.bytes_, np.uint8]]:
-    """_summary_
+    """Pad (or truncate) sequences on either the left, right, or both sides.
 
     Parameters
     ----------
     seqs : Iterable[str]
     pad : Literal["left", "both", "right"]
         How to pad. If padding on both sides and an odd amount of padding is needed, 1
-        more pad value will be on the right side.
+        more pad value will be on the right side. Similarly for truncating, if an odd
+        amount length needs to be truncated, 1 more character will be truncated from the
+        right side.
     pad_val : str, optional
         Single character to pad sequences with. Needed for string input. Ignored for OHE
         sequences.
@@ -77,7 +78,14 @@ def pad_seqs(
         if length_diff == 0:
             return seqs
         elif length_diff > 0:  # longer than needed, truncate
-            seqs = array_slice(seqs, length_axis, 0, length)
+            if pad == "left":
+                seqs = array_slice(seqs, length_axis, -length)
+            elif pad == "both":
+                seqs = array_slice(
+                    seqs, length_axis, length_diff // 2, -length_diff // 2
+                )
+            else:
+                seqs = array_slice(seqs, length_axis, stop=length)
         else:  # shorter than needed, pad
             pad_arr_shape = (
                 *seqs.shape[:length_axis],

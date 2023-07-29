@@ -5,7 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-@nb.guvectorize(["(u1[:], u1[:])"], "(n)->(n)", target="parallel", nopython=True)
+@nb.guvectorize(["(u1[:], u1[:])"], "(n)->(n)", target="parallel", cache=True)
 def gufunc_pad_left(
     seq: NDArray[np.uint8], res: Optional[NDArray[np.uint8]] = None
 ) -> NDArray[np.uint8]:  # type: ignore
@@ -14,7 +14,7 @@ def gufunc_pad_left(
         res[(i + shift) % len(seq)] = seq[i]  # type: ignore
 
 
-@nb.guvectorize(["(u1[:], u1[:])"], "(n)->(n)", target="parallel", nopython=True)
+@nb.guvectorize(["(u1[:], u1[:])"], "(n)->(n)", target="parallel", cache=True)
 def gufunc_pad_both(
     seq: NDArray[np.uint8], res: Optional[NDArray[np.uint8]] = None
 ) -> NDArray[np.uint8]:  # type: ignore
@@ -23,7 +23,7 @@ def gufunc_pad_both(
         res[(i + shift) % len(seq)] = seq[i]  # type: ignore
 
 
-@nb.guvectorize(["(u1, u1[:], u1[:])"], "(),(n)->(n)", target="parallel", nopython=True)
+@nb.guvectorize(["(u1, u1[:], u1[:])"], "(),(n)->(n)", target="parallel", cache=True)
 def gufunc_ohe(
     char: Union[np.uint8, NDArray[np.uint8]],
     alphabet: NDArray[np.uint8],
@@ -33,7 +33,7 @@ def gufunc_ohe(
         res[i] = np.uint8(alphabet[i] == char)  # type: ignore
 
 
-@nb.guvectorize(["(u1[:], intp[:])"], "(n)->()", target="parallel", nopython=True)
+@nb.guvectorize(["(u1[:], intp[:])"], "(n)->()", target="parallel", cache=True)
 def gufunc_ohe_char_idx(
     seq: NDArray[np.uint8],
     res: Optional[NDArray[np.intp]] = None,
@@ -59,9 +59,7 @@ def gufunc_ohe_char_idx(
             res[0] = i  # type: ignore
 
 
-@nb.guvectorize(
-    ["(u1, u1[:], intp[:])"], "(),(n)->()", target="parallel", nopython=True
-)
+@nb.guvectorize(["(u1, u1[:], intp[:])"], "(),(n)->()", target="parallel", cache=True)
 def gufunc_char_idx(
     seq: NDArray[np.uint8],
     alphabet: NDArray[np.uint8],
@@ -77,7 +75,7 @@ def gufunc_char_idx(
     ["(u1[:], u1[:, :], u1[:], u1[:])"],
     "(k),(j,k),(j)->()",
     target="parallel",
-    nopython=True,
+    cache=True,
 )
 def gufunc_translate(
     seq: NDArray[np.uint8],
@@ -103,7 +101,7 @@ def gufunc_translate(
             res[0] = aminos_acids[i]  # type: ignore
 
 
-@nb.guvectorize("(n),(),()->(n)", nopython=True)
+@nb.guvectorize("(n),(),()->(n)", target="parallel", cache=True)
 def gufunc_jitter_helper(
     arr: NDArray,
     start: Union[int, NDArray[np.integer]],

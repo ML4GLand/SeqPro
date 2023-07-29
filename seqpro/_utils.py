@@ -3,8 +3,10 @@ from typing import List, Optional, TypeVar, Union, cast, overload
 import numpy as np
 from numpy.typing import NDArray
 
-StrSeqType = Union[str, List[str], NDArray[Union[np.str_, np.bytes_]]]
-SeqType = Union[str, List[str], NDArray[Union[np.str_, np.bytes_, np.uint8]]]
+StrSeqType = Union[str, List[str], NDArray[Union[np.str_, np.object_, np.bytes_]]]
+SeqType = Union[
+    str, List[str], NDArray[Union[np.str_, np.object_, np.bytes_, np.uint8]]
+]
 
 
 @overload
@@ -28,7 +30,7 @@ def cast_seqs(seqs: SeqType) -> NDArray[Union[np.bytes_, np.uint8]]:
 
     Parameters
     ----------
-    seqs : str, (nested) list[str], ndarray[str, bytes, uint8]
+    seqs : str, (nested) list[str], ndarray[str, object (Python strings), bytes, uint8]
 
     Returns
     -------
@@ -52,12 +54,14 @@ def _check_axes(
     """Raise errors if length_axis or ohe_axis is missing when they're needed. Pass
     False to corresponding axis to not check for it.
 
-    - Any ndarray => length axis required.
-    - Any OHE array => length and OHE axis required.
+    - ndarray with itemsize == 1 => length axis required.
+    - OHE array => length and OHE axis required.
     """
     # bytes or OHE
     if length_axis is None and isinstance(seqs, np.ndarray) and seqs.itemsize == 1:
-        raise ValueError("Need a length axis to process an ndarray.")
+        raise ValueError(
+            "Need a length axis to process an ndarray with itemsize == 1 (S1, u1)."
+        )
 
     # OHE
     if ohe_axis is None and isinstance(seqs, np.ndarray) and seqs.dtype == np.uint8:
@@ -76,7 +80,11 @@ DTYPE = TypeVar("DTYPE", bound=np.generic)
 
 
 def array_slice(
-    a: NDArray[DTYPE], axis: int, start: int, end: int, step=1
+    a: NDArray[DTYPE],
+    axis: int,
+    start: Optional[int] = None,
+    stop: Optional[int] = None,
+    step: Optional[int] = None,
 ) -> NDArray[DTYPE]:
     """Slice an array from a dynamic axis."""
-    return a[(slice(None),) * (axis % a.ndim) + (slice(start, end, step),)]
+    return a[(slice(None),) * (axis % a.ndim) + (slice(start, stop, step),)]

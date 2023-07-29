@@ -2,7 +2,7 @@ name: seqpro
 channels:
   - bioconda
   - conda-forge
-  - no-defaults
+  - nodefaults
 dependencies:
   - matplotlib
   - numba

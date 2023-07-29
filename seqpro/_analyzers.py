@@ -20,8 +20,8 @@ def length(seqs: Union[str, List[str]]) -> NDArray[np.integer]:
     np.array
         Array containing the length of each sequence.
     """
-    _seqs = cast_seqs(seqs)
-    return (_seqs != b"").sum(-1)
+    seqs = cast_seqs(seqs)
+    return (seqs != b"").sum(-1)
 
 
 def gc_content(

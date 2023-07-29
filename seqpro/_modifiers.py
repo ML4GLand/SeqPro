@@ -1,4 +1,5 @@
-from typing import Optional, Tuple, Union, cast
+from enum import Enum
+from typing import Literal, Optional, Tuple, Union, cast
 
 import numpy as np
 import ushuffle
@@ -120,8 +121,7 @@ def bin_coverage(
     coverage_array : NDArray
     bin_width : int
         Width of the windows to sum over. Must be an even divisor of the length
-        of the coverage array. If not, raises an error. The length dimension is
-        assumed to be the second dimension.
+        of the coverage array. If not, raises an error.
     length_axis: int
     normalize : bool, default False
         Whether to normalize by the length of the bin.
@@ -169,15 +169,15 @@ def jitter(
     Returns
     -------
     arrays
-        Jittered arrays. Will have a new length equal to length - 2*max_jitter.
+        Jittered arrays. Each will have a new length equal to length - 2*max_jitter.
     """
     if isinstance(jitter_axes, int):
         jitter_axes = (jitter_axes,)
 
     destination_axes = list(range(-len(jitter_axes) - 1, 0))
-    arrays = [
+    arrays = tuple(
         np.moveaxis(a, [*jitter_axes, length_axis], destination_axes) for a in arrays
-    ]
+    )
 
     jitter_axes_shape = arrays[0].shape[-len(destination_axes) : -1]
     for arr in arrays:
@@ -224,3 +224,47 @@ def random_seqs(
     """
     rng = np.random.default_rng(seed)
     return rng.choice(alphabet.array, size=shape)
+
+
+class NormalizationMethod(str, Enum):
+    CPM = "CPM"
+    CPKM = "CPKM"
+
+
+def normalize_coverage(
+    coverage: NDArray,
+    method: Union[Literal["CPM", "CPKM"], NormalizationMethod],
+    total_counts: Union[int, NDArray],
+    length_axis: int,
+):
+    """Normalize an array of coverage. Note that whether this corresponds to the
+    conventional definitions of CPM, RPKM, and FPKM depends on how the underlying
+    coverage was quantified. If the coverage is for reads, then CPKM = RPKM. If it is
+    for fragments, then CPKM = FPKM.
+
+    Parameters
+    ----------
+    coverage : NDArray
+        Array of coverage.
+    method : Union[Literal['CPM', 'CPKM'], NormalizationMethod]
+        Normalization method, either CPM (counts per million) or CPKM (counts per
+        kilobase per million).
+    total_counts : Union[int, NDArray]
+        The total number of reads or fragments from the experiment.
+    length_axis : int
+
+    Returns
+    -------
+    NDArray
+        Array of normalized coverage.
+    """
+    method = NormalizationMethod(method)
+
+    length = coverage.shape[length_axis]
+
+    if method is NormalizationMethod.CPM:
+        coverage = coverage * 1e9 / total_counts
+    elif method is NormalizationMethod.CPKM:
+        coverage = coverage * 1e9 / total_counts / length
+
+    return coverage
