@@ -109,10 +109,22 @@ def translate(
     length_dim: str,
     aa_length_dim="_aa_length",
 ) -> Union[xr.DataArray, xr.Dataset]:
+    """Translate DNA sequences to amino acid sequences.
+
+    Parameters
+    ----------
+    seqs : Union[xr.DataArray, xr.Dataset]
+    alphabet : AminoAlphabet
+    length_dim : str
+    aa_length_dim : str, optional
+        Amino acid length dimension, by default "_aa_length"
+    """
     k = alphabet.codon_array.shape[-1]
 
     if seqs.sizes[length_dim] % k != 0:
-        raise ValueError("Sequence length is not evenly divisible by codon length.")
+        raise ValueError(
+            f"Sequence length is not evenly divisible by codon length: {k}."
+        )
 
     def _translate(seqs):
         n = seqs.shape[-1] // k

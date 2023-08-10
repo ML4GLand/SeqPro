@@ -72,8 +72,8 @@ class NucleotideAlphabet:
         NDArray[np.uint8]
             Ohe hot encoded nucleotide sequences.
         """
-        seqs = cast_seqs(seqs)
-        return gufunc_ohe(seqs.view(np.uint8), self.array.view(np.uint8))
+        _seqs = cast_seqs(seqs)
+        return gufunc_ohe(_seqs.view(np.uint8), self.array.view(np.uint8))
 
     def decode_ohe(
         self,

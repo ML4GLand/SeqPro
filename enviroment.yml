@@ -6,6 +6,6 @@ channels:
 dependencies:
   - matplotlib
   - numba
-  - numpy
+  - numpy>=1.20
   - cyushuffle
-  - xarray
+  - xarray>=2023.4.0
