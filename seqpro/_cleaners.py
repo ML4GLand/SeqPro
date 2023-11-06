@@ -1,4 +1,8 @@
+from typing import Optional
+
 import numpy as np
+
+from ._utils import StrSeqType, _check_axes, cast_seqs
 
 
 def remove_N_seqs(seqs):
@@ -33,28 +37,16 @@ def remove_only_N_seqs(seqs):
     return [seq for seq in seqs if not all([x == "N" for x in seq])]
 
 
-def sanitize_seq(seq):
-    """Capitalizes and removes whitespace for single seq.
+def remove_whitespace(seqs: StrSeqType):
+    pass
+
+
+def sanitize(seqs: StrSeqType, length_axis: Optional[int] = None):
+    """Capitalize characters, remove whitespace, and coerce to fixed length.
 
     Parameters
     ----------
-    seq : str
-        Sequence to be sanitized.
-
-    Returns
-    -------
-    str
-        Sanitized sequence.
-    """
-    return seq.strip().upper()
-
-
-def sanitize_seqs(seqs):
-    """Capitalizes and removes whitespace for a set of sequences.
-
-    Parameters
-    ----------
-    seqs : list
+    seqs : str, list[str], NDArray[np.str_, np.object_, np.bytes_]
         List of sequences to be sanitized.
 
     Returns
@@ -62,4 +54,12 @@ def sanitize_seqs(seqs):
     numpy.ndarray
         Array of sanitized sequences.
     """
-    return np.array([seq.strip().upper() for seq in seqs])
+    _check_axes(seqs, length_axis, False)
+
+    seqs = cast_seqs(seqs)
+
+    (seqs != b"").sum(-1).max()
+    seqs = np.char.strip(seqs.view(f"S{seqs.shape[-1]}"))
+    seqs = np.char.upper(seqs.view("S1"))
+
+    return seqs
