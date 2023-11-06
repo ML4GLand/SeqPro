@@ -3,9 +3,6 @@ try:
 except ModuleNotFoundError:
     import importlib_metadata
 
-package_name = "seqpro"
-__version__ = importlib_metadata.version(package_name)
-
 from . import alphabets
 from ._analyzers import gc_content, length, nucleotide_content
 from ._cleaners import remove_N_seqs, remove_only_N_seqs, sanitize
@@ -13,6 +10,9 @@ from ._encoders import decode_ohe, ohe, pad_seqs
 from ._modifiers import bin_coverage, jitter, k_shuffle, random_seqs, reverse_complement
 from ._utils import cast_seqs
 from .alphabets import AA, DNA, RNA, AminoAlphabet, NucleotideAlphabet
+
+package_name = "seqpro"
+__version__ = importlib_metadata.version(package_name)
 
 __all__ = [
     "cast_seqs",
