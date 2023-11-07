@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "seqpro"
-version = "0.1.4"
+version = "0.0.0"
 description = "Sequence processing toolkit"
 authors = ["Adam Klie <aklie@ucsd.edu>"]
 
@@ -10,15 +10,19 @@ numba = "^0.57.0"
 numpy = "~1.23.5"
 cython = "^0.29.35"
 matplotlib = {version = "^3.6.2", extras = ["dev"]}
+pytest-cases = "^3.8.0"
 
 [tool.poetry.extras]
 dev = ["matplotlib"]
 
 [tool.poetry.dev-dependencies]
 
+[tool.poetry-dynamic-versioning]
+enable = true
+
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
+build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.isort]
 profile = "black"

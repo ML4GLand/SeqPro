@@ -20,8 +20,8 @@ def length(seqs: Union[str, List[str]]) -> NDArray[np.integer]:
     np.array
         Array containing the length of each sequence.
     """
-    seqs = cast_seqs(seqs)
-    return (seqs != b"").sum(-1)
+    _seqs = cast_seqs(seqs)
+    return (_seqs != b"").sum(-1)
 
 
 def gc_content(
@@ -56,7 +56,7 @@ def gc_content(
     seqs = cast_seqs(seqs)
 
     if length_axis is None:  # length axis after casting strings
-        length_axis = -1
+        length_axis = seqs.ndim - 1
 
     if seqs.dtype == np.uint8:  # OHE
         if alphabet is None:
@@ -84,7 +84,7 @@ def nucleotide_content(
     normalize=True,
     length_axis: Optional[int] = None,
     alphabet: Optional[NucleotideAlphabet] = None,
-) -> NDArray[Union[np.integer, np.float64]]:
+) -> NDArray[Union[np.integer, np.floating]]:
     """Compute the number or proportion of each nucleotide.
 
     Parameters
@@ -106,7 +106,7 @@ def nucleotide_content(
     seqs = cast_seqs(seqs)
 
     if length_axis is None:
-        length_axis = -1
+        length_axis = seqs.ndim - 1
 
     if seqs.dtype == np.uint8:  # OHE
         nuc_content = cast(NDArray[np.integer], seqs.sum(length_axis))
@@ -142,7 +142,8 @@ def count_kmers_seq(seq: str, k: int) -> dict:
     kmers : dict
         k-mers and their counts expressed in a dictionary.
     """
-    assert len(seq) >= k, "Length of seq must be greater than that of k."
+    if len(seq) < k:
+        raise ValueError("Length of seq must be >= k.")
 
     _seq = np.frombuffer(seq.encode("ascii"), "S1")
     kmers = np.lib.stride_tricks.sliding_window_view(_seq, k).view(f"S{k}")

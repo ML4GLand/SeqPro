@@ -70,7 +70,8 @@ class NucleotideAlphabet:
         Returns
         -------
         NDArray[np.uint8]
-            Ohe hot encoded nucleotide sequences.
+            Ohe hot encoded nucleotide sequences. The last axis is the one hot encoding
+            and the second to last axis is the length of the sequence.
         """
         _seqs = cast_seqs(seqs)
         return gufunc_ohe(_seqs.view(np.uint8), self.array.view(np.uint8))

@@ -1,8 +1,3 @@
-try:
-    import importlib.metadata as importlib_metadata
-except ModuleNotFoundError:
-    import importlib_metadata
-
 from . import alphabets
 from ._analyzers import gc_content, length, nucleotide_content
 from ._cleaners import remove_N_seqs, remove_only_N_seqs, sanitize
@@ -11,8 +6,7 @@ from ._modifiers import bin_coverage, jitter, k_shuffle, random_seqs, reverse_co
 from ._utils import cast_seqs
 from .alphabets import AA, DNA, RNA, AminoAlphabet, NucleotideAlphabet
 
-package_name = "seqpro"
-__version__ = importlib_metadata.version(package_name)
+__version__ = "0.0.0"
 
 __all__ = [
     "cast_seqs",
