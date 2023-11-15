@@ -93,7 +93,7 @@ def gufunc_translate(
         All unique k-mer codons as an (n, k) array.
     aminos_acids : NDArray[np.uint8]
         All amino acids corresponding to each codon, in matching order.
-    res : Optional[NDArray[np.uint8]], optional
+    res : NDArray[np.uint8], optional
         Array to save the result in, by default None
     """
     for i in nb.prange(len(codons)):

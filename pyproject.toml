@@ -2,7 +2,7 @@
 name = "seqpro"
 version = "0.0.0"
 description = "Sequence processing toolkit"
-authors = ["Adam Klie <aklie@ucsd.edu>"]
+authors = ["Adam Klie <aklie@ucsd.edu>", "David Laub <dlaub@ucsd.edu>"]
 
 [tool.poetry.dependencies]
 python = "^3.8"

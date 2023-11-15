@@ -73,7 +73,7 @@ def k_shuffle(
 
     # only get here if seqs was str or list[str]
     if length_axis is None:
-        length_axis = -1
+        length_axis = seqs.ndim - 1
 
     if k == 1:
         rng = np.random.default_rng(seed)
@@ -164,9 +164,9 @@ def jitter(
         Maximum jitter amount.
     length_axis : int
     jitter_axes : Tuple[int, ...]
-        Each element along the jitter axes will be randomly jittered *independently*.
+        Each slice along the jitter axes will be randomly jittered *independently*.
         Thus, if jitter_axes = 0, then every slice of data along axis 0 would be
-        jittered independently. If jitter_axes = (0, 1), then each element along axes 0
+        jittered independently. If jitter_axes = (0, 1), then each slice along axes 0
         and 1 would be randomly jittered independently.
     seed : Optional[int], optional
         Random seed, by default None

@@ -115,9 +115,9 @@ class NucleotideAlphabet:
         ----------
         byte_arr : ndarray[bytes]
         """
-        # NOTE: a vectorized implementation using np.unique is NOT faster even for
-        # longer alphabets like IUPAC DNA/RNA. Another micro-optimization to try would
-        # be using vectorized bit manipulations.
+        # * a vectorized implementation using np.unique or np.char.translate is NOT
+        # * faster even for longer alphabets like IUPAC DNA/RNA. Another optimization to
+        # * try would be using vectorized bit manipulations.
         out = byte_arr.copy()
         for nuc, comp in self.complement_map_bytes.items():
             out[byte_arr == nuc] = comp

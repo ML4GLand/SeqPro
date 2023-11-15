@@ -57,6 +57,8 @@ def gc_content(
 
     if length_axis is None:  # length axis after casting strings
         length_axis = seqs.ndim - 1
+    elif length_axis < 0:
+        length_axis = seqs.ndim + length_axis
 
     if seqs.dtype == np.uint8:  # OHE
         if alphabet is None:
@@ -107,6 +109,8 @@ def nucleotide_content(
 
     if length_axis is None:
         length_axis = seqs.ndim - 1
+    elif length_axis < 0:
+        length_axis = seqs.ndim + length_axis
 
     if seqs.dtype == np.uint8:  # OHE
         nuc_content = cast(NDArray[np.integer], seqs.sum(length_axis))

@@ -49,7 +49,7 @@ def pad_seqs(
     seqs = cast_seqs(seqs)
 
     if length_axis is None:
-        length_axis = -1
+        length_axis = seqs.ndim - 1
 
     if string_input:
         if pad_value is None:
