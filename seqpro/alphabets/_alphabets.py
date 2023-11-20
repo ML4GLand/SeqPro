@@ -178,6 +178,12 @@ class NucleotideAlphabet:
 
 
 class AminoAlphabet:
+    codons: List[str]
+    amino_acids: List[str]
+    codon_array: NDArray[np.bytes_]
+    aa_array: NDArray[np.bytes_]
+    codon_to_aa: Dict[str, str]
+
     def __init__(self, codons: List[str], amino_acids: List[str]) -> None:
         """Construct an alphabet of amino acids and their mappings to codons.
 
@@ -214,6 +220,20 @@ class AminoAlphabet:
     def translate(
         self, seqs: StrSeqType, length_axis: Optional[int] = None
     ) -> NDArray[np.bytes_]:
+        """Translate nucleotide sequences to amino acids.
+
+        Parameters
+        ----------
+        seqs : StrSeqType
+            Nucleotide sequences
+        length_axis : Optional[int], optional
+
+        Returns
+        -------
+        NDArray[np.bytes_]
+            Amino acid sequences.
+        """
+        # TODO this doesn't respect start and stop codons
         _check_axes(seqs, length_axis, False)
 
         seqs = cast_seqs(seqs)
@@ -247,3 +267,51 @@ class AminoAlphabet:
             self.aa_array.view(np.uint8),
             axes=[codon_axis, (-2, -1), (-1), ()],  # type: ignore
         ).view("S1")
+
+    def ohe(self, seqs: StrSeqType) -> NDArray[np.uint8]:
+        """One hot encode an amino acid sequence.
+
+        Parameters
+        ----------
+        seqs : str, list[str], ndarray[str, bytes]
+
+        Returns
+        -------
+        NDArray[np.uint8]
+            Ohe hot encoded amino acid sequences. The last axis is the one hot encoding
+            and the second to last axis is the length of the sequence.
+        """
+        _seqs = cast_seqs(seqs)
+        return gufunc_ohe(_seqs.view(np.uint8), self.aa_array.view(np.uint8))
+
+    def decode_ohe(
+        self,
+        seqs: NDArray[np.uint8],
+        ohe_axis: int,
+        unknown_char: str = "N",
+    ) -> NDArray[np.bytes_]:
+        """Convert an OHE array to an S1 byte array.
+
+        Parameters
+        ----------
+        seqs : NDArray[np.uint8]
+        ohe_axis : int
+        unknown_char : str, optional
+            Single character to use for unknown values, by default "N"
+
+        Returns
+        -------
+        NDArray[np.bytes_]
+        """
+        idx = gufunc_ohe_char_idx(seqs, axis=ohe_axis)  # type: ignore
+
+        if ohe_axis < 0:
+            ohe_axis_idx = seqs.ndim + ohe_axis
+        else:
+            ohe_axis_idx = ohe_axis
+
+        shape = *seqs.shape[:ohe_axis_idx], *seqs.shape[ohe_axis_idx + 1 :]
+
+        _alphabet = np.concatenate([self.aa_array, [unknown_char.encode("ascii")]])
+
+        return _alphabet[idx].reshape(shape)
