@@ -8,8 +8,8 @@ license = "MIT"
 [tool.poetry.dependencies]
 python = "^3.8"
 numba = "^0.57.0"
-numpy = "~1.23.5"
-cython = "^0.29.35"
+numpy = "^1.23.5"
+cython = "^3.0"
 matplotlib = {version = "^3.6.2", extras = ["dev"]}
 ushuffle = "^1.1.2"
 
