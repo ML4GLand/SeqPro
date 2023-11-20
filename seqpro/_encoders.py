@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 
 from ._numba import gufunc_char_idx, gufunc_pad_both, gufunc_pad_left
 from ._utils import SeqType, StrSeqType, _check_axes, array_slice, cast_seqs
-from .alphabets._alphabets import NucleotideAlphabet
+from .alphabets._alphabets import AminoAlphabet, NucleotideAlphabet
 
 
 def pad_seqs(
@@ -103,7 +103,9 @@ def pad_seqs(
     return seqs
 
 
-def ohe(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.uint8]:
+def ohe(
+    seqs: StrSeqType, alphabet: Union[NucleotideAlphabet, AminoAlphabet]
+) -> NDArray[np.uint8]:
     """One hot encode a nucleotide sequence.
 
     Parameters
@@ -122,7 +124,7 @@ def ohe(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.uint8]:
 def decode_ohe(
     seqs: NDArray[np.uint8],
     ohe_axis: int,
-    alphabet: NucleotideAlphabet,
+    alphabet: Union[NucleotideAlphabet, AminoAlphabet],
     unknown_char: str = "N",
 ) -> NDArray[np.bytes_]:
     """Convert an OHE array to an S1 byte array.

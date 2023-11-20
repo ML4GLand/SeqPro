@@ -3,6 +3,7 @@ name = "seqpro"
 version = "0.0.0"
 description = "Sequence processing toolkit"
 authors = ["Adam Klie <aklie@ucsd.edu>", "David Laub <dlaub@ucsd.edu>"]
+license = "MIT"
 
 [tool.poetry.dependencies]
 python = "^3.8"
@@ -10,12 +11,13 @@ numba = "^0.57.0"
 numpy = "~1.23.5"
 cython = "^0.29.35"
 matplotlib = {version = "^3.6.2", extras = ["dev"]}
-pytest-cases = "^3.8.0"
+ushuffle = "^1.1.2"
 
 [tool.poetry.extras]
 dev = ["matplotlib"]
 
 [tool.poetry.dev-dependencies]
+pytest-cases = "^3.8.0"
 
 [tool.poetry-dynamic-versioning]
 enable = true
