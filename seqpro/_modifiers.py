@@ -1,10 +1,9 @@
 from enum import Enum
-from typing import Literal, Optional, Tuple, Union, cast
+from typing import List, Literal, Optional, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
-from ._numba import gufunc_jitter_helper
 from ._utils import SeqType, _check_axes, cast_seqs
 from .alphabets._alphabets import NucleotideAlphabet
 
@@ -99,7 +98,8 @@ def k_shuffle(
 
     length = seqs.shape[length_axis]
     with np.nditer(
-        seqs.view(f"S{length}").ravel(), op_flags=["readwrite"]  # type: ignore
+        seqs.view(f"S{length}").ravel(),
+        op_flags=["readwrite"],  # type: ignore
     ) as it:
         for seq in it:
             seq[...] = ushuffle.shuffle(seq.tobytes(), k)  # type: ignore
@@ -158,7 +158,7 @@ def jitter(
     Parameters
     ----------
     *arrays : NDArray
-        Arrays to be jittered. They must have the same sizez jitter and length
+        Arrays to be jittered. They must have the same sized jitter and length
         axes.
     max_jitter : int
         Maximum jitter amount.
@@ -175,35 +175,109 @@ def jitter(
     -------
     arrays
         Jittered arrays. Each will have a new length equal to length - 2*max_jitter.
+
+    Raises
+    ------
+    ValueError
+        If any arrays have insufficient length to be jittered.
     """
     if isinstance(jitter_axes, int):
         jitter_axes = (jitter_axes,)
 
-    destination_axes = list(range(-len(jitter_axes) - 1, 0))
-    arrays = tuple(
-        np.moveaxis(a, [*jitter_axes, length_axis], destination_axes) for a in arrays
+    # move jitter axes and length axis to back
+    arrays, destination_axes = _align_axes(*arrays, axes=(*jitter_axes, length_axis))
+    short_arrays = []
+    for i, arr in enumerate(arrays):
+        if arr.shape[-1] - 2 * max_jitter <= 0:
+            short_arrays.append(i)
+    if short_arrays:
+        raise ValueError(
+            f"Arrays {short_arrays} have insufficient length to be jittered with max_jitter={max_jitter}."
+        )
+
+    jittered_length = arrays[0].shape[-1] - 2 * max_jitter
+    jitter_axes_shape = arrays[0].shape[-len(jitter_axes) : -1]
+    rng = np.random.default_rng(seed)
+    starts = rng.integers(
+        0, arrays[0].shape[-1] - jittered_length + 1, jitter_axes_shape
     )
 
-    jitter_axes_shape = arrays[0].shape[-len(destination_axes) : -1]
+    sliced_arrs: List[NDArray] = []
     for arr in arrays:
-        if arr.shape[-len(destination_axes) : -1] != jitter_axes_shape:
-            raise ValueError("Got arrays with different sized jitter axes.")
-        if arr.shape[-1] - 2 * max_jitter <= 0:
-            raise ValueError("Jittered length is <= 0")
-
-    rng = np.random.default_rng(seed)
-    starts = rng.integers(0, max_jitter + 1, jitter_axes_shape)
-
-    sliced_arrs = []
-    for arr in arrays:
-        jittered_length = arr.shape[-1] - 2 * max_jitter
-        sliced = np.empty_like(arr)
-        gufunc_jitter_helper(arr, starts, max_jitter, sliced, axis=-1)  # type: ignore
-        sliced = sliced[..., :jittered_length]
+        sliced = _slice_kmers(arr, starts, jittered_length)
         sliced = np.moveaxis(sliced, destination_axes, [*jitter_axes, length_axis])
         sliced_arrs.append(sliced)
 
     return tuple(sliced_arrs)
+
+
+def _align_axes(*arrays: NDArray, axes: Union[int, Tuple[int, ...]]):
+    """Align axes of arrays, moving them to the back while preserving order.
+
+    Parameters
+    ----------
+    *arrays : NDArray
+        Arrays to align axes of.
+    axes : Union[int, Tuple[int, ...]]
+        Axes to align.
+
+    Returns
+    -------
+    Tuple[NDArray]
+        Aligned arrays.
+    Tuple[int]
+        Destination axes.
+
+    Raises
+    ------
+    ValueError
+        If axes cannot be aligned because they have different sizes.
+    """
+    if isinstance(axes, int):
+        source_axes = (axes,)
+    else:
+        source_axes = axes
+
+    destination_axes = tuple(range(-len(source_axes), 0))
+    arrays = tuple(np.moveaxis(a, source_axes, destination_axes) for a in arrays)
+
+    first_axes_shape = arrays[0].shape[-len(destination_axes) : -1]
+    for arr in arrays:
+        if arr.shape[-len(destination_axes) : -1] != first_axes_shape:
+            raise ValueError("Can't align axes with different sizes.")
+
+    return arrays, destination_axes
+
+
+def _slice_kmers(array: NDArray, starts: NDArray, k: int):
+    """Slice an array into k-mers, assuming starts aligns with final axes of array and length is the final axis.
+
+    Parameters
+    ----------
+    array : NDArray
+        Array to slice.
+    starts : NDArray
+        Start indices of k-mers.
+    k : int
+        Size of k-mers.
+
+    Returns
+    -------
+    NDArray
+        Sliced array.
+    """
+    n_axes_sliced = starts.ndim
+    n_axes_not_sliced = array.ndim - n_axes_sliced - 1  # - 1 for length axis
+    idx: List[Union[slice, NDArray]] = [slice(None)] * n_axes_not_sliced
+    for i, size in enumerate(array.shape[-starts.ndim - 1 : -1]):
+        shape = np.ones(starts.ndim, dtype=np.uint32)
+        shape[i] = size
+        idx.append(np.arange(size, dtype=np.intp).reshape(shape))
+    idx.append(starts)
+
+    windows = np.lib.stride_tricks.sliding_window_view(array, k, axis=-1)
+    sliced = windows[tuple(idx)]
+    return sliced
 
 
 def random_seqs(

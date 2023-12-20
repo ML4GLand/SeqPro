@@ -99,14 +99,3 @@ def gufunc_translate(
     for i in nb.prange(len(codons)):
         if (seq == codons[i]).all():
             res[0] = aminos_acids[i]  # type: ignore
-
-
-@nb.guvectorize("(n),(),()->(n)", target="parallel", cache=True)
-def gufunc_jitter_helper(
-    arr: NDArray,
-    start: Union[int, NDArray[np.integer]],
-    max_jitter: Union[int, NDArray[np.integer]],
-    res: NDArray,
-):
-    new_length = len(arr) - 2 * max_jitter
-    res[:new_length] = arr[start : start + new_length]

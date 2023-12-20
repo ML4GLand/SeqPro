@@ -1,0 +1,93 @@
+import numpy as np
+
+import seqpro as sp
+from seqpro._modifiers import _align_axes, _slice_kmers
+
+
+def test_align_axes():
+    arr1 = np.random.randint(0, 5, (3, 2, 7))
+    arr2 = np.random.randint(0, 5, (3, 2, 4, 7))
+    arr3 = np.random.randint(0, 5, (3, 2, 5, 6, 7))
+
+    aligned, destination_axes = _align_axes(arr1, arr2, arr3, axes=(0, 1, -1))
+
+    assert aligned[0].shape == (3, 2, 7)
+    assert aligned[1].shape == (4, 3, 2, 7)
+    assert aligned[2].shape == (5, 6, 3, 2, 7)
+    assert destination_axes == (-3, -2, -1)
+
+
+def naive_slice_kmers(arr, starts, k):
+    """Slice kmers from an array of sequences.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Array of sequences.
+    starts : np.ndarray
+        Array of starting indices for each sequence.
+    k : int
+        Length of each kmer.
+
+    Returns
+    -------
+    np.ndarray
+        Array of kmers.
+    """
+    kmers = np.empty(arr.shape[:-1] + (k,), dtype=arr.dtype)
+    for i, j in np.ndindex(starts.shape):
+        kmers[..., i, j, :] = arr[..., i, j, starts[i, j] : starts[i, j] + k]
+    return kmers
+
+
+def test_slice_kmers():
+    rng = np.random.default_rng(0)
+    arr1 = sp.random_seqs((3, 2, 7), sp.DNA)
+    arr2 = rng.integers(0, 5, (4, 3, 2, 7))
+    arr3 = rng.uniform(0, 5, (5, 6, 3, 2, 7)).astype(np.float16)
+
+    starts = np.array(
+        [
+            [0, 1],
+            [2, 1],
+            [1, 0],
+        ]
+    )
+
+    actual_sliced_arr1 = _slice_kmers(arr1, starts, 5)
+    actual_sliced_arr2 = _slice_kmers(arr2, starts, 5)
+    actual_sliced_arr3 = _slice_kmers(arr3, starts, 5)
+
+    desired_sliced_arr1 = naive_slice_kmers(arr1, starts, 5)
+    desired_sliced_arr2 = naive_slice_kmers(arr2, starts, 5)
+    desired_sliced_arr3 = naive_slice_kmers(arr3, starts, 5)
+
+    np.testing.assert_equal(actual_sliced_arr1, desired_sliced_arr1)
+    np.testing.assert_equal(actual_sliced_arr2, desired_sliced_arr2)
+    np.testing.assert_equal(actual_sliced_arr3, desired_sliced_arr3)
+
+
+def test_jitter():
+    rng = np.random.default_rng(0)
+    arr1 = sp.random_seqs((3, 2, 7), sp.DNA)
+    arr2 = rng.integers(0, 5, (3, 2, 4, 7))
+    arr3 = rng.uniform(0, 5, (3, 2, 5, 6, 7)).astype(np.float16)
+
+    max_jitter = 1
+    jitter_axes = (0, 1)
+    length_axis = -1
+    seed = 0
+
+    jittered = sp.jitter(
+        arr1,
+        arr2,
+        arr3,
+        max_jitter=max_jitter,
+        length_axis=length_axis,
+        jitter_axes=jitter_axes,
+        seed=seed,
+    )
+
+    assert jittered[0].shape == (3, 2, 5)
+    assert jittered[1].shape == (3, 2, 4, 5)
+    assert jittered[2].shape == (3, 2, 5, 6, 5)
