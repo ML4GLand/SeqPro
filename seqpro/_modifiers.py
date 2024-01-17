@@ -250,7 +250,7 @@ def _align_axes(*arrays: NDArray, axes: Union[int, Tuple[int, ...]]):
 
 
 def _slice_kmers(array: NDArray, starts: NDArray, k: int):
-    """Slice an array into k-mers, assuming starts aligns with final axes of array and length is the final axis.
+    """Get a view of an array sliced into k-mers, assuming starts align with the penultimate axes and length is the final axis.
 
     Parameters
     ----------
