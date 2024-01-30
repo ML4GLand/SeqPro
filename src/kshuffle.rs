@@ -2,6 +2,7 @@ use rand::{seq::SliceRandom, Rng, SeedableRng};
 use std::collections::HashMap;
 use xxhash_rust::xxh3::Xxh3Builder;
 
+use indextree::Arena;
 use ndarray::prelude::*;
 use rand::rngs::SmallRng;
 use anyhow::{bail, Result};
@@ -33,7 +34,7 @@ struct HEntry {
 }
 
 fn kshuffle(
-    arr: &ArrayView1<u8>,
+    arr: ArrayView1<u8>,
     k: usize,
     seed: Option<u64>,
 ) -> Result<Array1<u8>> {
@@ -70,6 +71,7 @@ fn kshuffle(
 
     let root = arr.slice(s![-(k as isize)..]).to_vec();
     let n_vertices = htable.len();
+    let tree = Arena::<Vertex>::with_capacity(n_vertices);
     let mut vertices = vec![
         Vertex {
             indices: vec![],
@@ -118,6 +120,7 @@ fn kshuffle(
     let root_vertex = &mut vertices[root_idx];
     root_vertex.intree = true;
 
+    // TODO: doesn't compile due to multiple mutable borrows
     for v in &mut vertices {
         let mut u = v;
         while !u.intree {
@@ -131,6 +134,7 @@ fn kshuffle(
         }
     }
     
+    // TODO: doesn't compile due to multiple mutable borrows
     for (i, v) in vertices.iter_mut().enumerate() {
         if i != root_idx {
             j = v.indices[v.n_indices - 1];
@@ -163,7 +167,7 @@ fn kshuffle(
 mod test {
     use super::*;
 
-    fn kmer_frequencies(seq: &[u8], k: usize) -> HashMap<&[u8], u32> {
+    fn kmer_frequencies(seq: Vec<u8>, k: usize) -> HashMap<&[u8], u32> {
         let mut freqs = HashMap::new();
 
         for kmer in seq.windows(k) {
@@ -179,9 +183,9 @@ mod test {
         let k = 2;
         let seq = Array1::from(vec![b'A', b'C', b'G', b'T', b'A', b'C', b'G', b'T']);
 
-        let freqs = kmer_frequencies(seq.as_slice().unwrap(), k);
-        let shuffled = kshuffle(seq, k, Some(0)).unwrap();
-        let shuffled_freqs = kmer_frequencies(shuffled.as_slice().unwrap(), k);
+        let freqs = kmer_frequencies(seq.to_vec(), k);
+        let shuffled = kshuffle(seq.view(), k, Some(0)).unwrap();
+        let shuffled_freqs = kmer_frequencies(shuffled.to_vec(), k);
 
         assert_eq!(freqs, shuffled_freqs);
     }

@@ -10,6 +10,7 @@ name = "seqpro"
 
 [dependencies]
 anyhow = "1.0.79"
+indextree = "4.6.0"
 ndarray = "0.15.6"
 numpy = "0.20.0"
 rand = { version = "0.8.5", features = ["small_rng"] }
