@@ -6,11 +6,11 @@ authors = ["Adam Klie <aklie@ucsd.edu>", "David Laub <dlaub@ucsd.edu>"]
 license = "MIT"
 
 [tool.poetry.dependencies]
-python = "^3.8"
-numba = "^0.57.0"
-numpy = "^1.23.5"
+python = "^3.9"
+numba = "^0.58.1"
+numpy = "^1.26.3"
 matplotlib = {version = "^3.6.2", extras = ["dev"]}
-ushuffle = "^1.1.2"
+ushuffle = {git = "https://github.com/d-laub/ushuffle", branch = "cython-build-dep"}
 
 [tool.poetry.extras]
 dev = ["matplotlib"]
