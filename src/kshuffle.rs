@@ -1,6 +1,6 @@
-use rayon::prelude::*;
 use derive_builder::Builder;
 use rand::{seq::SliceRandom, Rng, SeedableRng};
+use rayon::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use xxhash_rust::xxh3::Xxh3Builder;
@@ -42,14 +42,14 @@ pub fn k_shuffle<D: Dimension>(
 ) -> Array<u8, D> {
     let mut out = unsafe { Array::uninit(seqs.raw_dim()).assume_init() };
 
-    let results = out.rows_mut()
+    let results = out
+        .rows_mut()
         .into_iter()
         .zip(seqs.rows())
         .par_bridge()
-        .map(|(out_row, row)| {
-            k_shuffle1(row, k, seed, out_row)
-        }).collect::<Vec<_>>();
-    
+        .map(|(out_row, row)| k_shuffle1(row, k, seed, out_row))
+        .collect::<Vec<_>>();
+
     for result in results {
         result.expect("k_shuffle error");
     }
@@ -115,7 +115,7 @@ fn k_shuffle1(
             vertices[hentry.i_vertices] =
                 v.i_sequence(hentry.i_sequence).n_indices(n_indices).into();
         } else {
-            vertices[hentry.i_vertices] = v.i_sequence(hentry.i_sequence).into();
+            vertices[hentry.i_vertices] = v.i_sequence(hentry.i_sequence).n_indices(0).into();
         }
     }
 
@@ -142,11 +142,13 @@ fn k_shuffle1(
     {
         let eu = htable.get(&kmer1.to_vec()).unwrap();
         let ev = htable.get(&kmer2.to_vec()).unwrap();
-        let mut u = vertices[eu.i_vertices].borrow_mut();
 
-        let i_indices = u.i_indices;
-        u.indices[i_indices] = ev.i_vertices;
-        u.i_indices += 1;
+        let mut u = vertices[eu.i_vertices].borrow_mut();
+        if u.n_indices > 0 {
+            let i_indices = u.i_indices;
+            u.indices[i_indices] = ev.i_vertices;
+            u.i_indices += 1;
+        }
     }
 
     // Wilson algorithm for random arborescence
@@ -192,7 +194,7 @@ fn k_shuffle1(
     }
 
     // walk the graph
-    let mut out: Vec<u8> = vec![0; l];
+    let out = out.as_slice_mut().unwrap();
     out[..k - 1].clone_from_slice(arr.slice(s![..k - 1]).as_slice().unwrap());
     let mut i = k - 1;
     let mut u_idx = 0;
@@ -246,10 +248,10 @@ mod test {
         let seq = ArrayView1::from(b"AATAT");
 
         let freqs = kmer_frequencies(seq.as_slice().unwrap(), k);
-        let mut shuffled = unsafe { Array1::<u8>::uninit(seq.len()).assume_init() };
+        let mut shuffled = unsafe { Array::uninit(seq.len()).assume_init() };
         let res = k_shuffle1(seq.view(), k, Some(1), shuffled.view_mut());
         assert!(res.is_ok());
-        
+
         let shuffled_freqs = kmer_frequencies(shuffled.as_slice().unwrap(), k);
 
         println!("{:?}", shuffled);

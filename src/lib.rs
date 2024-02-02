@@ -15,8 +15,8 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
 /// 
 /// Parameters
 /// ----------
-/// seqs : numpy.ndarray of u8
-///     Sequences to shuffle. Array must be contiguous with the last dimension
+/// seqs : NDArray[uint8]
+///    Sequences to shuffle. Array must be contiguous with the last dimension
 ///    being the sequence length.
 /// k : int
 ///    Length of k-mers to preserve frequencies of.
