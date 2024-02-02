@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 
 #[pymodule]
 fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(k_shuffle, m)?)?;
+    m.add_function(wrap_pyfunction!(_k_shuffle, m)?)?;
     Ok(())
 }
 
@@ -22,7 +22,7 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
 ///    Length of k-mers to preserve frequencies of.
 /// seed : int, optional
 ///   Seed for the random number generator.
-fn k_shuffle<'py>(
+fn _k_shuffle<'py>(
     py: Python<'py>,
     seqs: PyReadonlyArray<'py, u8, IxDyn>,
     k: usize,
