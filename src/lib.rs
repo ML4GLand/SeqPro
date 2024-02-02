@@ -1,1 +1,1 @@
-mod kshuffle;
+pub mod kshuffle;

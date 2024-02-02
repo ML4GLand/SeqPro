@@ -1,11 +1,12 @@
+use derive_builder::Builder;
 use rand::{seq::SliceRandom, Rng, SeedableRng};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use xxhash_rust::xxh3::Xxh3Builder;
 
-use indextree::Arena;
+use anyhow::{bail, Result};
 use ndarray::prelude::*;
 use rand::rngs::SmallRng;
-use anyhow::{bail, Result};
 
 #[derive(thiserror::Error, Debug)]
 pub enum KShuffleError {
@@ -17,9 +18,10 @@ pub enum KShuffleError {
     NEntriesTooSmall,
 }
 
-#[derive(Clone)]
-struct Vertex {
-    indices: Vec<usize>,
+#[derive(Builder)]
+#[builder(pattern = "owned")]
+struct Vertex<'a> {
+    indices: &'a mut [usize],
     n_indices: usize,
     i_indices: usize,
     intree: bool,
@@ -28,16 +30,11 @@ struct Vertex {
 }
 
 struct HEntry {
-    next: Option<Box<HEntry>>,
     i_vertices: usize,
     i_sequence: usize,
 }
 
-fn kshuffle(
-    arr: ArrayView1<u8>,
-    k: usize,
-    seed: Option<u64>,
-) -> Result<Array1<u8>> {
+pub fn kshuffle(arr: ArrayView1<u8>, k: usize, seed: Option<u64>) -> Result<Array1<u8>> {
     let seed = seed.unwrap_or(0);
     let mut rng = SmallRng::seed_from_u64(seed);
     let l = arr.len();
@@ -60,104 +57,140 @@ fn kshuffle(
     let n_lets = l - k + 2;
     let mut htable = HashMap::with_capacity_and_hasher(n_lets, Xxh3Builder::new());
 
-    for kmer in arr.windows(k) {
-        let hentry = HEntry {
-            next: None,
-            i_vertices: 0,
-            i_sequence: 0,
-        };
-        htable.insert(kmer.to_vec(), hentry);
+    // find distinct verticess
+    let mut n_vertices = 0;
+    for (pos, kmer) in arr.windows(k - 1).into_iter().enumerate() {
+        htable.entry(kmer.to_vec()).or_insert_with(|| {
+            let hentry = HEntry {
+                i_vertices: n_vertices,
+                i_sequence: pos,
+            };
+            n_vertices += 1;
+            hentry
+        });
     }
 
-    let root = arr.slice(s![-(k as isize)..]).to_vec();
     let n_vertices = htable.len();
-    let tree = Arena::<Vertex>::with_capacity(n_vertices);
-    let mut vertices = vec![
-        Vertex {
-            indices: vec![],
-            n_indices: 0,
-            i_indices: 0,
-            intree: false,
-            next: 0,
-            i_sequence: 0,
-        };
-        n_vertices
-    ];
+    let root = arr.slice(s![-(k as isize - 1)..]).to_vec();
+    let mut indices = vec![0 as usize; n_lets - 1];
+    let mut vertices = (0..n_vertices)
+        .map(|_| RefCell::new(VertexBuilder::default().intree(false).next(0)))
+        .collect::<Vec<_>>();
 
-    for (i, kmer) in arr.windows(k).into_iter().enumerate() {
+    // set i_sequence and n_indices for each vertex
+    for (i, kmer) in arr.windows(k - 1).into_iter().enumerate() {
         let hentry = htable.get(&kmer.to_vec()).unwrap();
-        let v = &mut vertices[hentry.i_vertices];
+        let v = vertices[hentry.i_vertices].take();
 
-        v.i_sequence = hentry.i_sequence;
         if i < n_lets - 1 {
-            v.n_indices += 1;
+            let n_indices = v.n_indices.map_or(1, |n| n + 1);
+            vertices[hentry.i_vertices] =
+                v.i_sequence(hentry.i_sequence).n_indices(n_indices).into();
+        } else {
+            vertices[hentry.i_vertices] = v.i_sequence(hentry.i_sequence).into();
         }
     }
 
-    let indices = vec![0 as usize; n_vertices];
-    let mut j = 0;
-
+    // distribute indices
+    let mut for_vertex: &mut [usize];
+    let mut indices_slice = indices.as_mut_slice();
     for v in &mut vertices {
-        v.indices = indices[j..j + v.n_indices].to_vec();
-        j += v.n_indices;
+        let temp = v.take();
+        (for_vertex, indices_slice) = indices_slice.split_at_mut(temp.n_indices.unwrap());
+        *v = temp.indices(for_vertex).into();
     }
 
+    let vertices = vertices
+        .into_iter()
+        .map(|v| RefCell::new(v.take().i_indices(0).build().unwrap()))
+        .collect::<Vec<_>>();
+
+    // populate indices for each vertex
     for (kmer1, kmer2) in arr
         .slice(s![..-1])
-        .windows(k)
+        .windows(k - 1)
         .into_iter()
-        .zip(arr.slice(s![1..]).windows(k))
+        .zip(arr.slice(s![1..]).windows(k - 1))
     {
         let eu = htable.get(&kmer1.to_vec()).unwrap();
         let ev = htable.get(&kmer2.to_vec()).unwrap();
-        let u = &mut vertices[eu.i_vertices];
+        let mut u = vertices[eu.i_vertices].borrow_mut();
 
-        u.indices[u.i_indices] = ev.i_vertices;
+        let i_indices = u.i_indices;
+        u.indices[i_indices] = ev.i_vertices;
         u.i_indices += 1;
     }
 
+    // Wilson algorithm for random arborescence
     let root_idx = htable.get(&root).unwrap().i_vertices;
-    let root_vertex = &mut vertices[root_idx];
+    let mut root_vertex = vertices[root_idx].borrow_mut();
     root_vertex.intree = true;
+    drop(root_vertex);
 
-    // TODO: doesn't compile due to multiple mutable borrows
-    for v in &mut vertices {
-        let mut u = v;
-        while !u.intree {
-            u.next = rng.gen_range(0..u.n_indices);
-            u = &mut vertices[u.indices[u.next]];
+    for v in vertices.iter() {
+        // let mut u = &mut vertices[i];
+        {
+            let mut u = v.borrow_mut();
+            while !u.intree {
+                // u = vertices[u.indices[u.next]].borrow_mut();
+                u.next = rng.gen_range(0..u.n_indices);
+                u = vertices[u.indices[u.next]].borrow_mut();
+            }
         }
-        let mut u = v;
-        while !u.intree {
-            u.intree = true;
-            u = &mut vertices[u.indices[u.next]];
+        {
+            let mut u = v.borrow_mut();
+            while !u.intree {
+                u.intree = true;
+                u = vertices[u.indices[u.next]].borrow_mut();
+            }
         }
     }
-    
-    // TODO: doesn't compile due to multiple mutable borrows
-    for (i, v) in vertices.iter_mut().enumerate() {
+
+    // shuffle indices to prepare for walk
+    let mut j;
+    for (i, mut u) in vertices.iter().map(|v| v.borrow_mut()).enumerate() {
         if i != root_idx {
-            j = v.indices[v.n_indices - 1];
-            v.indices[v.n_indices - 1] = v.indices[v.next];
-            v.indices[v.next] = j;
-            v.indices[0..v.n_indices - 1].shuffle(&mut rng);
+            let idx = u.n_indices - 1;
+            j = u.indices[idx];
+            u.indices[idx] = u.indices[u.next];
+            let next = u.next;
+            u.indices[next] = j;
+            u.indices[0..idx].shuffle(&mut rng);
         } else {
-            v.indices.shuffle(&mut rng);
+            u.indices.shuffle(&mut rng);
         }
-        v.i_indices = 0;
+        u.i_indices = 0;
     }
 
+    // walk the graph
     let mut out: Vec<u8> = vec![0; l];
-    out[..k].clone_from_slice(arr.slice(s![..k]).as_slice().unwrap());
-    let u = &mut vertices[0];
+    out[..k - 1].clone_from_slice(arr.slice(s![..k - 1]).as_slice().unwrap());
     let mut i = k - 1;
-    while u.i_indices < u.n_indices {
-        let v = &mut vertices[u.indices[u.i_indices]];
-        j = v.i_sequence + k - 2;
-        out[i] = arr[j];
-        i += 1;
-        u.i_indices += 1;
-        let u = v;
+    let mut u_idx = 0;
+    loop {
+        let v_idx = {
+            let u = vertices[u_idx].borrow();
+            if u.i_indices >= u.n_indices {
+                break;
+            }
+            u.indices[u.i_indices]
+        };
+        {
+            if u_idx != v_idx {
+                let v = vertices[v_idx].borrow();
+                j = v.i_sequence + k - 2;
+                out[i] = arr[j];
+                i += 1;
+                vertices[u_idx].borrow_mut().i_indices += 1;
+            } else {
+                let mut v = vertices[v_idx].borrow_mut();
+                j = v.i_sequence + k - 2;
+                out[i] = arr[j];
+                i += 1;
+                v.i_indices += 1;
+            }
+        }
+        u_idx = v_idx;
     }
 
     Ok(Array1::from(out))
@@ -167,7 +200,7 @@ fn kshuffle(
 mod test {
     use super::*;
 
-    fn kmer_frequencies(seq: Vec<u8>, k: usize) -> HashMap<&[u8], u32> {
+    fn kmer_frequencies(seq: &[u8], k: usize) -> HashMap<&[u8], u32> {
         let mut freqs = HashMap::new();
 
         for kmer in seq.windows(k) {
@@ -181,12 +214,13 @@ mod test {
     #[test]
     fn same_freq() {
         let k = 2;
-        let seq = Array1::from(vec![b'A', b'C', b'G', b'T', b'A', b'C', b'G', b'T']);
+        let seq = ArrayView1::from(b"AATAT");
 
-        let freqs = kmer_frequencies(seq.to_vec(), k);
-        let shuffled = kshuffle(seq.view(), k, Some(0)).unwrap();
-        let shuffled_freqs = kmer_frequencies(shuffled.to_vec(), k);
+        let freqs = kmer_frequencies(seq.as_slice().unwrap(), k);
+        let shuffled = kshuffle(seq.view(), k, Some(1)).unwrap();
+        let shuffled_freqs = kmer_frequencies(shuffled.as_slice().unwrap(), k);
 
+        println!("{:?}", shuffled);
         assert_eq!(freqs, shuffled_freqs);
     }
 }
