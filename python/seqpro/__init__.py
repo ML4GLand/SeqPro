@@ -2,9 +2,10 @@ from . import alphabets
 from ._analyzers import gc_content, length, nucleotide_content
 from ._cleaners import remove_N_seqs, remove_only_N_seqs, sanitize
 from ._encoders import decode_ohe, ohe, pad_seqs
-from ._modifiers import bin_coverage, jitter, k_shuffle, random_seqs, reverse_complement
+from ._modifiers import bin_coverage, jitter, random_seqs, reverse_complement
 from ._utils import cast_seqs
 from .alphabets import AA, DNA, RNA, AminoAlphabet, NucleotideAlphabet
+from .seqpro import k_shuffle
 
 __version__ = "0.0.0"
 

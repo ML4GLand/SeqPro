@@ -12,7 +12,7 @@ name = "seqpro"
 anyhow = "1.0.79"
 derive_builder = "0.13.0"
 indextree = "4.6.0"
-ndarray = "0.15.6"
+ndarray = { version = "0.15.6", features = ["rayon"] }
 numpy = "0.20.0"
 rand = { version = "0.8.5", features = ["small_rng"] }
 rayon = "1.8.0"

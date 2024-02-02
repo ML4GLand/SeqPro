@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use derive_builder::Builder;
 use rand::{seq::SliceRandom, Rng, SeedableRng};
 use std::cell::RefCell;
@@ -34,13 +35,41 @@ struct HEntry {
     i_sequence: usize,
 }
 
-pub fn kshuffle(arr: ArrayView1<u8>, k: usize, seed: Option<u64>) -> Result<Array1<u8>> {
+pub fn k_shuffle<D: Dimension>(
+    seqs: ArrayView<u8, D>,
+    k: usize,
+    seed: Option<u64>,
+) -> Array<u8, D> {
+    let mut out = unsafe { Array::uninit(seqs.raw_dim()).assume_init() };
+
+    let results = out.rows_mut()
+        .into_iter()
+        .zip(seqs.rows())
+        .par_bridge()
+        .map(|(out_row, row)| {
+            k_shuffle1(row, k, seed, out_row)
+        }).collect::<Vec<_>>();
+    
+    for result in results {
+        result.expect("k_shuffle error");
+    }
+
+    out
+}
+
+fn k_shuffle1(
+    arr: ArrayView1<u8>,
+    k: usize,
+    seed: Option<u64>,
+    mut out: ArrayViewMut1<u8>,
+) -> Result<()> {
     let seed = seed.unwrap_or(0);
     let mut rng = SmallRng::seed_from_u64(seed);
     let l = arr.len();
 
     if k >= l {
-        return Ok(arr.to_owned());
+        arr.assign_to(out);
+        return Ok(());
     }
 
     if k < 1 {
@@ -48,10 +77,9 @@ pub fn kshuffle(arr: ArrayView1<u8>, k: usize, seed: Option<u64>) -> Result<Arra
     }
 
     if k == 1 {
-        let mut out = arr.to_owned().to_vec();
-        out.shuffle(&mut rng);
-        let out = Array1::from_vec(out);
-        return Ok(out);
+        arr.assign_to(&mut out);
+        out.as_slice_mut().unwrap().shuffle(&mut rng);
+        return Ok(());
     }
 
     let n_lets = l - k + 2;
@@ -123,9 +151,10 @@ pub fn kshuffle(arr: ArrayView1<u8>, k: usize, seed: Option<u64>) -> Result<Arra
 
     // Wilson algorithm for random arborescence
     let root_idx = htable.get(&root).unwrap().i_vertices;
-    let mut root_vertex = vertices[root_idx].borrow_mut();
-    root_vertex.intree = true;
-    drop(root_vertex);
+    {
+        let mut root_vertex = vertices[root_idx].borrow_mut();
+        root_vertex.intree = true;
+    }
 
     for v in vertices.iter() {
         // let mut u = &mut vertices[i];
@@ -193,7 +222,7 @@ pub fn kshuffle(arr: ArrayView1<u8>, k: usize, seed: Option<u64>) -> Result<Arra
         u_idx = v_idx;
     }
 
-    Ok(Array1::from(out))
+    Ok(())
 }
 
 #[cfg(test)]
@@ -217,7 +246,10 @@ mod test {
         let seq = ArrayView1::from(b"AATAT");
 
         let freqs = kmer_frequencies(seq.as_slice().unwrap(), k);
-        let shuffled = kshuffle(seq.view(), k, Some(1)).unwrap();
+        let mut shuffled = unsafe { Array1::<u8>::uninit(seq.len()).assume_init() };
+        let res = k_shuffle1(seq.view(), k, Some(1), shuffled.view_mut());
+        assert!(res.is_ok());
+        
         let shuffled_freqs = kmer_frequencies(shuffled.as_slice().unwrap(), k);
 
         println!("{:?}", shuffled);
