@@ -1,6 +1,6 @@
 [project]
 name = "seqpro"
-version = "0.1.10"
+version = "0.1.11"
 authors = [
     { name = "David Laub", email = "dlaub@ucsd.edu" },
     { name = "Adam Klie", email = "aklie@ucsd.edu" }
@@ -13,14 +13,14 @@ classifiers = [
 ]
 requires-python = ">=3.8"
 dependencies = [
-    "numba~=0.57.0",
-    "numpy~=1.23.5",
+    "numba>=0.57.0",
+    "numpy>=1.23.5",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "matplotlib~=3.6.2",
-    "pytest-cases~=3.8.0",
+    "matplotlib>=3.6.2",
+    "pytest-cases>=3.8.0",
 ]
 
 [build-system]
