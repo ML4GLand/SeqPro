@@ -63,7 +63,9 @@ fn k_shuffle1(
     seed: Option<u64>,
     mut out: ArrayViewMut1<u8>,
 ) -> Result<()> {
-    let seed = seed.unwrap_or(0);
+    let seed = seed.unwrap_or_else(|| {
+        rand::thread_rng().gen()
+    });
     let mut rng = SmallRng::seed_from_u64(seed);
     let l = arr.len();
 
@@ -102,7 +104,7 @@ fn k_shuffle1(
     let root = arr.slice(s![-(k as isize - 1)..]).to_vec();
     let mut indices = vec![0 as usize; n_lets - 1];
     let mut vertices = (0..n_vertices)
-        .map(|_| RefCell::new(VertexBuilder::default().intree(false).next(0)))
+        .map(|_| RefCell::new(VertexBuilder::default().intree(false).n_indices(0).next(0)))
         .collect::<Vec<_>>();
 
     // set i_sequence and n_indices for each vertex
@@ -115,7 +117,7 @@ fn k_shuffle1(
             vertices[hentry.i_vertices] =
                 v.i_sequence(hentry.i_sequence).n_indices(n_indices).into();
         } else {
-            vertices[hentry.i_vertices] = v.i_sequence(hentry.i_sequence).n_indices(0).into();
+            vertices[hentry.i_vertices] = v.i_sequence(hentry.i_sequence).into();
         }
     }
 
@@ -158,21 +160,44 @@ fn k_shuffle1(
         root_vertex.intree = true;
     }
 
-    for v in vertices.iter() {
+    for i in 0..vertices.len() {
         // let mut u = &mut vertices[i];
         {
-            let mut u = v.borrow_mut();
-            while !u.intree {
-                // u = vertices[u.indices[u.next]].borrow_mut();
-                u.next = rng.gen_range(0..u.n_indices);
-                u = vertices[u.indices[u.next]].borrow_mut();
+            let mut u_idx = i;
+            loop {
+                {
+                    let u = vertices[u_idx].borrow();
+                    if u.intree {
+                        break;
+                    }
+                }
+                {
+                    let mut u = vertices[u_idx].borrow_mut();
+                    u.next = rng.gen_range(0..u.n_indices);
+                }
+                {
+                    let u = vertices[u_idx].borrow();
+                    u_idx = u.indices[u.next];
+                }
             }
         }
         {
-            let mut u = v.borrow_mut();
-            while !u.intree {
-                u.intree = true;
-                u = vertices[u.indices[u.next]].borrow_mut();
+            let mut u_idx = i;
+            loop {
+                {
+                    let u = vertices[u_idx].borrow();
+                    if u.intree {
+                        break;
+                    }
+                }
+                {
+                    let mut u = vertices[u_idx].borrow_mut();
+                    u.intree = true;
+                }
+                {
+                    let u = vertices[u_idx].borrow();
+                    u_idx = u.indices[u.next];
+                }
             }
         }
     }
