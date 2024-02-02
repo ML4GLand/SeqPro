@@ -6,6 +6,7 @@ from numpy.typing import NDArray
 
 from ._utils import SeqType, _check_axes, cast_seqs
 from .alphabets._alphabets import NucleotideAlphabet
+from .seqpro import _k_shuffle
 
 
 def reverse_complement(
@@ -59,12 +60,6 @@ def k_shuffle(
     alphabet : Optional[NucleotideAlphabet], optional
         Alphabet, needed for OHE sequence input.
     """
-    try:
-        import ushuffle
-    except ImportError:
-        raise ImportError(
-            "Please install ushuffle to use this function (pip install ushuffle))"
-        )
 
     _check_axes(seqs, length_axis, ohe_axis)
 
@@ -73,18 +68,6 @@ def k_shuffle(
     # only get here if seqs was str or list[str]
     if length_axis is None:
         length_axis = seqs.ndim - 1
-
-    if k == 1:
-        rng = np.random.default_rng(seed)
-        return rng.permuted(seqs, axis=length_axis)
-
-    if seed is not None:
-        import importlib
-
-        importlib.reload(ushuffle)
-        ushuffle.set_seed(seed)
-
-    seqs = seqs.copy()
 
     if seqs.dtype == np.uint8:
         assert ohe_axis is not None
@@ -96,21 +79,20 @@ def k_shuffle(
     else:
         ohe = False
 
-    length = seqs.shape[length_axis]
-    with np.nditer(
-        seqs.view(f"S{length}").ravel(),
-        op_flags=["readwrite"],  # type: ignore
-    ) as it:
-        for seq in it:
-            seq[...] = ushuffle.shuffle(seq.tobytes(), k)  # type: ignore
+    seqs = np.moveaxis(seqs, length_axis, -1)  # length must be final
+    seqs = np.ascontiguousarray(seqs)  # must be contiguous
+
+    shuffled = _k_shuffle(seqs.view("u1"), k, seed).view("S1")
+
+    shuffled = np.moveaxis(shuffled, -1, length_axis)  # put length back where it was
 
     if ohe:
         assert ohe_axis is not None
         assert alphabet is not None
-        seqs = cast(NDArray[np.bytes_], seqs)
-        seqs = alphabet.ohe(seqs).swapaxes(-1, ohe_axis)
+        shuffled = cast(NDArray[np.bytes_], shuffled)
+        shuffled = alphabet.ohe(shuffled).swapaxes(-1, ohe_axis)
 
-    return seqs
+    return shuffled
 
 
 def bin_coverage(
@@ -234,7 +216,7 @@ def _align_axes(*arrays: NDArray, axes: Union[int, Tuple[int, ...]]):
         If axes cannot be aligned because they have different sizes.
     """
     if isinstance(axes, int):
-        source_axes = (axes,)
+        source_axes: Tuple[int, ...] = (axes,)
     else:
         source_axes = axes
 
@@ -250,7 +232,7 @@ def _align_axes(*arrays: NDArray, axes: Union[int, Tuple[int, ...]]):
 
 
 def _slice_kmers(array: NDArray, starts: NDArray, k: int):
-    """Slice an array into k-mers, assuming starts aligns with final axes of array and length is the final axis.
+    """Get a view of an array sliced into k-mers, assuming starts align with the penultimate axes and length is the final axis.
 
     Parameters
     ----------

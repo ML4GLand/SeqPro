@@ -1,29 +1,35 @@
-[tool.poetry]
+[project]
 name = "seqpro"
-version = "0.0.0"
-description = "Sequence processing toolkit"
-authors = ["Adam Klie <aklie@ucsd.edu>", "David Laub <dlaub@ucsd.edu>"]
-license = "MIT"
+version = "0.1.10"
+authors = [
+    { name = "David Laub", email = "dlaub@ucsd.edu" },
+    { name = "Adam Klie", email = "aklie@ucsd.edu" }
+]
+license = { file = "LICENSE" }
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numba~=0.57.0",
+    "numpy~=1.23.5",
+]
 
-[tool.poetry.dependencies]
-python = "^3.9"
-numba = "^0.58.1"
-numpy = "^1.26.3"
-matplotlib = {version = "^3.6.2", extras = ["dev"]}
-ushuffle = {git = "https://github.com/d-laub/ushuffle", branch = "cython-build-dep"}
-
-[tool.poetry.extras]
-dev = ["matplotlib"]
-
-[tool.poetry.dev-dependencies]
-pytest-cases = "^3.8.0"
-
-[tool.poetry-dynamic-versioning]
-enable = true
+[project.optional-dependencies]
+dev = [
+    "matplotlib~=3.6.2",
+    "pytest-cases~=3.8.0",
+]
 
 [build-system]
-requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
-build-backend = "poetry_dynamic_versioning.backend"
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+python-source = "python"
+features = ["pyo3/extension-module"]
 
 [tool.isort]
 profile = "black"

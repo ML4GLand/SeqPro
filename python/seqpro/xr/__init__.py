@@ -2,7 +2,6 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import NDArray
-
 from seqpro._numba import gufunc_ohe, gufunc_translate
 from seqpro.alphabets import AminoAlphabet, NucleotideAlphabet
 

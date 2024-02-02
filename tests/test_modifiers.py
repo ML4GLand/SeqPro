@@ -1,7 +1,9 @@
-import numpy as np
+from collections import defaultdict
 
+import numpy as np
 import seqpro as sp
 from seqpro._modifiers import _align_axes, _slice_kmers
+from seqpro._utils import _check_axes
 
 
 def test_align_axes():
@@ -91,3 +93,39 @@ def test_jitter():
     assert jittered[0].shape == (3, 2, 5)
     assert jittered[1].shape == (3, 2, 4, 5)
     assert jittered[2].shape == (3, 2, 5, 6, 5)
+
+
+def _count_kmers(seqs, k, length_axis):
+    _check_axes(seqs, length_axis, False)
+
+    seqs = sp.cast_seqs(seqs)
+
+    if length_axis is None:
+        length_axis = -1
+
+    length = seqs.shape[length_axis]
+
+    if k > length:
+        raise ValueError("k is larger than sequence length")
+
+    if seqs.dtype == np.uint8:
+        raise NotImplementedError
+    else:
+        counts = defaultdict(int)
+        kmers = np.lib.stride_tricks.sliding_window_view(seqs, k, -1)
+        for kmer in kmers:
+            counts[kmer.tobytes()] += 1
+        return counts
+
+
+def test_k_shuffle():
+    seqs = sp.random_seqs(20, sp.DNA)
+    length_axis = -1
+    seed = 0
+
+    for k in range(2, 5):
+        counts = _count_kmers(seqs, k, length_axis)
+        shuffled = sp.k_shuffle(seqs, k, length_axis=length_axis, seed=seed)
+        shuffled_counts = _count_kmers(shuffled, k, length_axis)
+
+        assert counts == shuffled_counts
