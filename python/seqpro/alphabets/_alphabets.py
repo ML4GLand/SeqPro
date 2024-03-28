@@ -234,7 +234,7 @@ class AminoAlphabet:
         NDArray[np.bytes_]
             Amino acid sequences.
         """
-        # TODO this doesn't respect start and stop codons
+        # TODO this doesn't respect start and stop codons, doing so would also require ragged arrays
         _check_axes(seqs, length_axis, False)
 
         seqs = cast_seqs(seqs)

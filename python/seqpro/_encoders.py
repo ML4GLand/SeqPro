@@ -3,7 +3,7 @@ from typing import Literal, Optional, Union, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ._numba import gufunc_char_idx, gufunc_pad_both, gufunc_pad_left
+from ._numba import gufunc_pad_both, gufunc_pad_left, gufunc_tokenize
 from ._utils import SeqType, StrSeqType, _check_axes, array_slice, cast_seqs
 from .alphabets._alphabets import AminoAlphabet, NucleotideAlphabet
 
@@ -144,14 +144,18 @@ def decode_ohe(
     return alphabet.decode_ohe(seqs=seqs, ohe_axis=ohe_axis, unknown_char=unknown_char)
 
 
-def tokenize(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.integer]:
-    """Tokenize nucleotides. Replaces each nucleotide with its index in the alphabet.
-    Nucleotides not in the alphabet are replaced with -1.
+def tokenize(
+    seqs: StrSeqType, alphabet: NucleotideAlphabet, tokens: Optional[StrSeqType] = None
+) -> NDArray[np.integer]:
+    """Tokenize nucleotides. Replaces each nucleotide with its corresponding token, if provided. Otherwise, uses each
+    nucleotide's index in the alphabet. Nucleotides not in the alphabet or list of tokens are replaced with -1.
 
     Parameters
     ----------
     seqs : StrSeqType
     alphabet : NucleotideAlphabet
+    tokens : Optional[StrSeqType], optional
+        List of tokens to use for each nucleotide, by default None
 
     Returns
     -------
@@ -159,7 +163,13 @@ def tokenize(seqs: StrSeqType, alphabet: NucleotideAlphabet) -> NDArray[np.integ
         Sequences of tokens (integers)
     """
     seqs = cast_seqs(seqs)
-    return gufunc_char_idx(seqs.view(np.uint8), alphabet.array.view(np.uint8))
+    if tokens is None:
+        _tokens = np.arange(len(alphabet), dtype=np.int32)
+    else:
+        if len(tokens) != len(alphabet):
+            raise ValueError("Tokens must be the same length as the alphabet.")
+        _tokens = cast_seqs(tokens).view(np.uint8).astype(np.int32)
+    return gufunc_tokenize(seqs.view(np.uint8), alphabet.array.view(np.uint8), _tokens)
 
 
 def decode_tokens(

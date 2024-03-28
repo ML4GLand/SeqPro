@@ -1,7 +1,6 @@
 from . import alphabets
 from ._analyzers import gc_content, length, nucleotide_content
-from ._cleaners import remove_N_seqs, remove_only_N_seqs, sanitize
-from ._encoders import decode_ohe, ohe, pad_seqs
+from ._encoders import decode_ohe, ohe, pad_seqs, tokenize
 from ._modifiers import bin_coverage, jitter, k_shuffle, random_seqs, reverse_complement
 from ._utils import cast_seqs
 from .alphabets import AA, DNA, RNA, AminoAlphabet, NucleotideAlphabet
@@ -14,9 +13,6 @@ __all__ = [
     "gc_content",
     "length",
     "nucleotide_content",
-    "remove_N_seqs",
-    "remove_only_N_seqs",
-    "sanitize",
     "ohe",
     "decode_ohe",
     "pad_seqs",
@@ -30,4 +26,5 @@ __all__ = [
     "DNA",
     "RNA",
     "AA",
+    "tokenize",
 ]
