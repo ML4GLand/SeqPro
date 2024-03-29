@@ -3,7 +3,7 @@ from typing import Literal, Optional, Union, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ._numba import gufunc_pad_both, gufunc_pad_left, gufunc_tokenize
+from ._numba import gufunc_pad_both, gufunc_pad_left, gufunc_tokenize, gufunc_untokenize
 from ._utils import SeqType, StrSeqType, _check_axes, array_slice, cast_seqs
 from .alphabets._alphabets import AminoAlphabet, NucleotideAlphabet
 
@@ -145,8 +145,11 @@ def decode_ohe(
 
 
 def tokenize(
-    seqs: StrSeqType, alphabet: NucleotideAlphabet, tokens: Optional[StrSeqType] = None
-) -> NDArray[np.integer]:
+    seqs: StrSeqType,
+    alphabet: NucleotideAlphabet,
+    tokens: Optional[StrSeqType] = None,
+    out: Optional[NDArray[np.int32]] = None,
+) -> NDArray[np.int32]:
     """Tokenize nucleotides. Replaces each nucleotide with its corresponding token, if provided. Otherwise, uses each
     nucleotide's index in the alphabet. Nucleotides not in the alphabet or list of tokens are replaced with -1.
 
@@ -159,7 +162,7 @@ def tokenize(
 
     Returns
     -------
-    NDArray[int]
+    NDArray[int32]
         Sequences of tokens (integers)
     """
     seqs = cast_seqs(seqs)
@@ -169,11 +172,16 @@ def tokenize(
         if len(tokens) != len(alphabet):
             raise ValueError("Tokens must be the same length as the alphabet.")
         _tokens = cast_seqs(tokens).view(np.uint8).astype(np.int32)
-    return gufunc_tokenize(seqs.view(np.uint8), alphabet.array.view(np.uint8), _tokens)
+    return gufunc_tokenize(
+        seqs.view(np.uint8), alphabet.array.view(np.uint8), _tokens, out
+    )
 
 
 def decode_tokens(
-    tokens: NDArray[np.integer], alphabet: NucleotideAlphabet, unknown_char: str = "N"
+    seqs: NDArray[np.int32],
+    alphabet: NucleotideAlphabet,
+    tokens: Optional[NDArray[np.int32]] = None,
+    unknown_char: str = "N",
 ) -> NDArray[np.bytes_]:
     """Untokenize nucleotides. Replaces each token/index with its corresponding
     nucleotide in the alphabet.
@@ -181,8 +189,10 @@ def decode_tokens(
 
     Parameters
     ----------
-    ids : NDArray[np.integer]
+    ids : NDArray[np.int32]
     alphabet : NucleotideAlphabet
+    tokens : Optional[NDArray[np.int32]], optional
+        List of tokens to use for each nucleotide, by default None
     unknown_char : str, optional
         Character to replace unknown tokens with, by default 'N'
 
@@ -192,5 +202,10 @@ def decode_tokens(
     NDArray[bytes] aka S1
         Sequences of nucleotides
     """
-    chars = cast_seqs(alphabet.alphabet + unknown_char)
-    return chars[tokens]
+    if tokens is None:
+        tokens = np.arange(len(alphabet), dtype=np.int32)
+    _unk_char = np.uint8(ord(unknown_char))
+    _seqs = gufunc_untokenize(
+        seqs, alphabet.array.view(np.uint8), tokens, _unk_char
+    ).view("S1")
+    return _seqs
