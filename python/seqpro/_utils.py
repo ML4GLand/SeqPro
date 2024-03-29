@@ -10,23 +10,20 @@ SeqType = Union[
 
 
 @overload
-def cast_seqs(seqs: NDArray[np.uint8]) -> NDArray[np.uint8]:
-    ...
+def cast_seqs(seqs: NDArray[np.uint8]) -> NDArray[np.uint8]: ...
 
 
 @overload
-def cast_seqs(seqs: StrSeqType) -> NDArray[np.bytes_]:
-    ...
+def cast_seqs(seqs: StrSeqType) -> NDArray[np.bytes_]: ...
 
 
 @overload
-def cast_seqs(seqs: SeqType) -> NDArray[Union[np.bytes_, np.uint8]]:
-    ...
+def cast_seqs(seqs: SeqType) -> NDArray[Union[np.bytes_, np.uint8]]: ...
 
 
 def cast_seqs(seqs: SeqType) -> NDArray[Union[np.bytes_, np.uint8]]:
     """Cast any sequence type to be a NumPy array of ASCII characters (or left alone as
-    8-bit integers if the input is OHE).
+    8-bit unsigned integers if the input is OHE).
 
     Parameters
     ----------

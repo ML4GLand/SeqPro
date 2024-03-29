@@ -59,16 +59,45 @@ def gufunc_ohe_char_idx(
             res[0] = i  # type: ignore
 
 
-@nb.guvectorize(["(u1, u1[:], intp[:])"], "(),(n)->()", target="parallel", cache=True)
-def gufunc_char_idx(
+@nb.guvectorize(
+    ["(u1, u1[:], i4[:], i4[:])"], "(),(n),(n)->()", target="parallel", cache=True
+)
+def gufunc_tokenize(
     seq: NDArray[np.uint8],
     alphabet: NDArray[np.uint8],
-    res: Optional[NDArray[np.intp]] = None,
-) -> NDArray[np.intp]:  # type: ignore
-    res[0] = np.intp(-1)  # type: ignore
+    token_map: NDArray[np.int32],
+    res: Optional[NDArray[np.int32]] = None,
+) -> NDArray[np.int32]:  # type: ignore
+    """Tokenize a sequence.
+
+    Note: np.int32 is used intentionally since token IDs are generally used as indices into an array of embeddings
+    (a la torch.nn.Embedding)."""
+    res[0] = np.int32(-1)  # type: ignore
     for i in nb.prange(len(alphabet)):
         if seq == alphabet[i]:
-            res[0] = i  # type: ignore
+            res[0] = token_map[i]  # type: ignore
+            break
+
+
+@nb.guvectorize(
+    ["(u1, u1[:], i4[:], u1, i4[:])"], "(),(n),(n)->()", target="parallel", cache=True
+)
+def gufunc_untokenize(
+    seq: NDArray[np.int32],
+    alphabet: NDArray[np.uint8],
+    token_map: NDArray[np.int32],
+    unknown_char: np.uint8,
+    res: Optional[NDArray[np.uint8]] = None,
+) -> NDArray[np.uint8]:  # type: ignore
+    """Tokenize a sequence.
+
+    Note: np.int32 is used intentionally since token IDs are generally used as indices into an array of embeddings
+    (a la torch.nn.Embedding)."""
+    res[0] = unknown_char  # type: ignore
+    for i in nb.prange(len(alphabet)):
+        if seq == token_map[i]:
+            res[0] = alphabet[i]  # type: ignore
+            break
 
 
 @nb.guvectorize(
@@ -99,3 +128,4 @@ def gufunc_translate(
     for i in nb.prange(len(codons)):
         if (seq == codons[i]).all():
             res[0] = aminos_acids[i]  # type: ignore
+            break
