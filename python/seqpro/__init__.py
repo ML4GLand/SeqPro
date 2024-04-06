@@ -7,8 +7,6 @@ from ._modifiers import bin_coverage, jitter, k_shuffle, random_seqs, reverse_co
 from ._utils import cast_seqs
 from .alphabets import AA, DNA, RNA, AminoAlphabet, NucleotideAlphabet
 
-__version__ = "0.1.12"
-
 __all__ = [
     "transforms",
     "cast_seqs",
