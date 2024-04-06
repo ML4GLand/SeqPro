@@ -80,7 +80,10 @@ def gufunc_tokenize(
 
 
 @nb.guvectorize(
-    ["(u1, u1[:], i4[:], u1, i4[:])"], "(),(n),(n)->()", target="parallel", cache=True
+    ["(u1, u1[:], i4[:], u1, i4[:])"],
+    "(),(n),(n),()->()",
+    target="parallel",
+    cache=True,
 )
 def gufunc_untokenize(
     seq: NDArray[np.int32],
