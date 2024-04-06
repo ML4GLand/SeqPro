@@ -1,3 +1,5 @@
+import transforms
+
 from . import alphabets
 from ._analyzers import gc_content, length, nucleotide_content
 from ._encoders import decode_ohe, ohe, pad_seqs, tokenize
@@ -8,6 +10,7 @@ from .alphabets import AA, DNA, RNA, AminoAlphabet, NucleotideAlphabet
 __version__ = "0.1.12"
 
 __all__ = [
+    "transforms",
     "cast_seqs",
     "bin_coverage",
     "gc_content",
