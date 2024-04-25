@@ -21,15 +21,23 @@ pip install seqpro
 ## API
 
 ```python
+N = 2
+L = 3
+
+# Generating random sequences
+seqs = sp.random_seqs(shape=(N, L), alphabet=sp.DNA, seed=1234)
 
 # Padding
-sp.pad_seqs(seqs, pad="right", pad_value="N", max_length=None)
+sp.pad_seqs(seqs, pad="right", pad_value="N", length=5, length_axis=-1)
 
-# One-hot encoding
-sp.ohe(seqs, alphabet=sp.DNA)
+# One-hot encoding and decoding
+ohe = sp.ohe(seqs, alphabet=sp.DNA)
+sp.decode_ohe(ohe, ohe_axis=-1, alphabet=sp.DNA, unknown_char="N")
 
-# Decode one-hot encoding
-sp.decode_ohe(ohe, ohe_axis=1, alphabet=sp.DNA, unknown_char="N")
+# Tokenization
+token_map = {"A": 7, "C": 8, "G": 9, "T": 10, "N": 11}
+tokens = sp.tokenize(seqs, token_map=token_map, unknown_token=11)
+sp.decode_tokens(tokens, token_map=token_map)
 
 # Reverse complement
 sp.reverse_complement(seqs, alphabet=sp.DNA)
@@ -40,9 +48,6 @@ sp.k_shuffle(seqs, k=2, length_axis=1, seed=1234)
 # Calculating GC or nucleotide content
 sp.gc_content(seqs, alphabet=sp.DNA)
 sp.nucleotide_content(seqs, alphabet=sp.DNA)
-
-# Generating random sequences
-sp.random_seqs(shape=(N, L), alphabet=sp.DNA, seed=1234)
 
 # Randomly jittering sequences
 sp.jitter(seqs, max_jitter=128, length_axis=1, seed=1234)
