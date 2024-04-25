@@ -1,9 +1,9 @@
-from typing import Literal, Optional, Union, cast
+from typing import Dict, Literal, Optional, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
-from ._numba import gufunc_pad_both, gufunc_pad_left, gufunc_tokenize, gufunc_untokenize
+from ._numba import gufunc_pad_both, gufunc_pad_left, gufunc_tokenize
 from ._utils import SeqType, StrSeqType, _check_axes, array_slice, cast_seqs
 from .alphabets._alphabets import AminoAlphabet, NucleotideAlphabet
 
@@ -146,8 +146,8 @@ def decode_ohe(
 
 def tokenize(
     seqs: StrSeqType,
-    alphabet: NucleotideAlphabet,
-    tokens: Optional[StrSeqType] = None,
+    token_map: Dict[str, int],
+    unknown_token: int,
     out: Optional[NDArray[np.int32]] = None,
 ) -> NDArray[np.int32]:
     """Tokenize nucleotides. Replaces each nucleotide with its corresponding token, if provided. Otherwise, uses each
@@ -166,21 +166,15 @@ def tokenize(
         Sequences of tokens (integers)
     """
     seqs = cast_seqs(seqs)
-    if tokens is None:
-        _tokens = np.arange(len(alphabet), dtype=np.int32)
-    else:
-        if len(tokens) != len(alphabet):
-            raise ValueError("Tokens must be the same length as the alphabet.")
-        _tokens = cast_seqs(tokens).view(np.uint8).astype(np.int32)
-    return gufunc_tokenize(
-        seqs.view(np.uint8), alphabet.array.view(np.uint8), _tokens, out
-    )
+    source = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
+    target = np.array(list(token_map.values()), dtype=np.int32)
+    _unknown_token = np.int32(unknown_token)
+    return gufunc_tokenize(seqs.view(np.uint8), source, target, _unknown_token, out)
 
 
 def decode_tokens(
     seqs: NDArray[np.int32],
-    alphabet: NucleotideAlphabet,
-    tokens: Optional[NDArray[np.int32]] = None,
+    token_map: Dict[str, int],
     unknown_char: str = "N",
 ) -> NDArray[np.bytes_]:
     """Untokenize nucleotides. Replaces each token/index with its corresponding
@@ -202,10 +196,8 @@ def decode_tokens(
     NDArray[bytes] aka S1
         Sequences of nucleotides
     """
-    if tokens is None:
-        tokens = np.arange(len(alphabet), dtype=np.int32)
+    target = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
+    source = np.array(list(token_map.values()), dtype=np.int32)
     _unk_char = np.uint8(ord(unknown_char))
-    _seqs = gufunc_untokenize(
-        seqs, alphabet.array.view(np.uint8), tokens, _unk_char
-    ).view("S1")
+    _seqs = gufunc_tokenize(seqs, source, target, _unk_char).view("S1")
     return _seqs
