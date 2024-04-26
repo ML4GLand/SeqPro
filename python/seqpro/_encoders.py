@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._numba import gufunc_pad_both, gufunc_pad_left, gufunc_tokenize
-from ._utils import SeqType, StrSeqType, _check_axes, array_slice, cast_seqs
+from ._utils import SeqType, StrSeqType, array_slice, cast_seqs, check_axes
 from .alphabets._alphabets import AminoAlphabet, NucleotideAlphabet
 
 
@@ -38,7 +38,7 @@ def pad_seqs(
     -------
     Array of padded or truncated sequences.
     """
-    _check_axes(seqs, length_axis, False)
+    check_axes(seqs, length_axis, False)
 
     string_input = (
         isinstance(seqs, (str, list))
@@ -79,13 +79,13 @@ def pad_seqs(
             return seqs
         elif length_diff > 0:  # longer than needed, truncate
             if pad == "left":
-                seqs = array_slice(seqs, length_axis, -length)
+                seqs = array_slice(seqs, length_axis, slice(-length))
             elif pad == "both":
                 seqs = array_slice(
-                    seqs, length_axis, length_diff // 2, -length_diff // 2
+                    seqs, length_axis, slice(length_diff // 2, -length_diff // 2)
                 )
             else:
-                seqs = array_slice(seqs, length_axis, stop=length)
+                seqs = array_slice(seqs, length_axis, slice(None, length))
         else:  # shorter than needed, pad
             pad_arr_shape = (
                 *seqs.shape[:length_axis],

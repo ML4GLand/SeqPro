@@ -2,9 +2,8 @@ from typing import List, Union
 
 import numpy as np
 import pytest
-from pytest_cases import parametrize_with_cases
-
 import seqpro as sp
+from pytest_cases import parametrize_with_cases
 
 
 def length_empty():
@@ -21,6 +20,11 @@ def length_variable():
 
 @parametrize_with_cases("seq, lengths", cases=".", prefix="length_")
 def test_length(seq: Union[str, List[str]], lengths: Union[int, List[int]]):
+    if len(seq) == 0:
+        with pytest.raises(ValueError):
+            sp.length(seq)
+        return
+
     test_lengths = sp.length(seq)
     np.testing.assert_equal(test_lengths, lengths)
 
@@ -51,6 +55,11 @@ def gc_content_ohe():
 
 @parametrize_with_cases("seqs, counts, proportions", cases=".", prefix="gc_content_")
 def test_gc_content(seqs, counts, proportions):
+    if len(seqs) == 0:
+        with pytest.raises(ValueError):
+            sp.gc_content(seqs)
+        return
+
     if isinstance(seqs, np.ndarray) and seqs.dtype == np.uint8:
         length_axis = -2
         ohe_axis = -1
@@ -127,6 +136,11 @@ def nucleotide_content_ohe():
     "seqs, counts, proportions", cases=".", prefix="nucleotide_content_"
 )
 def test_nucleotide_content(seqs, counts, proportions):
+    if len(seqs) == 0:
+        with pytest.raises(ValueError):
+            sp.nucleotide_content(seqs)
+        return
+
     if isinstance(seqs, np.ndarray) and seqs.dtype == np.uint8:
         length_axis = -2
     else:

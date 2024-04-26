@@ -3,7 +3,7 @@ from collections import defaultdict
 import numpy as np
 import seqpro as sp
 from seqpro._modifiers import _align_axes, _slice_kmers
-from seqpro._utils import _check_axes
+from seqpro._utils import check_axes
 
 
 def test_align_axes():
@@ -96,7 +96,7 @@ def test_jitter():
 
 
 def _count_kmers(seqs, k, length_axis):
-    _check_axes(seqs, length_axis, False)
+    check_axes(seqs, length_axis, False)
 
     seqs = sp.cast_seqs(seqs)
 

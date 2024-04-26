@@ -3,7 +3,7 @@ from typing import List, Optional, Union, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ._utils import SeqType, _check_axes, cast_seqs
+from ._utils import SeqType, cast_seqs, check_axes
 from .alphabets._alphabets import NucleotideAlphabet
 
 
@@ -51,7 +51,7 @@ def gc_content(
     NDArray[int, float]
         Returns integers if unnormalized, otherwise floats.
     """
-    _check_axes(seqs, length_axis, ohe_axis)
+    check_axes(seqs, length_axis, ohe_axis)
 
     seqs = cast_seqs(seqs)
 
@@ -103,7 +103,7 @@ def nucleotide_content(
     NDArray[int, float]
         Returns integers if unnormalized, otherwise floats.
     """
-    _check_axes(seqs, length_axis, False)
+    check_axes(seqs, length_axis, False)
 
     seqs = cast_seqs(seqs)
 
@@ -183,7 +183,7 @@ def _count_kmers(
     """
     raise NotImplementedError
 
-    _check_axes(seqs, length_axis, False)
+    check_axes(seqs, length_axis, False)
 
     seqs = cast_seqs(seqs)
 

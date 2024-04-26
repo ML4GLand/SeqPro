@@ -2,7 +2,7 @@ from typing import Optional
 
 import numpy as np
 
-from ._utils import StrSeqType, _check_axes, cast_seqs
+from ._utils import StrSeqType, cast_seqs, check_axes
 
 
 def remove_N_seqs(seqs):
@@ -54,7 +54,7 @@ def sanitize(seqs: StrSeqType, length_axis: Optional[int] = None):
     numpy.ndarray
         Array of sanitized sequences.
     """
-    _check_axes(seqs, length_axis, False)
+    check_axes(seqs, length_axis, False)
 
     seqs = cast_seqs(seqs)
 
