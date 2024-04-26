@@ -45,7 +45,7 @@ def cast_seqs(seqs: SeqType) -> NDArray[Union[np.bytes_, np.uint8]]:
         return cast(NDArray[Union[np.bytes_, np.uint8]], seqs)
 
 
-def _check_axes(
+def check_axes(
     seqs: SeqType,
     length_axis: Optional[Union[int, bool]] = None,
     ohe_axis: Optional[Union[int, bool]] = None,
@@ -78,12 +78,6 @@ def _check_axes(
 DTYPE = TypeVar("DTYPE", bound=np.generic)
 
 
-def array_slice(
-    a: NDArray[DTYPE],
-    axis: int,
-    start: Optional[int] = None,
-    stop: Optional[int] = None,
-    step: Optional[int] = None,
-) -> NDArray[DTYPE]:
+def array_slice(a: NDArray[DTYPE], axis: int, slice_: slice) -> NDArray[DTYPE]:
     """Slice an array from a dynamic axis."""
-    return a[(slice(None),) * (axis % a.ndim) + (slice(start, stop, step),)]
+    return a[(slice(None),) * (axis % a.ndim) + (slice_,)]
