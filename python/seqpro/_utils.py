@@ -34,6 +34,8 @@ def cast_seqs(seqs: SeqType) -> NDArray[Union[np.bytes_, np.uint8]]:
     ndarray with dtype |S1 or uint8
     """
     if isinstance(seqs, str):
+        if len(seqs) == 0:
+            raise ValueError("Empty string cannot be cast to a sequence array.")
         return np.array([seqs], "S").view("S1")
     elif isinstance(seqs, list):
         return np.array(seqs, "S")[..., None].view("S1")

@@ -15,7 +15,7 @@ requires-python = ">=3.8"
 dependencies = ["numba~=0.57.0", "numpy~=1.23.5"]
 
 [project.optional-dependencies]
-dev = ["matplotlib~=3.6.2", "pytest-cases~=3.8.0"]
+dev = ["matplotlib", "pytest", "pytest-cases", "hypothesis", "pytest-benchmark"]
 
 [build-system]
 requires = ["maturin>=1.4,<2.0"]
@@ -24,7 +24,6 @@ build-backend = "maturin"
 [tool.maturin]
 python-source = "python"
 features = ["pyo3/extension-module"]
-
 
 [tool.pyright]
 include = ['seqpro', 'notebooks', 'tests']
