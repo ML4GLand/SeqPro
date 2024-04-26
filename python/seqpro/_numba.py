@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, overload
 
 import numba as nb
 import numpy as np
@@ -59,47 +59,47 @@ def gufunc_ohe_char_idx(
             res[0] = i  # type: ignore
 
 
-@nb.guvectorize(
-    ["(u1, u1[:], i4[:], i4[:])"], "(),(n),(n)->()", target="parallel", cache=True
-)
+@overload
 def gufunc_tokenize(
     seq: NDArray[np.uint8],
-    alphabet: NDArray[np.uint8],
-    token_map: NDArray[np.int32],
+    source: NDArray[np.uint8],
+    target: NDArray[np.int32],
+    unknown_token: np.int32,
     res: Optional[NDArray[np.int32]] = None,
-) -> NDArray[np.int32]:  # type: ignore
-    """Tokenize a sequence.
+) -> NDArray[np.int32]: ...
 
-    Note: np.int32 is used intentionally since token IDs are generally used as indices into an array of embeddings
-    (a la torch.nn.Embedding)."""
-    res[0] = np.int32(-1)  # type: ignore
-    for i in nb.prange(len(alphabet)):
-        if seq == alphabet[i]:
-            res[0] = token_map[i]  # type: ignore
-            break
+
+@overload
+def gufunc_tokenize(
+    seq: NDArray[np.int32],
+    source: NDArray[np.int32],
+    target: NDArray[np.uint8],
+    unknown_token: np.uint8,
+    res: Optional[NDArray[np.uint8]] = None,
+) -> NDArray[np.uint8]: ...
 
 
 @nb.guvectorize(
-    ["(u1, u1[:], i4[:], u1, i4[:])"],
+    ["(u1, u1[:], i4[:], i4, i4[:])", "(i4, i4[:], u1[:], u1, u1[:])"],
     "(),(n),(n),()->()",
     target="parallel",
     cache=True,
 )
-def gufunc_untokenize(
-    seq: NDArray[np.int32],
-    alphabet: NDArray[np.uint8],
-    token_map: NDArray[np.int32],
-    unknown_char: np.uint8,
-    res: Optional[NDArray[np.uint8]] = None,
-) -> NDArray[np.uint8]:  # type: ignore
+def gufunc_tokenize(
+    seq: NDArray[Union[np.int32, np.uint8]],
+    source: NDArray[Union[np.int32, np.uint8]],
+    target: NDArray[Union[np.int32, np.uint8]],
+    unknown_token: Union[np.int32, np.uint8],
+    res: Optional[NDArray[Union[np.int32, np.uint8]]] = None,
+) -> NDArray[Union[np.int32, np.uint8]]:  # type: ignore
     """Tokenize a sequence.
 
-    Note: np.int32 is used intentionally since token IDs are generally used as indices into an array of embeddings
+    Note: np.int32 is returned since token IDs are generally used as indices into an array of embeddings
     (a la torch.nn.Embedding)."""
-    res[0] = unknown_char  # type: ignore
-    for i in nb.prange(len(alphabet)):
-        if seq == token_map[i]:
-            res[0] = alphabet[i]  # type: ignore
+    res[0] = unknown_token  # type: ignore
+    for i in nb.prange(len(source)):
+        if seq == source[i]:
+            res[0] = target[i]  # type: ignore
             break
 
 
