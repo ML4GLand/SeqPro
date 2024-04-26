@@ -4,7 +4,7 @@ from typing import List, Literal, Optional, Tuple, Union, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ._utils import SeqType, _check_axes, cast_seqs
+from ._utils import SeqType, cast_seqs, check_axes
 from .alphabets._alphabets import NucleotideAlphabet
 from .seqpro import _k_shuffle
 
@@ -61,7 +61,7 @@ def k_shuffle(
         Alphabet, needed for OHE sequence input.
     """
 
-    _check_axes(seqs, length_axis, ohe_axis)
+    check_axes(seqs, length_axis, ohe_axis)
 
     seqs = cast_seqs(seqs)
 

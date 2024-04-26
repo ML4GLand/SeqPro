@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .._numba import gufunc_ohe, gufunc_ohe_char_idx, gufunc_translate
-from .._utils import SeqType, StrSeqType, _check_axes, cast_seqs
+from .._utils import SeqType, StrSeqType, cast_seqs, check_axes
 
 
 class NucleotideAlphabet:
@@ -164,7 +164,7 @@ class NucleotideAlphabet:
         ndarray[bytes, uint8]
             Array of bytes (S1) or uint8 for string or OHE input, respectively.
         """
-        _check_axes(seqs, length_axis, ohe_axis)
+        check_axes(seqs, length_axis, ohe_axis)
 
         seqs = cast_seqs(seqs)
 
@@ -235,7 +235,7 @@ class AminoAlphabet:
             Amino acid sequences.
         """
         # TODO this doesn't respect start and stop codons, doing so would also require ragged arrays
-        _check_axes(seqs, length_axis, False)
+        check_axes(seqs, length_axis, False)
 
         seqs = cast_seqs(seqs)
 
