@@ -1,9 +1,10 @@
-from typing import Callable, Literal
+from typing import Callable, Dict, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .._modifiers import jitter, k_shuffle, reverse_complement
+from .._numba import gufunc_tokenize
 from ..alphabets import DNA
 
 
@@ -68,3 +69,14 @@ class Jitter:
         if len(out) == 1:
             out = out[0]
         return out
+
+
+class Tokenize:
+    def __init__(self, token_map: Dict[str, int], unknown_token: int = -1):
+        self.token_map = token_map
+        self.source = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
+        self.target = np.array(list(token_map.values()), dtype=np.int32)
+        self.unknown_token = np.int32(unknown_token)
+
+    def __call__(self, x: NDArray):
+        return gufunc_tokenize(x, self.source, self.target, self.unknown_token)
