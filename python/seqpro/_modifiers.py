@@ -186,7 +186,6 @@ def jitter(
     starts = rng.integers(
         0, arrays[0].shape[-1] - jittered_length + 1, jitter_axes_shape
     )
-    print(starts)
 
     sliced_arrs: List[NDArray] = []
     for arr in arrays:
