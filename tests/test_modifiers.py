@@ -71,14 +71,19 @@ def test_slice_kmers():
 
 def test_jitter():
     rng = np.random.default_rng(0)
-    arr1 = sp.random_seqs((3, 2, 7), sp.DNA)
-    arr2 = rng.integers(0, 5, (3, 2, 4, 7))
-    arr3 = rng.uniform(0, 5, (3, 2, 5, 6, 7)).astype(np.float16)
+    arr1 = sp.random_seqs((2, 1, 4), sp.DNA)
+    arr2 = rng.integers(0, 5, (2, 1, 4, 4))
+    arr3 = rng.uniform(0, 5, (2, 1, 5, 6, 4)).astype(np.float16)
 
     max_jitter = 1
+    jittered_length = 2
     jitter_axes = (0, 1)
     length_axis = -1
     seed = 0
+
+    rng = np.random.default_rng(seed)
+    starts = rng.integers(0, 3, (2, 1))
+    print(starts)
 
     jittered = sp.jitter(
         arr1,
@@ -90,9 +95,18 @@ def test_jitter():
         seed=seed,
     )
 
-    assert jittered[0].shape == (3, 2, 5)
-    assert jittered[1].shape == (3, 2, 4, 5)
-    assert jittered[2].shape == (3, 2, 5, 6, 5)
+    des_jit_arr1 = _slice_kmers(arr1, starts, jittered_length)
+    des_jit_arr2 = _slice_kmers(
+        np.moveaxis(arr2, (0, 1), (1, 2)), starts, jittered_length
+    )
+    des_jit_arr2 = np.moveaxis(des_jit_arr2, (1, 2), (0, 1))
+    des_jit_arr3 = _slice_kmers(
+        np.moveaxis(arr3, (0, 1), (2, 3)), starts, jittered_length
+    )
+    des_jit_arr3 = np.moveaxis(des_jit_arr3, (2, 3), (0, 1))
+    np.testing.assert_array_equal(jittered[0], des_jit_arr1, "Failed array 1")
+    np.testing.assert_array_equal(jittered[1], des_jit_arr2, "Failed array 2")
+    np.testing.assert_array_equal(jittered[2], des_jit_arr3, "Failed array 3")
 
 
 def _count_kmers(seqs, k, length_axis):

@@ -32,11 +32,14 @@ def test_ohe(seq: str):
     cast_seq = sp.cast_seqs(seq)
     ohe = sp.DNA.ohe(cast_seq)
 
-    note(f"{seq}, {cast_seq}")
+    note(f"{seq}, {cast_seq}, {ohe}")
 
-    for char in sp.DNA.array:
-        assert np.all(ohe[cast_seq == char, (sp.DNA.array == char).nonzero()[0]] == 1)
-        assert np.all(ohe[cast_seq != char, (sp.DNA.array != char).nonzero()[0]] == 0)
+    for i in range(len(seq)):
+        for char in sp.DNA.alphabet:
+            if seq[i] == char:
+                assert ohe[i, sp.DNA.alphabet.index(char)] == 1
+            else:
+                assert ohe[i, sp.DNA.alphabet.index(char)] == 0
 
 
 @given(seqs)

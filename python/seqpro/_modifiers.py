@@ -133,7 +133,7 @@ def jitter(
     max_jitter: int,
     length_axis: int,
     jitter_axes: Union[int, Tuple[int, ...]],
-    seed: Optional[int] = None,
+    seed: Optional[Union[int, np.random.Generator]] = None,
 ):
     """Randomly jitter data from arrays, using the same jitter across arrays.
 
@@ -166,7 +166,7 @@ def jitter(
     if isinstance(jitter_axes, int):
         jitter_axes = (jitter_axes,)
 
-    # move jitter axes and length axis to back
+    # move jitter axes and length axis to back such that shape = (..., jitter, length)
     arrays, destination_axes = _align_axes(*arrays, axes=(*jitter_axes, length_axis))
     short_arrays = []
     for i, arr in enumerate(arrays):
@@ -178,11 +178,15 @@ def jitter(
         )
 
     jittered_length = arrays[0].shape[-1] - 2 * max_jitter
-    jitter_axes_shape = arrays[0].shape[-len(jitter_axes) : -1]
-    rng = np.random.default_rng(seed)
+    jitter_axes_shape = arrays[0].shape[-len(jitter_axes) - 1 : -1]
+    if seed is None or isinstance(seed, int):
+        rng = np.random.default_rng(seed)
+    else:
+        rng = seed
     starts = rng.integers(
         0, arrays[0].shape[-1] - jittered_length + 1, jitter_axes_shape
     )
+    print(starts)
 
     sliced_arrs: List[NDArray] = []
     for arr in arrays:
