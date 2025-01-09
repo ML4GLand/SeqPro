@@ -47,6 +47,12 @@ def case_3d():
     return seqs, desired
 
 
+def case_full_codon_table():
+    seqs = sp.AA.codon_array
+    desired = sp.AA.aa_array[:, None]
+    return seqs, desired
+
+
 @parametrize_with_cases("seqs, desired", cases=".", prefix="case_")
 def test_translate(seqs, desired):
     actual = sp.AA.translate(seqs, length_axis=-1)
