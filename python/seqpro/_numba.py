@@ -110,25 +110,25 @@ def gufunc_tokenize(
     cache=True,
 )
 def gufunc_translate(
-    seq: NDArray[np.uint8],
-    codons: NDArray[np.uint8],
-    aminos_acids: NDArray[np.uint8],
+    seq_kmers: NDArray[np.uint8],
+    kmer_keys: NDArray[np.uint8],
+    kmer_values: NDArray[np.uint8],
     res: Optional[NDArray[np.uint8]] = None,
 ) -> NDArray[np.uint8]:  # type: ignore
     """Translate 3-mers into amino acids.
 
     Parameters
     ----------
-    seq : NDArray[np.uint8]
-        A k-mer or ndarray of k-mers.
-    codons : NDArray[np.uint8]
-        All unique k-mer codons as an (n, k) array.
-    aminos_acids : NDArray[np.uint8]
-        All amino acids corresponding to each codon, in matching order.
+    seq_kmers : NDArray[np.uint8]
+        A k-mer.
+    kmer_keys : NDArray[np.uint8]
+        All unique k-mers as an (n, k) array.
+    kmer_values : NDArray[np.uint8]
+        Values corresponding to each k-mer, in corresponding order.
     res : NDArray[np.uint8], optional
         Array to save the result in, by default None
     """
-    for i in nb.prange(len(codons)):
-        if (seq == codons[i]).all():
-            res[0] = aminos_acids[i]  # type: ignore
+    for i in nb.prange(len(kmer_keys)):
+        if (seq_kmers == kmer_keys[i]).all():
+            res[0] = kmer_values[i]  # type: ignore
             break
