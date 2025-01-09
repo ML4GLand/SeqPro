@@ -213,9 +213,11 @@ class AminoAlphabet:
             )
 
         self.codons = codons
-        self.amino_acids = list(set(amino_acids))
+        self.amino_acids = amino_acids
+
         self.codon_array = np.array(codons, "S")[..., None].view("S1")
-        self.aa_array = np.array(self.amino_acids, "S1")
+        self.aa_array = np.array(amino_acids, "S1")
+
         self.codon_to_aa = dict(zip(codons, amino_acids))
 
     def translate(
@@ -251,16 +253,10 @@ class AminoAlphabet:
             length_axis = seqs.ndim + length_axis
 
         # get k-mers (codons)
-        n = seqs.shape[length_axis] // codon_size
-        shape = *seqs.shape[:length_axis], n, codon_size, *seqs.shape[length_axis + 1 :]
+        codons = np.lib.stride_tricks.sliding_window_view(
+            seqs, window_shape=codon_size, axis=-1
+        )[..., ::codon_size, :]
         codon_axis = length_axis + 1
-        strides = (
-            *seqs.strides[:length_axis],
-            codon_size,
-            seqs.strides[length_axis],
-            *seqs.strides[length_axis + 1 :],
-        )
-        codons = np.lib.stride_tricks.as_strided(seqs, shape=shape, strides=strides)
 
         return gufunc_translate(
             codons.view(np.uint8),

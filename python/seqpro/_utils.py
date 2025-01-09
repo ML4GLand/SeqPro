@@ -3,10 +3,13 @@ from typing import List, Optional, TypeVar, Union, cast, overload
 import numpy as np
 from numpy.typing import NDArray
 
-StrSeqType = Union[str, List[str], NDArray[Union[np.str_, np.object_, np.bytes_]]]
-SeqType = Union[
-    str, List[str], NDArray[Union[np.str_, np.object_, np.bytes_, np.uint8]]
-]
+NestedStr = Union[str, List["NestedStr"]]
+"""String or nested list of strings"""
+
+StrSeqType = Union[NestedStr, NDArray[Union[np.str_, np.object_, np.bytes_]]]
+"""String sequence type (i.e. SeqType but not)"""
+
+SeqType = Union[NestedStr, NDArray[Union[np.str_, np.object_, np.bytes_, np.uint8]]]
 
 
 @overload
