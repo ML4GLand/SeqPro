@@ -77,7 +77,7 @@ class KShuffle:
             x,
             self.k,
             length_axis=self.length_axis,
-            seed=self.rng.integers(2**32, dtype=np.uint32),
+            seed=self.rng.integers(np.iinfo(np.uint32).max, dtype=np.uint32),
         )
 
 

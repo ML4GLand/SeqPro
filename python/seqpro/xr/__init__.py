@@ -2,13 +2,14 @@ from typing import Union
 
 import numpy as np
 from numpy.typing import NDArray
+
 from seqpro._numba import gufunc_ohe, gufunc_translate
 from seqpro.alphabets import AminoAlphabet, NucleotideAlphabet
 
 try:
     import xarray as xr
 except ImportError:
-    raise ImportError("Need to install XArray to use seqpro.xr")
+    raise ImportError("Need to install Xarray to use seqpro.xr")
 
 __all__ = ["ohe", "bin_coverage"]
 
