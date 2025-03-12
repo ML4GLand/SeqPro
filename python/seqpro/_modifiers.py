@@ -40,7 +40,7 @@ def k_shuffle(
     *,
     length_axis: Optional[int] = None,
     ohe_axis: Optional[int] = None,
-    seed: Optional[int] = None,
+    seed: Optional[Union[int, np.random.Generator]] = None,
     alphabet: Optional[NucleotideAlphabet] = None,
 ) -> NDArray[Union[np.bytes_, np.uint8]]:
     """Shuffle sequences while preserving k-let frequencies.
@@ -55,13 +55,16 @@ def k_shuffle(
     ohe_axes : Optional[int], optional
         Needed for OHE input. Axis that corresponds to the one hot encoding, should be
         the same size as the length of the alphabet.
-    seed : Optional[int], optional
-        Seed for shuffling.
+    seed : int, np.random.Generator, optional
+        Seed or generator for shuffling.
     alphabet : Optional[NucleotideAlphabet], optional
         Alphabet, needed for OHE sequence input.
     """
 
     check_axes(seqs, length_axis, ohe_axis)
+
+    if isinstance(seed, np.random.Generator):
+        seed = seed.integers(0, np.iinfo(np.int32).max)
 
     seqs = cast_seqs(seqs)
 
@@ -150,8 +153,8 @@ def jitter(
         Thus, if jitter_axes = 0, then every slice of data along axis 0 would be
         jittered independently. If jitter_axes = (0, 1), then each slice along axes 0
         and 1 would be randomly jittered independently.
-    seed : Optional[int], optional
-        Random seed, by default None
+    seed : int, np.random.Generator, optional
+        Random seed or generator, by default None
 
     Returns
     -------
@@ -177,18 +180,16 @@ def jitter(
             f"Arrays {short_arrays} have insufficient length to be jittered with max_jitter={max_jitter}."
         )
 
-    jittered_length = arrays[0].shape[-1] - 2 * max_jitter
     jitter_axes_shape = arrays[0].shape[-len(jitter_axes) - 1 : -1]
     if seed is None or isinstance(seed, int):
         rng = np.random.default_rng(seed)
     else:
         rng = seed
-    starts = rng.integers(
-        0, arrays[0].shape[-1] - jittered_length + 1, jitter_axes_shape
-    )
+    starts = rng.integers(0, 2 * max_jitter + 1, jitter_axes_shape)
 
     sliced_arrs: List[NDArray] = []
     for arr in arrays:
+        jittered_length = arr.shape[-1] - 2 * max_jitter
         sliced = _slice_kmers(arr, starts, jittered_length)
         sliced = np.moveaxis(sliced, destination_axes, [*jitter_axes, length_axis])
         sliced_arrs.append(sliced)
@@ -268,7 +269,7 @@ def _slice_kmers(array: NDArray, starts: NDArray, k: int):
 def random_seqs(
     shape: Union[int, Tuple[int, ...]],
     alphabet: NucleotideAlphabet,
-    seed: Optional[int] = None,
+    seed: Optional[Union[int, np.random.Generator]] = None,
 ):
     """Generate random nucleotide sequences.
 
@@ -278,16 +279,17 @@ def random_seqs(
         Shape of sequences to generate
     alphabet : NucleotideAlphabet
         Alphabet to sample nucleotides from.
-    seed : int, optional
-        Random seed.
+    seed : int, np.random.Generator, optional
+        Random seed or generator.
 
     Returns
     -------
     ndarray
         Randomly generated sequences.
     """
-    rng = np.random.default_rng(seed)
-    return rng.choice(alphabet.array, size=shape)
+    if isinstance(seed, int) or seed is None:
+        seed = np.random.default_rng(seed)
+    return seed.choice(alphabet.array, size=shape)
 
 
 class NormalizationMethod(str, Enum):

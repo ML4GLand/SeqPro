@@ -12,10 +12,22 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 requires-python = ">=3.9"
-dependencies = ["numba>=0.58.1", "numpy>=1.26.0"]
+dependencies = [
+    "numba>=0.58.1",
+    "numpy>=1.26.0",
+    "polars>=1,<2",
+    "pyranges>=0.1.3,<0.2",
+    "pandera>=0.19",
+]
 
 [project.optional-dependencies]
-dev = ["matplotlib", "pytest<8", "pytest-cases", "hypothesis", "pytest-benchmark"]
+dev = [
+    "matplotlib",
+    "pytest<8",
+    "pytest-cases",
+    "hypothesis",
+    "pytest-benchmark",
+]
 
 [build-system]
 requires = ["maturin>=1.4,<2.0"]
