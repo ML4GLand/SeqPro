@@ -122,7 +122,7 @@ def broadpeak_valid():
 @parametrize_with_cases("bed", cases=".", prefix="bed_")
 def test_read_bed(bed: pl.DataFrame):
     with NamedTemporaryFile("w+", suffix=".bed") as f:
-        bed.with_columns(pl.col(r"^name|score|strand$").fill_null(".")).write_csv(
+        bed.with_columns(pl.col(r"^(name|score|strand)$").fill_null(".")).write_csv(
             f.name, include_header=False, separator="\t"
         )
         assert_frame_equal(sp.bed.read_bedlike(f.name), bed)

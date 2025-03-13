@@ -42,6 +42,13 @@ def with_length(bed: pl.DataFrame, length: int) -> pl.DataFrame:
 def to_pyranges(bedlike: pl.DataFrame) -> pr.PyRanges:
     """Convert a BED-like DataFrame to a PyRanges object.
 
+    .. important::
+        PyRanges automatically sorts the DataFrame by chromosome and start position, so the order of
+        the regions may change after conversion. You can keep track of the original
+        order by `adding an index column <https://docs.pola.rs/api/python/stable/reference/dataframe/api/polars.DataFrame.with_row_index.html>`_
+        before converting to a PyRanges object. After converting back to a DataFrame, you can sort the DataFrame by the index to
+        get the original order.
+
     Parameters
     ----------
     bedlike
@@ -56,7 +63,7 @@ def to_pyranges(bedlike: pl.DataFrame) -> pr.PyRanges:
                 "strand": "Strand",
             },
             strict=False,
-        ).to_pandas()
+        ).to_pandas(use_pyarrow_extension_array=True)
     )
 
 
@@ -68,8 +75,21 @@ def from_pyranges(pyr: pr.PyRanges) -> pl.DataFrame:
     pyr
         PyRanges object with at least the columns "Chromosome", "Start", and "End".
     """
-    return pl.from_pandas(pyr.df).rename(
-        {"Chromosome": "chrom", "Start": "chromStart", "End": "chromEnd"}
+    return (
+        pl.from_pandas(pyr.df)
+        .rename(
+            {
+                "Chromosome": "chrom",
+                "Start": "chromStart",
+                "End": "chromEnd",
+                "Strand": "strand",
+            },
+            strict=False,
+        )
+        .with_columns(
+            # pyranges casts these to categorical, but we want them back as strings
+            pl.col(r"^(chrom|strand)$").cast(pl.Utf8),
+        )
     )
 
 
