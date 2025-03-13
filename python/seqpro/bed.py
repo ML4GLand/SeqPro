@@ -9,9 +9,9 @@ from ._types import PathLike
 
 
 def with_length(bed: pl.DataFrame, length: int) -> pl.DataFrame:
-    """Adjust the length of windows in a BED-like DataFrame by expanding or shrinking relative
-    to the center (or peak) of the window. If the requested length is odd, the center will be
-    to the right side.
+    """Set the length of regions in a BED-like DataFrame to a fixed length by expanding or shrinking
+    relative to the center (or peak) of the window. If the original region size + length is odd, the
+    center will be 1 position closer the right end.
 
     Parameters
     ----------
@@ -60,9 +60,22 @@ def to_pyranges(bedlike: pl.DataFrame) -> pr.PyRanges:
     )
 
 
+def from_pyranges(pyr: pr.PyRanges) -> pl.DataFrame:
+    """Convert a PyRanges object to a BED-like DataFrame.
+
+    Parameters
+    ----------
+    pyr
+        PyRanges object with at least the columns "Chromosome", "Start", and "End".
+    """
+    return pl.from_pandas(pyr.df).rename(
+        {"Chromosome": "chrom", "Start": "chromStart", "End": "chromEnd"}
+    )
+
+
 def read_bedlike(path: PathLike) -> pl.DataFrame:
     """Reads a bed-like (BED3+) file as a pandas DataFrame. The file type is inferred
-    from the file extension.
+    from the file extension and supports .bed, .narrowPeak, and .broadPeak.
 
     Parameters
     ----------
@@ -216,7 +229,7 @@ BroadPeakSchema = pa.DataFrameSchema(
 )
 
 
-def _read_broadpeak(broadpeak_path: PathLike):
+def _read_broadpeak(broadpeak_path: PathLike) -> pl.DataFrame:
     with open(broadpeak_path) as f:
         skip_rows = 0
         while f.readline().startswith(("track", "browser")):
