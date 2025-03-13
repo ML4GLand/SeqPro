@@ -1,6 +1,6 @@
 import importlib.metadata as metadata
 
-from . import alphabets, transforms
+from . import alphabets, bed, transforms
 from ._analyzers import gc_content, length, nucleotide_content
 from ._encoders import decode_ohe, decode_tokens, ohe, pad_seqs, tokenize
 from ._modifiers import bin_coverage, jitter, k_shuffle, random_seqs, reverse_complement
@@ -31,4 +31,5 @@ __all__ = [
     "tokenize",
     "transforms",
     "decode_tokens",
+    "bed",
 ]

@@ -1,6 +1,6 @@
 [project]
 name = "seqpro"
-version = "0.1.16"
+version = "0.2.0"
 authors = [
     { name = "David Laub", email = "dlaub@ucsd.edu" },
     { name = "Adam Klie", email = "aklie@ucsd.edu" },
@@ -18,6 +18,8 @@ dependencies = [
     "polars>=1,<2",
     "pyranges>=0.1.3,<0.2",
     "pandera>=0.19",
+    "pandas",
+    "pyarrow",
 ]
 
 [project.optional-dependencies]
