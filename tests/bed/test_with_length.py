@@ -1,4 +1,5 @@
 import math
+from fractions import Fraction
 
 import hypothesis.strategies as st
 import polars as pl
@@ -99,15 +100,15 @@ def test_bed(bed: pl.DataFrame, length: int):
         _, start, end, peak = bed.row(0)
         _, adj_start, adj_end, peak = len_adj.row(0)
         if peak is None:
-            center = (start + end) / 2
+            center = Fraction(start + end, 2)
         else:
-            center = start + peak
+            center = int(start + peak)
     else:
         _, start, end = bed.row(0)
         _, adj_start, adj_end = len_adj.row(0)
-        center = (start + end) / 2
+        center = Fraction(start + end, 2)
 
-    desired_start = math.floor(center - length / 2)
+    desired_start = math.floor(center - Fraction(length, 2))
 
     assert adj_end - adj_start == length
     assert adj_start == desired_start
