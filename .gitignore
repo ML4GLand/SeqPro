@@ -148,3 +148,7 @@ cython_debug/
 # Added by cargo
 
 /target
+
+# pixi environments
+.pixi
+*.egg-info
