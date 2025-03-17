@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union, cast
+from typing import Dict, List, Optional, Union, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -9,6 +9,7 @@ from .._utils import SeqType, StrSeqType, cast_seqs, check_axes
 
 class NucleotideAlphabet:
     alphabet: str
+    """Alphabet excluding ambiguous characters e.g. "N" for DNA."""
     complement: str
     array: NDArray[np.bytes_]
     complement_map: Dict[str, str]
@@ -143,6 +144,20 @@ class NucleotideAlphabet:
         comp = bstring.translate(self.bytes_comp_table)
         return comp[::-1]
 
+    @overload
+    def reverse_complement(
+        self,
+        seqs: StrSeqType,
+        length_axis: Optional[int] = None,
+        ohe_axis: Optional[int] = None,
+    ) -> NDArray[np.bytes_]: ...
+    @overload
+    def reverse_complement(
+        self,
+        seqs: NDArray[np.uint8],
+        length_axis: Optional[int] = None,
+        ohe_axis: Optional[int] = None,
+    ) -> NDArray[np.uint8]: ...
     def reverse_complement(
         self,
         seqs: SeqType,
