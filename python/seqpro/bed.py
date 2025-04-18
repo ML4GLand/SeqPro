@@ -4,8 +4,30 @@ import pandera.dtypes as pat
 import pandera.polars as pa
 import polars as pl
 import pyranges as pr
+from natsort import natsorted
 
 from ._types import PathLike
+
+__all__ = [
+    "sort",
+    "with_length",
+    "to_pyranges",
+    "from_pyranges",
+    "read_bedlike",
+    "BEDSchema",
+    "NarrowPeakSchema",
+    "BroadPeakSchema",
+]
+
+
+def sort(bed: pl.DataFrame):
+    """Sort a BED-like DataFrame by chromosome, start, and end position, using the natural
+    order of chromosome names e.g. 1, 2, ..., 10, ..."""
+    contigs = bed["chrom"].unique()
+    with pl.StringCache():
+        pl.Series(natsorted(contigs), dtype=pl.Categorical())
+        bed = bed.sort(pl.col("chrom").cast(pl.Categorical()), "chromStart", "chromEnd")
+    return bed
 
 
 def with_length(bed: pl.DataFrame, length: int) -> pl.DataFrame:
@@ -159,7 +181,7 @@ def _read_bed(bed_path: PathLike) -> pl.DataFrame:
         schema_overrides={"chrom": pl.Utf8, "name": pl.Utf8, "strand": pl.Utf8},
         null_values=".",
     ).pipe(BEDSchema.validate)
-    return bed
+    return bed  # type: ignore
 
 
 NarrowPeakSchema = pa.DataFrameSchema(
@@ -225,7 +247,7 @@ def _read_narrowpeak(narrowpeak_path: PathLike) -> pl.DataFrame:
         .with_columns(pl.col("pValue", "qValue", "peak").replace(-1, None))
         .pipe(NarrowPeakSchema.validate)
     )
-    return narrowpeaks
+    return narrowpeaks  # type: ignore
 
 
 BroadPeakSchema = pa.DataFrameSchema(
@@ -277,4 +299,4 @@ def _read_broadpeak(broadpeak_path: PathLike) -> pl.DataFrame:
         .with_columns(pl.col("pValue", "qValue").replace(-1, None))
         .pipe(BroadPeakSchema.validate)
     )
-    return broadpeaks
+    return broadpeaks  # type: ignore

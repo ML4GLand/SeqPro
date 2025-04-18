@@ -1,6 +1,6 @@
 [project]
 name = "seqpro"
-version = "0.2.0"
+version = "0.2.1"
 authors = [
     { name = "David Laub", email = "dlaub@ucsd.edu" },
     { name = "Adam Klie", email = "aklie@ucsd.edu" },
@@ -20,16 +20,8 @@ dependencies = [
     "pandera>=0.19",
     "pandas",
     "pyarrow",
-]
-
-[project.optional-dependencies]
-dev = [
-    "matplotlib",
-    "pytest<8",
-    "pytest-cases",
-    "hypothesis",
-    "pytest-benchmark",
-    "biopython",
+    "natsort",
+    "setuptools>=70",  # uv + pyranges seems to miss this
 ]
 
 [build-system]
@@ -43,15 +35,10 @@ features = ["pyo3/extension-module"]
 [tool.pyright]
 include = ['seqpro', 'notebooks', 'tests']
 
-[tool.pixi.project]
-channels = ["conda-forge"]
-platforms = ["linux-64"]
-
-[tool.pixi.pypi-dependencies]
-seqpro = { path = ".", editable = true }
-
-[tool.pixi.environments]
-default = { solve-group = "default" }
-dev = { features = ["dev"], solve-group = "default" }
-
-[tool.pixi.tasks]
+[dependency-groups]
+dev = [
+    "biopython>=1.85",
+    "hypothesis[numpy]>=6.131.2",
+    "pytest>=8.3.5",
+    "pytest-cases>=3.8.6",
+]
