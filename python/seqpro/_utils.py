@@ -84,3 +84,24 @@ DTYPE = TypeVar("DTYPE", bound=np.generic)
 def array_slice(a: NDArray[DTYPE], axis: int, slice_: slice) -> NDArray[DTYPE]:
     """Slice an array from a dynamic axis."""
     return a[(slice(None),) * (axis % a.ndim) + (slice_,)]
+
+
+def lengths_to_offsets(
+    lengths: NDArray[np.integer], dtype: type[DTYPE] = np.uint64
+) -> NDArray[DTYPE]:
+    """Convert lengths to offsets.
+
+    Parameters
+    ----------
+    lengths
+        Lengths of the segments.
+
+    Returns
+    -------
+    offsets
+        Offsets of the segments.
+    """
+    offsets = np.empty(lengths.size + 1, dtype=dtype)
+    offsets[0] = 0
+    offsets[1:] = lengths.cumsum()
+    return offsets

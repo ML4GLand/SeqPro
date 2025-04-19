@@ -21,7 +21,8 @@ dependencies = [
     "pandas",
     "pyarrow",
     "natsort",
-    "setuptools>=70",  # uv + pyranges seems to miss this
+    "setuptools>=70", # uv + pyranges seems to miss this
+    "awkward>=2.5.0",
 ]
 
 [build-system]
