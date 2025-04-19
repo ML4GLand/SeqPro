@@ -1,6 +1,6 @@
 [project]
 name = "seqpro"
-version = "0.2.1"
+version = "0.2.2"
 authors = [
     { name = "David Laub", email = "dlaub@ucsd.edu" },
     { name = "Adam Klie", email = "aklie@ucsd.edu" },
@@ -21,8 +21,16 @@ dependencies = [
     "pandas",
     "pyarrow",
     "natsort",
-    "setuptools>=70", # uv + pyranges seems to miss this
+    "setuptools>=70",       # uv + pyranges seems to miss this
     "awkward>=2.5.0",
+]
+
+[dependency-groups]
+dev = [
+    "biopython>=1.85",
+    "hypothesis[numpy]>=6.131.2",
+    "pytest>=8.3.5",
+    "pytest-cases>=3.8.6",
 ]
 
 [build-system]
@@ -36,10 +44,12 @@ features = ["pyo3/extension-module"]
 [tool.pyright]
 include = ['seqpro', 'notebooks', 'tests']
 
-[dependency-groups]
-dev = [
-    "biopython>=1.85",
-    "hypothesis[numpy]>=6.131.2",
-    "pytest>=8.3.5",
-    "pytest-cases>=3.8.6",
-]
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "$version"
+legacy_tag_formats = ["v$version"]
+version_scheme = "semver2"
+version_provider = "pep621"
+update_changelog_on_bump = true
+major_version_zero = true
+annotated_tag = true
