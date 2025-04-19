@@ -1,3 +1,9 @@
+## 0.2.3 (2025-04-19)
+
+### Fix
+
+- move length_to_offsets to _ragged
+
 ## 0.2.2 (2025-04-19)
 
 ### Fix
