@@ -1,3 +1,9 @@
+## 0.2.4 (2025-04-19)
+
+### Fix
+
+- maintain_order of bed rows with same chrom, start, and end
+
 ## 0.2.3 (2025-04-19)
 
 ### Fix
