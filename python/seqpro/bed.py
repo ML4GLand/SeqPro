@@ -25,8 +25,13 @@ def sort(bed: pl.DataFrame):
     order of chromosome names e.g. 1, 2, ..., 10, ..."""
     contigs = bed["chrom"].unique()
     with pl.StringCache():
-        pl.Series(natsorted(contigs), dtype=pl.Categorical())
-        bed = bed.sort(pl.col("chrom").cast(pl.Categorical()), "chromStart", "chromEnd")
+        pl.Series(natsorted(contigs), dtype=pl.Categorical)
+        bed = bed.sort(
+            pl.col("chrom").cast(pl.Categorical),
+            "chromStart",
+            "chromEnd",
+            maintain_order=True,
+        )
     return bed
 
 
