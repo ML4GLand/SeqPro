@@ -140,6 +140,9 @@ class Ragged(Generic[RDTYPE]):
             f"Ragged<shape={self.shape} dtype={self.data.dtype} size={self.data.size}>"
         )
 
+    def __getitem__(self, idx) -> Self:
+        return type(self).from_awkward(self.to_awkward()[idx])  # type: ignore
+
     def to_awkward(self) -> ak.Array:
         """Convert to an `Awkward <https://awkward-array.org/doc/main/>`_ array without copying. Note that this effectively
         returns a view of the data, so modifying the data will modify the original array."""
