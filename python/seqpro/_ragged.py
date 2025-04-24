@@ -10,6 +10,8 @@ from awkward.index import Index64
 from numpy.typing import NDArray
 from typing_extensions import Self
 
+from ._utils import cast_seqs
+
 __all__ = ["Ragged"]
 
 DTYPE = TypeVar("DTYPE", bound=np.generic)
@@ -126,6 +128,21 @@ class Ragged(Generic[RDTYPE]):
         """
         return cls(data, lengths.shape, maybe_lengths=lengths)
 
+    @classmethod
+    def empty(cls, shape: tuple[int, ...], dtype: type[RDTYPE]) -> Self:
+        """Create an empty Ragged array with the given shape and dtype."""
+        data = np.empty(0, dtype=dtype)
+        offsets = np.zeros(np.prod(shape) + 1, dtype=OFFSET_TYPE)
+        return cls.from_offsets(data, shape, offsets)
+
+    @property
+    def is_empty(self) -> bool:
+        return self.data.size == 0
+
+    def to_numpy(self) -> NDArray[RDTYPE]:
+        """Note: potentially not zero-copy if offsets are ListArray."""
+        return self.to_awkward().to_numpy(allow_missing=False)
+
     def squeeze(self, axis: Optional[Union[int, Tuple[int, ...]]] = None) -> Self:
         """Squeeze the ragged array along the given non-ragged axis."""
         return type(self).from_lengths(self.data, self.lengths.squeeze(axis))
@@ -140,8 +157,14 @@ class Ragged(Generic[RDTYPE]):
             f"Ragged<shape={self.shape} dtype={self.data.dtype} size={self.data.size}>"
         )
 
-    def __getitem__(self, idx) -> Self:
-        return type(self).from_awkward(self.to_awkward()[idx])  # type: ignore
+    def __getitem__(self, idx) -> Ragged[RDTYPE] | NDArray[RDTYPE]:
+        item = self.to_awkward()[idx]
+        if isinstance(item, ak.Array):
+            return type(self).from_awkward(item)
+        elif isinstance(item, (str, bytes)):
+            return cast_seqs(item)  # type: ignore
+        else:
+            return item  # type: ignore
 
     def to_awkward(self) -> ak.Array:
         """Convert to an `Awkward <https://awkward-array.org/doc/main/>`_ array without copying. Note that this effectively

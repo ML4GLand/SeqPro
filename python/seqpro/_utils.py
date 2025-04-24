@@ -3,7 +3,7 @@ from typing import List, Optional, TypeVar, Union, cast, overload
 import numpy as np
 from numpy.typing import NDArray
 
-NestedStr = Union[str, List["NestedStr"]]
+NestedStr = Union[bytes, str, List["NestedStr"]]
 """String or nested list of strings"""
 
 StrSeqType = Union[NestedStr, NDArray[Union[np.str_, np.object_, np.bytes_]]]
@@ -40,6 +40,8 @@ def cast_seqs(seqs: SeqType) -> NDArray[Union[np.bytes_, np.uint8]]:
         if len(seqs) == 0:
             raise ValueError("Empty string cannot be cast to a sequence array.")
         return np.array([seqs], "S").view("S1")
+    elif isinstance(seqs, bytes):
+        return np.array([seqs]).view("S1")
     elif isinstance(seqs, list):
         return np.array(seqs, "S")[..., None].view("S1")
     elif seqs.dtype.itemsize > 1:  # dtype == U or bigger than S1
