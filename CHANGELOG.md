@@ -1,3 +1,13 @@
+## 0.3.0 (2025-04-25)
+
+### Feat
+
+- add __getitem__ for ragged that matches awkward
+
+### Fix
+
+- helper methods for empty ragged arrays
+
 ## 0.2.4 (2025-04-19)
 
 ### Fix
