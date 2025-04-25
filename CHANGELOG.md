@@ -1,3 +1,9 @@
+## 0.3.1 (2025-04-25)
+
+### Fix
+
+- support gzipped bedlike files
+
 ## 0.3.0 (2025-04-25)
 
 ### Feat
