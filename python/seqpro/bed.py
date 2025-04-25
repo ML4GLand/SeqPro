@@ -1,3 +1,5 @@
+import gzip
+from functools import partial
 from pathlib import Path
 
 import pandera.dtypes as pat
@@ -143,7 +145,7 @@ def read_bedlike(path: PathLike) -> pl.DataFrame:
     else:
         raise ValueError(
             f"""Unrecognized file extension: {"".join(path.suffixes)}. Expected one of 
-            .bed, .narrowPeak, or .broadPeak"""
+            .bed, .narrowPeak, or .broadPeak (potentially gzipped)."""
         )
 
 
@@ -171,14 +173,24 @@ BEDSchema = pa.DataFrameSchema(
 )
 
 
-def _read_bed(bed_path: PathLike) -> pl.DataFrame:
-    with open(bed_path) as f:
+def _read_bed(path: PathLike) -> pl.DataFrame:
+    path = Path(path)
+
+    if path.suffix == ".bed":
+        opener = open
+    elif path.suffix == ".gz":
+        opener = partial(gzip.open, mode="rt")
+    else:
+        raise ValueError(f"Unsupported file type: {path.suffix}")
+
+    with opener(path) as f:
         skip_rows = 0
         while (line := f.readline()).startswith(("track", "browser")):
             skip_rows += 1
     n_cols = line.count("\t") + 1
+
     bed = pl.read_csv(
-        bed_path,
+        path,
         separator="\t",
         has_header=False,
         skip_rows=skip_rows,
@@ -216,14 +228,24 @@ NarrowPeakSchema = pa.DataFrameSchema(
 )
 
 
-def _read_narrowpeak(narrowpeak_path: PathLike) -> pl.DataFrame:
-    with open(narrowpeak_path) as f:
+def _read_narrowpeak(path: PathLike) -> pl.DataFrame:
+    path = Path(path)
+
+    if path.suffix == ".bed":
+        opener = open
+    elif path.suffix == ".gz":
+        opener = partial(gzip.open, mode="rt")
+    else:
+        raise ValueError(f"Unsupported file type: {path.suffix}")
+
+    with opener(path) as f:
         skip_rows = 0
         while f.readline().startswith(("track", "browser")):
             skip_rows += 1
+
     narrowpeaks = (
         pl.read_csv(
-            narrowpeak_path,
+            path,
             separator="\t",
             has_header=False,
             skip_rows=skip_rows,
@@ -276,14 +298,24 @@ BroadPeakSchema = pa.DataFrameSchema(
 )
 
 
-def _read_broadpeak(broadpeak_path: PathLike) -> pl.DataFrame:
-    with open(broadpeak_path) as f:
+def _read_broadpeak(path: PathLike) -> pl.DataFrame:
+    path = Path(path)
+
+    if path.suffix == ".bed":
+        opener = open
+    elif path.suffix == ".gz":
+        opener = partial(gzip.open, mode="rt")
+    else:
+        raise ValueError(f"Unsupported file type: {path.suffix}")
+
+    with opener(path) as f:
         skip_rows = 0
         while f.readline().startswith(("track", "browser")):
             skip_rows += 1
+
     broadpeaks = (
         pl.read_csv(
-            broadpeak_path,
+            path,
             separator="\t",
             has_header=False,
             skip_rows=skip_rows,
