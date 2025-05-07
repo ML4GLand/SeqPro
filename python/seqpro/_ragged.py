@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Generic, Optional, Tuple, TypeVar, Union, cast
+from typing import Generic, Optional, Sequence, Tuple, TypeVar, Union, cast, overload
 
 import awkward as ak
 import numpy as np
 from attrs import define
 from awkward.contents import ListArray, ListOffsetArray, NumpyArray, RegularArray
 from awkward.index import Index64
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 from typing_extensions import Self
 
 from ._utils import cast_seqs
@@ -129,7 +129,7 @@ class Ragged(Generic[RDTYPE]):
         return cls(data, lengths.shape, maybe_lengths=lengths)
 
     @classmethod
-    def empty(cls, shape: tuple[int, ...], dtype: type[RDTYPE]) -> Self:
+    def empty(cls, shape: int | tuple[int, ...], dtype: type[RDTYPE]) -> Self:
         """Create an empty Ragged array with the given shape and dtype."""
         data = np.empty(0, dtype=dtype)
         offsets = np.zeros(np.prod(shape) + 1, dtype=OFFSET_TYPE)
@@ -147,7 +147,7 @@ class Ragged(Generic[RDTYPE]):
         """Squeeze the ragged array along the given non-ragged axis."""
         return type(self).from_lengths(self.data, self.lengths.squeeze(axis))
 
-    def reshape(self, shape: Tuple[int, ...]) -> Self:
+    def reshape(self, shape: int | tuple[int, ...]) -> Self:
         """Reshape non-ragged axes."""
         # this is correct because all reshaping operations preserve the layout i.e. raveled ordered
         return type(self).from_lengths(self.data, self.lengths.reshape(shape))
@@ -157,9 +157,24 @@ class Ragged(Generic[RDTYPE]):
             f"Ragged<shape={self.shape} dtype={self.data.dtype} size={self.data.size}>"
         )
 
-    def __getitem__(self, idx) -> Ragged[RDTYPE] | NDArray[RDTYPE]:
+    @overload
+    def __getitem__(self, idx: int | tuple[int, ...]) -> NDArray[RDTYPE]: ...
+    @overload
+    def __getitem__(
+        self, idx: slice | Sequence[int] | tuple[slice | Sequence[int], ...]
+    ) -> Self: ...
+    @overload
+    def __getitem__(
+        self, idx: slice | ArrayLike | tuple[slice | ArrayLike, ...]
+    ) -> Self | NDArray[RDTYPE]: ...
+    def __getitem__(
+        self, idx: slice | ArrayLike | tuple[slice | ArrayLike, ...]
+    ) -> Self | NDArray[RDTYPE]:
         item = self.to_awkward()[idx]
         if isinstance(item, ak.Array):
+            # check if 1D, meaning the array is not ragged
+            if len(item.typestr.split(" * ")) == 2:
+                return item.to_numpy()
             return type(self).from_awkward(item)
         elif isinstance(item, (str, bytes)):
             return cast_seqs(item)  # type: ignore
@@ -169,6 +184,11 @@ class Ragged(Generic[RDTYPE]):
     def to_awkward(self) -> ak.Array:
         """Convert to an `Awkward <https://awkward-array.org/doc/main/>`_ array without copying. Note that this effectively
         returns a view of the data, so modifying the data will modify the original array."""
+        if self.dtype.type == np.void:
+            raise NotImplementedError(
+                "Converting Ragged arrays with structured dtype to/from Awkward is not supported."
+            )
+
         if self.dtype.type == np.bytes_ and self.dtype.itemsize == 1:
             data = NumpyArray(
                 self.data.view(np.uint8),  # type: ignore
@@ -244,6 +264,9 @@ class Ragged(Generic[RDTYPE]):
         return rag
 
     def __repr__(self):
+        if self.dtype.type == np.void:
+            return str(self)
+
         return cast(
             str,
             self.to_awkward().show(
