@@ -1,3 +1,9 @@
+## 0.3.2 (2025-05-07)
+
+### Fix
+
+- raise informative error for np.void ragged -> awk conversion, return correct value for 1D array result
+
 ## 0.3.1 (2025-04-25)
 
 ### Fix
