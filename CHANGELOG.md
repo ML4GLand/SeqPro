@@ -1,3 +1,9 @@
+## 0.4.2 (2025-05-22)
+
+### Fix
+
+- keep view as S1 for ragged -> numpy
+
 ## 0.4.1 (2025-05-22)
 
 ### Fix
