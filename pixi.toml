@@ -23,6 +23,7 @@ natsort = "*"
 pyarrow = "*"
 awkward = "*"
 uv = "*"
+maturin = "*"
 
 [pypi-dependencies]
 pyranges = "*"
@@ -54,7 +55,7 @@ pre-commit = "pre-commit install --hook-type commit-msg"
 i-kernel = "ipython kernel install --user --name seqpro"
 bump-dry = "cz bump --dry-run"
 publish = """
-    git checkout main && cz bump && git push --follow-tags && rm -rf dist && uv build && uv publish
+    git checkout main && cz bump && git push --follow-tags && maturin publish
     && git checkout stable && git pull origin stable && git rebase main && git push origin stable
     && git checkout main
     """
