@@ -1,3 +1,9 @@
+## 0.4.1 (2025-05-22)
+
+### Fix
+
+- expose gtf from top level
+
 ## 0.4.0 (2025-05-22)
 
 ### Feat
