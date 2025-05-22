@@ -1,0 +1,41 @@
+[workspace]
+authors = ["d-laub <dlaub@ucsd.edu>"]
+channels = ["conda-forge", "bioconda"]
+name = "SeqPro"
+platforms = ["linux-64"]
+
+[tasks]
+install = "uv pip install -e ."
+pre-commit = "pre-commit install --hook-type commit-msg"
+i-kernel = "ipython kernel install --user --name seqpro"
+test = { cmd = "pytest tests", depends-on = ["install"] }
+bump-dry = "cz bump --dry-run"
+publish = """
+    git checkout main && cz bump && git push --follow-tags && rm -rf dist && uv build && uv publish
+    && git checkout stable && git pull origin stable && git merge main && git push origin stable
+    && git checkout main
+    """
+
+[dependencies]
+numba = "0.58.1"
+numpy = "1.26.0"
+polars = "1.0.0"
+pyranges = "0.1.3"
+pandera = "0.19.0"
+pandas = "*"
+natsort = "*"
+pyarrow = "*"
+awkward = "2.5.0"
+uv = "*"
+
+[feature.doc.dependencies]
+python = "3.12.*"
+sphinx = "*"
+sphinx-book-theme = "*"
+sphinx-autobuild = "*"
+sphinx-autodoc-typehints = "*"
+myst-parser = "*"
+
+[feature.doc.tasks]
+install = "uv pip install -e ."
+doc = { cmd = "make clean && make html", cwd = "docs" }
