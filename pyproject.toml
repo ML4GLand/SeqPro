@@ -40,7 +40,6 @@ build-backend = "maturin"
 [tool.maturin]
 python-source = "python"
 features = ["pyo3/extension-module"]
-compatibility = "manylinux_2_28"
 
 [tool.basedpyright]
 include = ['python/seqpro', 'notebooks', 'tests']
