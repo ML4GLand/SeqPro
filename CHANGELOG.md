@@ -1,3 +1,9 @@
+## 0.4.0 (2025-05-22)
+
+### Feat
+
+- rename bed functions to be shorter. add basic gtf functions.
+
 ## 0.3.2 (2025-05-07)
 
 ### Fix
