@@ -141,7 +141,10 @@ class Ragged(Generic[RDTYPE]):
 
     def to_numpy(self) -> NDArray[RDTYPE]:
         """Note: potentially not zero-copy if offsets are ListArray."""
-        return self.to_awkward().to_numpy(allow_missing=False)
+        arr = self.to_awkward().to_numpy(allow_missing=False)
+        if self.dtype.type == np.bytes_:
+            arr = arr.view("S1")
+        return arr
 
     def squeeze(self, axis: Optional[Union[int, Tuple[int, ...]]] = None) -> Self:
         """Squeeze the ragged array along the given non-ragged axis."""
