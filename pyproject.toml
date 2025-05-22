@@ -41,8 +41,9 @@ build-backend = "maturin"
 python-source = "python"
 features = ["pyo3/extension-module"]
 
-[tool.pyright]
-include = ['seqpro', 'notebooks', 'tests']
+[tool.basedpyright]
+include = ['python/seqpro', 'notebooks', 'tests']
+enableTypeIgnoreComments = true
 
 [tool.commitizen]
 name = "cz_conventional_commits"

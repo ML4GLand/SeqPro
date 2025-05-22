@@ -12,10 +12,10 @@ from ._types import PathLike
 
 __all__ = [
     "sort",
-    "with_length",
-    "to_pyranges",
-    "from_pyranges",
-    "read_bedlike",
+    "with_len",
+    "to_pyr",
+    "from_pyr",
+    "read",
     "BEDSchema",
     "NarrowPeakSchema",
     "BroadPeakSchema",
@@ -37,7 +37,7 @@ def sort(bed: pl.DataFrame):
     return bed
 
 
-def with_length(bed: pl.DataFrame, length: int) -> pl.DataFrame:
+def with_len(bed: pl.DataFrame, length: int) -> pl.DataFrame:
     """Set the length of regions in a BED-like DataFrame to a fixed length by expanding or shrinking
     relative to the center (or peak) of the window. If the original region size + length is odd, the
     center will be 1 position closer the right end.
@@ -68,7 +68,7 @@ def with_length(bed: pl.DataFrame, length: int) -> pl.DataFrame:
     )
 
 
-def to_pyranges(bedlike: pl.DataFrame) -> pr.PyRanges:
+def to_pyr(bedlike: pl.DataFrame) -> pr.PyRanges:
     """Convert a BED-like DataFrame to a PyRanges object.
 
     .. important::
@@ -96,7 +96,7 @@ def to_pyranges(bedlike: pl.DataFrame) -> pr.PyRanges:
     )
 
 
-def from_pyranges(pyr: pr.PyRanges) -> pl.DataFrame:
+def from_pyr(pyr: pr.PyRanges) -> pl.DataFrame:
     """Convert a PyRanges object to a BED-like DataFrame.
 
     Parameters
@@ -122,7 +122,7 @@ def from_pyranges(pyr: pr.PyRanges) -> pl.DataFrame:
     )
 
 
-def read_bedlike(path: PathLike) -> pl.DataFrame:
+def read(path: PathLike) -> pl.DataFrame:
     """Reads a bed-like (BED3+) file as a pandas DataFrame. The file type is inferred
     from the file extension and supports .bed, .narrowPeak, and .broadPeak.
 
