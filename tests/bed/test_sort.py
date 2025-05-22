@@ -13,5 +13,5 @@ def test_sort():
     )
 
     actual_sort = sp.bed.sort(bed)
-    desired_sort = sp.bed.from_pyranges(sp.bed.to_pyranges(bed).sort())
+    desired_sort = sp.bed.from_pyr(sp.bed.to_pyr(bed).sort())
     assert_frame_equal(actual_sort, desired_sort)

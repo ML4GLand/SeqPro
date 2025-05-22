@@ -91,10 +91,10 @@ def case_invalid_peak():
 def test_bed(bed: pl.DataFrame, length: int):
     if length < 0:
         with pytest.raises(ValueError):
-            sp.bed.with_length(bed, length)
+            sp.bed.with_len(bed, length)
         return
 
-    len_adj = sp.bed.with_length(bed, length)
+    len_adj = sp.bed.with_len(bed, length)
 
     if "peak" in bed:
         _, start, end, peak = bed.row(0)

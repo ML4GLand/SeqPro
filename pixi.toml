@@ -4,7 +4,48 @@ channels = ["conda-forge", "bioconda"]
 name = "SeqPro"
 platforms = ["linux-64"]
 
-[tasks]
+[environments]
+dev = { features = ["dev", "py39"] }
+doc = { features = ["doc", "py312"] }
+py39 = { features = ["py39"] }
+py310 = { features = ["py310"] }
+py311 = { features = ["py311"] }
+py312 = { features = ["py312"] }
+py313 = { features = ["py313"] }
+
+[dependencies]
+numba = "*"
+numpy = "*"
+polars = "*"
+pandera = "*"
+pandas = "*"
+natsort = "*"
+pyarrow = "*"
+awkward = "*"
+uv = "*"
+
+[pypi-dependencies]
+pyranges = "*"
+
+[feature.dev.dependencies]
+numba = "==0.58.1"
+numpy = "==1.26.0"
+polars = "==1.10.0"
+pandera = "==0.22.1"
+pandas = "*"
+natsort = "*"
+pyarrow = "*"
+awkward = "==2.5.0"
+pytest = "*"
+pytest-cases = "*"
+biopython = "*"
+hypothesis = "*"
+ipykernel = "*"
+
+[feature.dev.pypi-dependencies]
+pyranges = "==0.1.3"
+
+[feature.dev.tasks]
 install = "uv pip install -e ."
 pre-commit = "pre-commit install --hook-type commit-msg"
 i-kernel = "ipython kernel install --user --name seqpro"
@@ -16,20 +57,7 @@ publish = """
     && git checkout main
     """
 
-[dependencies]
-numba = "0.58.1"
-numpy = "1.26.0"
-polars = "1.0.0"
-pyranges = "0.1.3"
-pandera = "0.19.0"
-pandas = "*"
-natsort = "*"
-pyarrow = "*"
-awkward = "2.5.0"
-uv = "*"
-
 [feature.doc.dependencies]
-python = "3.12.*"
 sphinx = "*"
 sphinx-book-theme = "*"
 sphinx-autobuild = "*"
@@ -39,3 +67,18 @@ myst-parser = "*"
 [feature.doc.tasks]
 install = "uv pip install -e ."
 doc = { cmd = "make clean && make html", cwd = "docs" }
+
+[feature.py39.dependencies]
+python = "3.9.*"
+
+[feature.py310.dependencies]
+python = "3.10.*"
+
+[feature.py311.dependencies]
+python = "3.11.*"
+
+[feature.py312.dependencies]
+python = "3.12.*"
+
+[feature.py313.dependencies]
+python = "3.13.*"

@@ -122,10 +122,14 @@ def broadpeak_valid():
 @parametrize_with_cases("bed", cases=".", prefix="bed_")
 def test_read_bed(bed: pl.DataFrame):
     with NamedTemporaryFile("w+", suffix=".bed") as f:
-        bed.with_columns(pl.col(r"^(name|score|strand)$").fill_null(".")).write_csv(
+        fill_null = [
+            pl.col(col).fill_null(".")
+            for col in {"name", "score", "strand"}.intersection(bed.columns)
+        ]
+        bed.with_columns(fill_null).write_csv(
             f.name, include_header=False, separator="\t"
         )
-        assert_frame_equal(sp.bed.read_bedlike(f.name), bed)
+        assert_frame_equal(sp.bed.read(f.name), bed)
 
 
 @parametrize_with_cases("bed", cases=".", prefix="narrowpeak_")
@@ -135,7 +139,7 @@ def test_read_narrowpeak(bed: pl.DataFrame):
             pl.col("name", "score", "strand").fill_null("."),
             pl.col("pValue", "qValue", "peak").fill_null(-1),
         ).write_csv(f.name, include_header=False, separator="\t")
-        assert_frame_equal(sp.bed.read_bedlike(f.name), bed)
+        assert_frame_equal(sp.bed.read(f.name), bed)
 
 
 @parametrize_with_cases("bed", cases=".", prefix="broadpeak_")
@@ -145,4 +149,4 @@ def test_read_broadpeak(bed: pl.DataFrame):
             pl.col("name", "score", "strand").fill_null("."),
             pl.col("pValue", "qValue").fill_null(-1),
         ).write_csv(f.name, include_header=False, separator="\t")
-        assert_frame_equal(sp.bed.read_bedlike(f.name), bed)
+        assert_frame_equal(sp.bed.read(f.name), bed)

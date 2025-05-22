@@ -206,19 +206,14 @@ NarrowPeakSchema = pa.DataFrameSchema(
         "chrom": pa.Column(str),
         "chromStart": pa.Column(int),
         "chromEnd": pa.Column(int),
-        "name": pa.Column(str, nullable=True, required=False),
-        "score": pa.Column(float, nullable=True, required=False),
-        "strand": pa.Column(
-            str, nullable=True, checks=pa.Check.isin(["+", "-", "."]), required=False
-        ),
-        "signalValue": pa.Column(float, nullable=True, required=False),
-        "pValue": pa.Column(float, nullable=True, required=False),
-        "qValue": pa.Column(float, nullable=True, required=False),
+        "name": pa.Column(str, nullable=True),
+        "score": pa.Column(float, nullable=True),
+        "strand": pa.Column(str, nullable=True, checks=pa.Check.isin(["+", "-", "."])),
+        "signalValue": pa.Column(float, nullable=True),
+        "pValue": pa.Column(float, nullable=True),
+        "qValue": pa.Column(float, nullable=True),
         "peak": pa.Column(
-            int,
-            nullable=True,
-            required=False,
-            checks=pa.Check.greater_than_or_equal_to(0),
+            int, nullable=True, checks=pa.Check.greater_than_or_equal_to(0)
         ),
     },
     checks=pa.Check(
@@ -231,7 +226,7 @@ NarrowPeakSchema = pa.DataFrameSchema(
 def _read_narrowpeak(path: PathLike) -> pl.DataFrame:
     path = Path(path)
 
-    if path.suffix == ".bed":
+    if path.suffix == ".narrowPeak":
         opener = open
     elif path.suffix == ".gz":
         opener = partial(gzip.open, mode="rt")
@@ -282,14 +277,12 @@ BroadPeakSchema = pa.DataFrameSchema(
         "chrom": pa.Column(str),
         "chromStart": pa.Column(int),
         "chromEnd": pa.Column(int),
-        "name": pa.Column(str, nullable=True, required=False),
-        "score": pa.Column(float, nullable=True, required=False),
-        "strand": pa.Column(
-            str, nullable=True, checks=pa.Check.isin(["+", "-", "."]), required=False
-        ),
-        "signalValue": pa.Column(float, nullable=True, required=False),
-        "pValue": pa.Column(float, nullable=True, required=False),
-        "qValue": pa.Column(float, nullable=True, required=False),
+        "name": pa.Column(str, nullable=True),
+        "score": pa.Column(float, nullable=True),
+        "strand": pa.Column(str, nullable=True, checks=pa.Check.isin(["+", "-", "."])),
+        "signalValue": pa.Column(float, nullable=True),
+        "pValue": pa.Column(float, nullable=True),
+        "qValue": pa.Column(float, nullable=True),
     },
     checks=pa.Check(
         lambda df: df.lazyframe.select(pl.col("chromEnd") >= pl.col("chromStart"))
@@ -301,7 +294,7 @@ BroadPeakSchema = pa.DataFrameSchema(
 def _read_broadpeak(path: PathLike) -> pl.DataFrame:
     path = Path(path)
 
-    if path.suffix == ".bed":
+    if path.suffix == ".broadPeak":
         opener = open
     elif path.suffix == ".gz":
         opener = partial(gzip.open, mode="rt")
