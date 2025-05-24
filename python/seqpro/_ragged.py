@@ -40,7 +40,7 @@ class Ragged(Generic[RDTYPE]):
 
     data: NDArray[RDTYPE]
     """A 1D array of the data."""
-    shape: Tuple[int, ...]
+    shape: tuple[int, ...]
     """Shape of the ragged array, excluding the length dimension. For example, if
         the shape is (2, 3), then the j, k-th element can be mapped to an index for
         offsets with :code:`i = np.ravel_multi_index((j, k), shape)`. The number of ragged
@@ -277,6 +277,22 @@ class Ragged(Generic[RDTYPE]):
                 stream=None,  # type: ignore
             ),
         )
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        if method == "__call__":
+            inputs = tuple(i.data if isinstance(i, Ragged) else i for i in inputs)
+            data = ufunc(*inputs, **kwargs)
+            return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+        else:
+            return NotImplemented
+
+    def __add__(self, other: int | float | Ragged):
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data + other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    __radd__ = __add__
 
 
 def lengths_to_offsets(
