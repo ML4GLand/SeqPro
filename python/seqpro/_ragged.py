@@ -20,7 +20,7 @@ LENGTH_TYPE = np.uint32
 OFFSET_TYPE = np.int64
 
 
-@define
+@define(eq=False, order=False)
 class Ragged(Generic[RDTYPE]):
     """Ragged array i.e. a rectilinear array where the final axis is ragged. Should not be initialized
     directly, use :meth:`from_offsets()` or :meth:`from_lengths()` instead.
@@ -184,6 +184,13 @@ class Ragged(Generic[RDTYPE]):
         else:
             return item  # type: ignore
 
+    def __setitem__(self, idx, value):
+        awk = self.to_awkward()
+        if isinstance(value, Ragged):
+            value = value.to_awkward()
+        awk[idx] = value
+        return type(self).from_awkward(awk)
+
     def to_awkward(self) -> ak.Array:
         """Convert to an `Awkward <https://awkward-array.org/doc/main/>`_ array without copying. Note that this effectively
         returns a view of the data, so modifying the data will modify the original array."""
@@ -267,16 +274,11 @@ class Ragged(Generic[RDTYPE]):
         return rag
 
     def __repr__(self):
-        if self.dtype.type == np.void:
-            return str(self)
-
-        return cast(
-            str,
-            self.to_awkward().show(
-                5,
-                stream=None,  # type: ignore
-            ),
-        )
+        msg = ""
+        if self.dtype.type != np.void:
+            msg += f"{self.to_awkward().show(5, stream=None)}\n"
+        msg += str(self)
+        return msg
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         if method == "__call__":
@@ -286,13 +288,323 @@ class Ragged(Generic[RDTYPE]):
         else:
             return NotImplemented
 
-    def __add__(self, other: int | float | Ragged):
+    def __add__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
         if isinstance(other, Ragged):
             other = other.data
         data = self.data + other
         return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
 
+    def __sub__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data - other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __rsub__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = other - self.data
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __mul__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data * other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __truediv__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data / other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __rtruediv__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = other / self.data
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __floordiv__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data // other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __rfloordiv__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = other // self.data
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __mod__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data % other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __rmod__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = other % self.data
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __pow__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data**other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __rpow__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = other**self.data
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __eq__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data == other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __ne__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data != other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __lt__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data < other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __le__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data <= other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __gt__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data > other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __ge__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data >= other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __or__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data | other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __and__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data & other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __xor__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data ^ other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __lshift__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data << other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __rlshift__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = other << self.data
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __rshift__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = self.data >> other
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __rrshift__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        data = other >> self.data
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __neg__(self: Ragged):
+        data = -self.data
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __pos__(self: Ragged):
+        data = +self.data
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __invert__(self: Ragged):
+        data = ~self.data
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __abs__(self: Ragged):
+        data = np.abs(self.data)
+        return Ragged(data, self.shape, self.maybe_offsets, self.maybe_lengths)
+
+    def __iadd__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data += other
+        return self
+
+    def __isub__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data -= other
+        return self
+
+    def __imul__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data *= other
+        return self
+
+    def __itruediv__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data /= other
+        return self
+
+    def __ifloordiv__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data //= other
+        return self
+
+    def __imod__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data %= other
+        return self
+
+    def __ipow__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data **= other
+        return self
+
+    def __iand__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data &= other
+        return self
+
+    def __ior__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data |= other
+        return self
+
+    def __ixor__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data ^= other
+        return self
+
+    def __ilshift__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data <<= other
+        return self
+
+    def __irshift__(self: Ragged, other: int | float | Ragged | ak.Array | NDArray):
+        if isinstance(other, ak.Array):
+            other = Ragged.from_awkward(other)
+        if isinstance(other, Ragged):
+            other = other.data
+        self.data >>= other
+        return self
+
     __radd__ = __add__
+    __rmul__ = __mul__
+    __rand__ = __and__
+    __ror__ = __or__
+    __rxor__ = __xor__
 
 
 def lengths_to_offsets(
