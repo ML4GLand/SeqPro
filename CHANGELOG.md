@@ -1,3 +1,10 @@
+## 0.5.0 (2025-05-24)
+
+### Feat
+
+- add all python ops and update repr to more clearly indicate type
+- ufunc and add support
+
 ## 0.4.2 (2025-05-22)
 
 ### Fix

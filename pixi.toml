@@ -24,6 +24,10 @@ pyarrow = "*"
 awkward = "*"
 uv = "*"
 maturin = "*"
+pytest = "*"
+pytest-cases = "*"
+biopython = "*"
+hypothesis = "*"
 
 [pypi-dependencies]
 pyranges = "*"
@@ -41,10 +45,6 @@ pandas = "*"
 natsort = "*"
 pyarrow = "*"
 awkward = "==2.5.0"
-pytest = "*"
-pytest-cases = "*"
-biopython = "*"
-hypothesis = "*"
 ipykernel = "*"
 
 [feature.dev.pypi-dependencies]
