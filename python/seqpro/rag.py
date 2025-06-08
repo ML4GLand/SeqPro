@@ -5,9 +5,17 @@ from typing import Generic, Optional, Sequence, Tuple, TypeVar, Union, cast, ove
 import awkward as ak
 import numpy as np
 from attrs import define
-from awkward.contents import ListArray, ListOffsetArray, NumpyArray, RegularArray
-from awkward.index import Index64
+from awkward.contents import (
+    Content,
+    EmptyArray,
+    ListArray,
+    ListOffsetArray,
+    NumpyArray,
+    RegularArray,
+)
+from awkward.index import Index, Index64
 from numpy.typing import ArrayLike, NDArray
+from ragged import array
 from typing_extensions import Self
 
 from ._utils import cast_seqs
@@ -20,8 +28,7 @@ LENGTH_TYPE = np.uint32
 OFFSET_TYPE = np.int64
 
 
-@define
-class Ragged(Generic[RDTYPE]):
+class Ragged(array, Generic[RDTYPE]):
     """Ragged array i.e. a rectilinear array where the final axis is ragged. Should not be initialized
     directly, use :meth:`from_offsets()` or :meth:`from_lengths()` instead.
 
@@ -38,59 +45,26 @@ class Ragged(Generic[RDTYPE]):
 
     """
 
-    data: NDArray[RDTYPE]
-    """A 1D array of the data."""
-    shape: Tuple[int, ...]
-    """Shape of the ragged array, excluding the length dimension. For example, if
-        the shape is (2, 3), then the j, k-th element can be mapped to an index for
-        offsets with :code:`i = np.ravel_multi_index((j, k), shape)`. The number of ragged
-        elements corresponds to the product of the shape."""
-    maybe_offsets: Optional[NDArray[OFFSET_TYPE]] = None
-    maybe_lengths: Optional[NDArray[LENGTH_TYPE]] = None
+    # shape: tuple[int, ...]
+    # """Shape of the ragged array, excluding the length dimension. For example, if
+    #     the shape is (2, 3), then the j, k-th element can be mapped to an index for
+    #     offsets with :code:`i = np.ravel_multi_index((j, k), shape)`. The number of ragged
+    #     elements corresponds to the product of the shape."""
 
-    def __attrs_post_init__(self):
-        if self.maybe_offsets is None and self.maybe_lengths is None:
-            raise ValueError("Either offsets or lengths must be provided.")
+    # def __len__(self):
+    #     return self.shape[0]
 
-    def __len__(self):
-        return self.shape[0]
-
-    def item(self):
-        a = self.squeeze()
-        if a.shape != ():
-            raise ValueError("Array has more than 1 ragged element.")
-        return a.data
+    # def item(self):
+    #     a = self.squeeze()
+    #     if a.shape != ():
+    #         raise ValueError("Array has more than 1 ragged element.")
+    #     return a.data
 
     def view(self, dtype: type[DTYPE]) -> Ragged[DTYPE]:
         """Return a view of the data with the given dtype."""
         return Ragged(
             self.data.view(dtype), self.shape, self.maybe_offsets, self.maybe_lengths
         )
-
-    @property
-    def ndim(self) -> int:
-        """Number of dimensions of the ragged array."""
-        return len(self.shape)
-
-    @property
-    def dtype(self) -> np.dtype[RDTYPE]:
-        """Data type of the data array."""
-        return self.data.dtype
-
-    @property
-    def offsets(self) -> NDArray[OFFSET_TYPE]:
-        """Offsets into the data array to get corresponding elements. The i-th element
-        is accessible as :code:`data[offsets[i]:offsets[i+1]]`."""
-        if self.maybe_offsets is None:
-            self.maybe_offsets = lengths_to_offsets(self.lengths, dtype=OFFSET_TYPE)
-        return self.maybe_offsets
-
-    @property
-    def lengths(self) -> NDArray[LENGTH_TYPE]:
-        """Array with appropriate shape containing lengths of each element in the ragged array."""
-        if self.maybe_lengths is None:
-            self.maybe_lengths = np.diff(self.offsets).reshape(self.shape)
-        return self.maybe_lengths
 
     @classmethod
     def from_offsets(
@@ -298,3 +272,116 @@ def lengths_to_offsets(
     offsets[0] = 0
     offsets[1:] = lengths.cumsum()
     return offsets
+
+
+@define
+class Parts(Generic[RDTYPE]):
+    data: NDArray[RDTYPE]
+    offsets: NDArray[OFFSET_TYPE]
+    shape: tuple[int | None, ...]
+    contiguous: bool
+
+
+def unbox(arr: Ragged[RDTYPE], as_contiguous: bool = False) -> Parts[RDTYPE]:
+    """Unbox an awkward array with a single ragged dimension into data, offsets, and shape.
+    Is guaranteed to be zero-copy if as_contiguous is False, in which case the data is a view
+    of the original array.
+
+    Parameters
+    ----------
+    arr
+        The awkward array to unbox.
+    as_contiguous
+        If True, the data will be returned as a contiguous array. May force a copy.
+
+    Returns
+    -------
+        Parts of the ragged array.
+    """
+    node = cast(Content, arr.layout)
+    shape: list[int | None] = [len(node)]
+    offsets = None
+
+    contiguous = None
+    while isinstance(node, (ListArray, ListOffsetArray, RegularArray)):
+        if isinstance(node, RegularArray):
+            shape.append(node.size)
+        else:
+            shape.append(None)
+            if isinstance(node, ListOffsetArray):
+                offsets = node.offsets.data
+                contiguous = True
+            else:
+                offsets = np.stack(
+                    [node.starts.data, node.stops.data],  # type: ignore
+                    1,
+                )
+                contiguous = False
+                if as_contiguous:
+                    raise NotImplementedError(
+                        "Converting to contiguous is not supported yet."
+                    )
+
+        node = node.content
+
+    if isinstance(node, EmptyArray):
+        node = node.to_NumpyArray(dtype=np.float64)
+
+    if isinstance(node, NumpyArray):
+        data = cast(NDArray, node.data)
+
+        if node.parameter("__array__") == "char":
+            # view uint8 as bytes
+            data = data.view("S1")
+
+        shape.extend(data.shape[1:])
+
+        if offsets is None or contiguous is None:
+            raise ValueError("Did not find offsets.")
+        offsets = cast(NDArray, offsets)
+        rag_dim = shape.index(None)
+        d0_size = offsets[-1]
+        reshape = cast(tuple[int, ...], (d0_size, *shape[rag_dim + 1 :]))
+        return Parts(data.reshape(reshape), offsets, tuple(shape), contiguous)
+
+    msg = f"Awkward Array type must have regular and irregular lists only, not {arr.layout.form.type!s}"
+    raise TypeError(msg)
+
+
+def box(parts: Parts[RDTYPE]) -> Ragged[RDTYPE]:
+    """Box a numpy array, offsets, and shape into an awkward array.
+
+    Parameters
+    ----------
+    data
+        The data of the awkward array.
+    offsets
+        The offsets of the awkward array. Must be a 1D array of integers.
+    shape
+        The shape of the awkward array. Must be a tuple of integers with a single None.
+
+    Returns
+    -------
+    ak.Array
+        The awkward array.
+    """
+    if parts.data.dtype.type == np.bytes_ and parts.data.dtype.itemsize == 1:
+        layout = NumpyArray(
+            parts.data.view(np.uint8),  # type: ignore
+            parameters={"__array__": "char"},
+        )
+    else:
+        layout = NumpyArray(parts.data.ravel())  # type: ignore
+
+    for size in reversed(parts.shape[1:]):
+        if size is None:
+            layout = ListOffsetArray(Index(parts.offsets), layout)
+        else:
+            layout = RegularArray(layout, size)
+
+    if len(layout) != parts.shape[0]:
+        raise ValueError(
+            f"Length of layout {len(layout)} does not match size of first dimension {parts.shape[0]}"
+        )
+
+    return Ragged(layout)
