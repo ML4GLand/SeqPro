@@ -89,7 +89,10 @@ class Ragged(Generic[RDTYPE]):
     def lengths(self) -> NDArray[LENGTH_TYPE]:
         """Array with appropriate shape containing lengths of each element in the ragged array."""
         if self.maybe_lengths is None:
-            self.maybe_lengths = np.diff(self.offsets).reshape(self.shape)
+            if self.offsets.ndim == 1:
+                self.maybe_lengths = np.diff(self.offsets).reshape(self.shape)
+            else:
+                self.maybe_lengths = np.diff(self.offsets, axis=0).reshape(self.shape)
         return self.maybe_lengths
 
     @classmethod
