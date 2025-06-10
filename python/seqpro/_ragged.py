@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Generic, Optional, Sequence, Tuple, TypeVar, Union, cast, overload
+from collections.abc import Sequence
+from typing import Generic, Optional, TypeVar, Union, cast, overload
 
 import awkward as ak
 import numpy as np
@@ -99,7 +100,7 @@ class Ragged(Generic[RDTYPE]):
     def from_offsets(
         cls,
         data: NDArray[RDTYPE],
-        shape: Union[int, Tuple[int, ...]],
+        shape: Union[int, tuple[int, ...]],
         offsets: NDArray[OFFSET_TYPE],
     ) -> Self:
         """Create a Ragged array from data and offsets.
@@ -149,7 +150,7 @@ class Ragged(Generic[RDTYPE]):
             arr = arr.view("S1")
         return arr
 
-    def squeeze(self, axis: Optional[Union[int, Tuple[int, ...]]] = None) -> Self:
+    def squeeze(self, axis: Optional[Union[int, tuple[int, ...]]] = None) -> Self:
         """Squeeze the ragged array along the given non-ragged axis."""
         return type(self).from_lengths(self.data, self.lengths.squeeze(axis))
 
