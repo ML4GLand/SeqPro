@@ -1,3 +1,10 @@
+## 0.6.0 (2025-06-10)
+
+### Fix
+
+- compute lengths for non-contiguous offsets
+- make Ragged.offsets layout match that of awkward for zero-copy conversion of non-contiguous data
+
 ## 0.5.0 (2025-05-24)
 
 ### Feat
