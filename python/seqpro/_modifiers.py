@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from enum import Enum
-from typing import List, Literal, Optional, Tuple, Union, cast
+from typing import Literal, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,9 +14,9 @@ from .seqpro import _k_shuffle
 def reverse_complement(
     seqs: SeqType,
     alphabet: NucleotideAlphabet,
-    length_axis: Optional[int] = None,
-    ohe_axis: Optional[int] = None,
-):
+    length_axis: int | None = None,
+    ohe_axis: int | None = None,
+) -> NDArray[np.bytes_]:
     """Reverse complement a sequence.
 
     Parameters
@@ -38,10 +40,10 @@ def k_shuffle(
     seqs: SeqType,
     k: int,
     *,
-    length_axis: Optional[int] = None,
-    ohe_axis: Optional[int] = None,
-    seed: Optional[Union[int, np.random.Generator]] = None,
-    alphabet: Optional[NucleotideAlphabet] = None,
+    length_axis: int | None = None,
+    ohe_axis: int | None = None,
+    seed: int | np.random.Generator | None = None,
+    alphabet: NucleotideAlphabet | None = None,
 ) -> NDArray[Union[np.bytes_, np.uint8]]:
     """Shuffle sequences while preserving k-let frequencies.
 
@@ -135,9 +137,9 @@ def jitter(
     *arrays: NDArray,
     max_jitter: int,
     length_axis: int,
-    jitter_axes: Union[int, Tuple[int, ...]],
-    seed: Optional[Union[int, np.random.Generator]] = None,
-):
+    jitter_axes: int | tuple[int, ...],
+    seed: int | np.random.Generator | None = None,
+) -> tuple[NDArray, ...]:
     """Randomly jitter data from arrays, using the same jitter across arrays.
 
     Parameters
@@ -187,7 +189,7 @@ def jitter(
         rng = seed
     starts = rng.integers(0, 2 * max_jitter + 1, jitter_axes_shape)
 
-    sliced_arrs: List[NDArray] = []
+    sliced_arrs: list[NDArray] = []
     for arr in arrays:
         jittered_length = arr.shape[-1] - 2 * max_jitter
         sliced = _slice_kmers(arr, starts, jittered_length)
@@ -197,7 +199,7 @@ def jitter(
     return tuple(sliced_arrs)
 
 
-def _align_axes(*arrays: NDArray, axes: Union[int, Tuple[int, ...]]):
+def _align_axes(*arrays: NDArray, axes: int | tuple[int, ...]):
     """Align axes of arrays, moving them to the back while preserving order.
 
     Parameters
@@ -220,7 +222,7 @@ def _align_axes(*arrays: NDArray, axes: Union[int, Tuple[int, ...]]):
         If axes cannot be aligned because they have different sizes.
     """
     if isinstance(axes, int):
-        source_axes: Tuple[int, ...] = (axes,)
+        source_axes: tuple[int, ...] = (axes,)
     else:
         source_axes = axes
 
@@ -254,7 +256,7 @@ def _slice_kmers(array: NDArray, starts: NDArray, k: int):
     """
     n_axes_sliced = starts.ndim
     n_axes_not_sliced = array.ndim - n_axes_sliced - 1  # - 1 for length axis
-    idx: List[Union[slice, NDArray]] = [slice(None)] * n_axes_not_sliced
+    idx: list[slice | NDArray] = [slice(None)] * n_axes_not_sliced
     for i, size in enumerate(array.shape[-starts.ndim - 1 : -1]):
         shape = np.ones(starts.ndim, dtype=np.uint32)
         shape[i] = size
@@ -267,10 +269,10 @@ def _slice_kmers(array: NDArray, starts: NDArray, k: int):
 
 
 def random_seqs(
-    shape: Union[int, Tuple[int, ...]],
+    shape: int | tuple[int, ...],
     alphabet: NucleotideAlphabet,
-    seed: Optional[Union[int, np.random.Generator]] = None,
-):
+    seed: int | np.random.Generator | None = None,
+) -> NDArray[np.bytes_]:
     """Generate random nucleotide sequences.
 
     Parameters
@@ -300,9 +302,9 @@ class NormalizationMethod(str, Enum):
 def normalize_coverage(
     coverage: NDArray,
     method: Literal["CPM", "CPKM"],
-    total_counts: Union[int, NDArray],
+    total_counts: int | NDArray,
     length_axis: int,
-):
+) -> NDArray:
     """Normalize an array of coverage. Note that whether this corresponds to the
     conventional definitions of CPM, RPKM, and FPKM depends on how the underlying
     coverage was quantified. If the coverage is for reads, then CPKM = RPKM. If it is

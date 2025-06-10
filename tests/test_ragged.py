@@ -1,6 +1,6 @@
 import numpy as np
 from pytest_cases import parametrize_with_cases
-from seqpro._ragged import OFFSET_TYPE, Ragged, lengths_to_offsets
+from seqpro.rag import OFFSET_TYPE, Ragged, lengths_to_offsets
 
 
 def case_int32():
@@ -23,8 +23,7 @@ def case_nested():
                 [[1], [3]],
                 [[2], [1]],
                 [[1], [2]],
-            ],
-            dtype=np.uint32,
+            ]
         ),
     )
 
