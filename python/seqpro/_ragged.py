@@ -210,9 +210,7 @@ class Ragged(Generic[RDTYPE]):
         if self.offsets.ndim == 1:
             layout = ListOffsetArray(Index64(self.offsets), data)
         else:
-            layout = ListArray(
-                Index64(self.offsets[:, 0]), Index64(self.offsets[:, 1]), data
-            )
+            layout = ListArray(Index64(self.offsets[0]), Index64(self.offsets[1]), data)
 
         for size in reversed(self.shape[1:]):
             layout = RegularArray(layout, size)
@@ -247,7 +245,7 @@ class Ragged(Generic[RDTYPE]):
                     NDArray[OFFSET_TYPE],
                     np.stack(
                         [starts, stops],  # type: ignore
-                        axis=-1,
+                        axis=0,
                         dtype=OFFSET_TYPE,
                     ),
                 )
