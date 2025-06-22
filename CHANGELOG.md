@@ -1,3 +1,9 @@
+## 0.6.1 (2025-06-21)
+
+### Fix
+
+- gtf attributes need not be quoted, fix regex to handle this flexibly.
+
 ## 0.6.0 (2025-06-10)
 
 ### Fix
