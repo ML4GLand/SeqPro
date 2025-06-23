@@ -1,3 +1,23 @@
+## 0.6.1 (2025-06-21)
+
+### Fix
+
+- gtf attributes need not be quoted, fix regex to handle this flexibly.
+
+## 0.6.0 (2025-06-10)
+
+### Fix
+
+- compute lengths for non-contiguous offsets
+- make Ragged.offsets layout match that of awkward for zero-copy conversion of non-contiguous data
+
+## 0.5.0 (2025-05-24)
+
+### Feat
+
+- add all python ops and update repr to more clearly indicate type
+- ufunc and add support
+
 ## 0.4.2 (2025-05-22)
 
 ### Fix

@@ -51,11 +51,17 @@ def scan(path: str | Path):
 
 
 def attr(attr: str):
-    """Extract a column from the attribute field.
+    """Extract a column from the attribute field. In general, GTF/GFF attributes can be any
+    type, so this always returns a Utf8 column. If an explicit cast is necessary, it can be
+    done by e.g. :code:`seqpro.gtf.attr(attr).cast(pl.Int32)`.
 
     Parameters
     ----------
     attr
         The attribute to extract.
     """
-    return pl.col("attribute").str.extract(rf"{attr} '(.*?)';?").alias(attr)
+    return (
+        pl.col("attribute")
+        .str.extract(rf"""{attr} ["']?([^"';]*)["']?;?""")
+        .alias(attr)
+    )
