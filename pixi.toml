@@ -41,10 +41,10 @@ numba = "==0.58.1"
 numpy = "==1.26.0"
 polars = "==1.10.0"
 pandera = "==0.22.1"
+awkward = "==2.5.0"
 pandas = "*"
 natsort = "*"
 pyarrow = "*"
-awkward = "==2.5.0"
 ipykernel = "*"
 
 [feature.dev.pypi-dependencies]
