@@ -23,7 +23,7 @@ jobs:
         with:
           ref: stable
           fetch-depth: 0
-          token: "${{ secrets.GITHUB_TOKEN }}"
+          token: "${{ secrets.GH_TOKEN }}"
       - name: Config git
         run: |
           git config --global user.name "${GITHUB_ACTOR}"

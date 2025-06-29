@@ -12,11 +12,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: "${{ secrets.GITHUB_TOKEN }}"
+          token: "${{ secrets.GH_TOKEN }}"
       - name: Create bump and changelog
         uses: commitizen-tools/commitizen-action@master
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.GH_TOKEN }}
           changelog_increment_filename: body.md
       - name: Release
         uses: softprops/action-gh-release@v2
@@ -24,4 +24,4 @@ jobs:
           body_path: "body.md"
           tag_name: ${{ env.REVISION }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
