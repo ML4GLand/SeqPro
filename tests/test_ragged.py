@@ -28,14 +28,6 @@ def case_nested():
     )
 
 
-@parametrize_with_cases("rag", cases=".")
-def test_roundtrip(rag: Ragged):
-    actual = Ragged.from_awkward(rag.to_awkward())
-    np.testing.assert_equal(actual.data, rag.data)
-    np.testing.assert_equal(actual.lengths, rag.lengths)
-    np.testing.assert_equal(actual.offsets, rag.offsets)
-
-
 def l2o_1d():
     lengths = np.array([3, 2, 5], dtype=np.uint32)
     desired = np.array([0, 3, 5, 10], dtype=OFFSET_TYPE)

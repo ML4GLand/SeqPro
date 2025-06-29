@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Callable, Generic, TypeVar, Union, cast
+from typing import TYPE_CHECKING, Callable, Generic, TypeVar, cast
 
 import awkward as ak
 import numpy as np
@@ -16,15 +16,14 @@ from awkward.contents import (
 )
 from awkward.index import Index
 from numpy.typing import NDArray
-from typing_extensions import Self
+from typing_extensions import Concatenate, ParamSpec, Self
 
-__all__ = ["Ragged"]
+from ._types import ak_dtypes
+from ._utils import OFFSET_TYPE, lengths_to_offsets
 
-ak_dtypes = Union[np.number, np.bytes_, np.datetime64, np.timedelta64]
 DTYPE = TypeVar("DTYPE", bound=ak_dtypes)
 RDTYPE = TypeVar("RDTYPE", bound=ak_dtypes)
-LENGTH_TYPE = np.uint32
-OFFSET_TYPE = np.int64
+P = ParamSpec("P")
 
 
 class Ragged(ak.Array, Generic[RDTYPE]):
@@ -34,20 +33,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         Ragged arrays only support a subset of Awkward array features.
 
         - Strings are not supported since ASCII is sufficient for the bioinformatics domain.
-        - Byte strings will have their length encoded as an explicit dimension, which allows variable sized groups
-        of fixed length strings to adhere to the Ragged invariant of exactly 1 ragged dimension. For example:
-
-            .. code-block:: python
-
-                seqs = sp.random_seqs((5,2), sp.DNA)
-                lengths = np.array([2, 3])
-                rag = Ragged.from_lengths(seqs, lengths)
-
-                [[b'AT', b'AC'],
-                [b'CG', b'CA', b'CC']]
-                ---------------------------------
-                type: 2 * var * 2 * bytes[ragged]
-
+        - Bytestrings count as a ragged dimension, and we break from the Awkward convention to not include a "var" in the type string.
         - Ragged arrays are not tested with support for Awkward fields or union types. Any functionality that appears
         to work with fields is experimental.
 
@@ -55,28 +41,30 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     _parts: RagParts[RDTYPE]
 
-    def __init__(self, data: Content | ak.Array | Ragged[RDTYPE] | RagParts[RDTYPE]):
+    def __init__(
+        self,
+        data: Content | ak.Array | Ragged[RDTYPE] | RagParts[RDTYPE],
+    ):
         if isinstance(data, RagParts):
             data = _parts_to_content(data)
         else:
-            data = ak.with_parameter(data, "__list__", "ragged", highlevel=False)
+            data = _with_ragged(data)
         super().__init__(data, behavior=deepcopy(behavior))
         self._parts = unbox(self)
         type_parts = []
         name = self.parts.data.dtype.name
         if name == "bytes8":
             name = "bytes"
-        else:
-            type_parts.append("var")
+        type_parts.append("var")
         type_parts.extend([str(s) for s in self.shape[self.rag_dim + 1 :]])
-        type_parts.append(f"ragged[{name}]")
+        type_parts.append(f"rag[{name}]")
         self.behavior["__typestr__", "ragged"] = " * ".join(type_parts)  # type: ignore
 
     @staticmethod
     def from_offsets(
         data: NDArray[DTYPE],
-        offsets: NDArray[OFFSET_TYPE],
         shape: tuple[int | None, ...],
+        offsets: NDArray[OFFSET_TYPE],
     ) -> Ragged[DTYPE]:
         """Create a Ragged array from data, offsets, and shape.
 
@@ -84,12 +72,12 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         ----------
         data
             The data to create the Ragged array from.
-        offsets
-            The offsets to create the Ragged array from.
         shape
             The shape of the Ragged array.
+        offsets
+            The offsets to create the Ragged array from.
         """
-        parts = RagParts[DTYPE](data, offsets, shape)
+        parts = RagParts[DTYPE](data, shape, offsets)
         return Ragged(parts)
 
     @staticmethod
@@ -120,7 +108,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     @property
     def offsets(self) -> NDArray[OFFSET_TYPE]:
-        """The offsets of the Ragged array."""
+        """The offsets of the Ragged array. May be 1- or 2-dimensional."""
         return self._parts.offsets
 
     @property
@@ -174,7 +162,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
             np.prod(shape[:rag_dim]) + 1,  # type: ignore
             dtype=OFFSET_TYPE,
         )
-        parts = RagParts(data, offsets, shape)
+        parts = RagParts(data, shape, offsets)
         content = _parts_to_content(parts)
         return cls(content)
 
@@ -217,26 +205,52 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     def squeeze(self, axis: int | tuple[int, ...] | None = None) -> Self:
         """Squeeze the ragged array along the given non-ragged axis."""
-        parts = RagParts[RDTYPE].from_lengths(
-            self._parts.data, self.lengths.squeeze(axis)
-        )
-        content = _parts_to_content(parts)
-        return type(self)(content)
+        if axis is None:
+            data = self._parts.data.squeeze()
+            shape = tuple(s for s in self.shape if s != 1)
+            parts = RagParts[RDTYPE](data, shape, self.offsets)
+            return type(self)(parts)
 
-    def reshape(self, shape: int | tuple[int | None, ...]) -> Self:
+        if isinstance(axis, int):
+            axis = (axis,)
+        axis = tuple(a if a >= 0 else self.ndim + a + 1 for a in axis)
+        for a in axis:
+            if (size := self.shape[a]) != 1:
+                raise ValueError(f"Cannot squeeze axis {a} of size {size}.")
+
+        shape = tuple(s for i, s in enumerate(self.shape) if i not in axis)
+        data_shape = tuple(
+            s for i, s in enumerate(self.shape) if i not in axis and i > self.rag_dim
+        )
+        data = self._parts.data.reshape(len(self._parts.data), *data_shape)
+
+        parts = RagParts[RDTYPE](data, shape, self.offsets)
+        return type(self)(parts)
+
+    def reshape(self, *shape: int | None | tuple[int | None, ...]) -> Self:
         """Reshape non-ragged axes."""
         # this is correct because all reshaping operations preserve the layout i.e. raveled ordered
-        if isinstance(shape, int):
-            shape = (shape,)
+        if isinstance(shape[0], tuple):
+            if len(shape) > 1:
+                raise ValueError("Cannot mix tuple and non-tuple shapes.")
+            shape = cast(tuple[tuple[int | None, ...]], shape)
+            shape = shape[0]
+
+        if TYPE_CHECKING:
+            shape = cast(tuple[int | None, ...], shape)
+
         rag_dim = shape.index(None)
-        parts = RagParts[
-            RDTYPE
-        ].from_lengths(
-            self._parts.data.reshape(-1, *shape[rag_dim + 1 :]),  # type: ignore
-            self.lengths.reshape(shape[:rag_dim]),  # type: ignore
+        rag_shape = cast(tuple[int, ...], self.shape[: self.rag_dim])
+        n_rag = np.prod(rag_shape)
+        new_rag_shape = cast(tuple[int, ...], shape[:rag_dim])
+        n_new_rag = abs(np.prod(new_rag_shape))
+        new_rag_shape = tuple(
+            s if s >= 0 else int(n_rag // n_new_rag) for s in new_rag_shape
         )
-        content = _parts_to_content(parts)
-        return type(self)(content)
+        data = self._parts.data.reshape(len(self._parts.data), *shape[rag_dim + 1 :])
+        new_shape = (*new_rag_shape, None, *data.shape[1:])
+        parts = RagParts[RDTYPE](data, new_shape, self.offsets)
+        return type(self)(parts)
 
     def to_ak(self):
         """Convert to an Awkward array."""
@@ -244,9 +258,16 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         arr.behavior = None
         return arr
 
-    def apply(self, gufunc: Callable[[NDArray[RDTYPE]], DTYPE]) -> Ragged[DTYPE]:
-        """Apply a gufunc to the data of the Ragged array."""
-        ...
+    def apply(
+        self,
+        gufunc: Callable[Concatenate[NDArray[RDTYPE], P], DTYPE],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Ragged[DTYPE]:
+        """Apply a gufunc to the data of the Ragged array that does not alter the shape of the data."""
+        data = gufunc(self.data, *args, **kwargs)
+        parts = RagParts(data, self.shape, self.offsets)
+        return Ragged(parts)
 
 
 behavior = deepcopy(ak.behavior)
@@ -263,6 +284,14 @@ def _n_var(arr: ak.Array) -> int:
     return n_var
 
 
+def _with_ragged(arr: ak.Array | Content) -> ak.Array:
+    def fn(layout, **kwargs):
+        if isinstance(layout, (ListArray, ListOffsetArray)):
+            return ak.with_parameter(layout, "__list__", "ragged", highlevel=False)
+
+    return ak.transform(fn, arr)
+
+
 def _without_ragged(arr: ak.Array | Ragged[DTYPE]) -> ak.Array:
     def fn(layout, **kwargs):
         if isinstance(layout, (ListArray, ListOffsetArray)):
@@ -271,32 +300,12 @@ def _without_ragged(arr: ak.Array | Ragged[DTYPE]) -> ak.Array:
     return ak.transform(fn, arr)
 
 
-def lengths_to_offsets(
-    lengths: NDArray[np.integer], dtype: type[DTYPE] = OFFSET_TYPE
-) -> NDArray[DTYPE]:
-    """Convert lengths to offsets.
-
-    Parameters
-    ----------
-    lengths
-        Lengths of the segments.
-
-    Returns
-    -------
-    offsets
-        Offsets of the segments.
-    """
-    offsets = np.empty(lengths.size + 1, dtype=dtype)
-    offsets[0] = 0
-    offsets[1:] = lengths.cumsum()
-    return offsets
-
-
 @define
 class RagParts(Generic[DTYPE]):
     data: NDArray[DTYPE]
-    offsets: NDArray[OFFSET_TYPE]
     shape: tuple[int | None, ...]
+    offsets: NDArray[OFFSET_TYPE]
+    """(n_ragged + 1) or (2, n_ragged)"""
 
     @property
     def contiguous(self) -> bool:
@@ -306,7 +315,7 @@ class RagParts(Generic[DTYPE]):
     def from_lengths(cls, data: NDArray[DTYPE], lengths: NDArray[np.integer]) -> Self:
         offsets = lengths_to_offsets(lengths)
         shape = (*lengths.shape, None, *data.shape[1:])
-        return cls(data, offsets, shape)
+        return cls(data, shape, offsets)
 
 
 def unbox(
@@ -345,7 +354,7 @@ def unbox(
             else:
                 offsets = np.stack(
                     [node.starts.data, node.stops.data],  # type: ignore
-                    1,
+                    0,
                 )
 
         node = node.content
@@ -368,16 +377,14 @@ def unbox(
 
         rag_dim = shape.index(None)
         reshape = cast(tuple[int, ...], (-1, *shape[rag_dim + 1 :]))
-        return RagParts(data.reshape(reshape), offsets, tuple(shape))
+        return RagParts(data.reshape(reshape), tuple(shape), offsets)
 
     msg = f"Awkward Array type must have regular and irregular lists only, not:\n{arr.layout}"
     raise TypeError(msg)
 
 
 def _parts_to_content(parts: RagParts[DTYPE]) -> Content:
-    list_params = {"__list__": "ragged"}
     if parts.data.dtype.str == "|S1":
-        list_params["__array__"] = "bytestring"
         layout = NumpyArray(
             parts.data.view(np.uint8).ravel(),  # type: ignore
             parameters={"__array__": "byte"},
@@ -385,23 +392,22 @@ def _parts_to_content(parts: RagParts[DTYPE]) -> Content:
     else:
         layout = NumpyArray(parts.data.ravel())  # type: ignore
 
-    for size in reversed(parts.shape[1:]):
+    for i, size in enumerate(reversed(parts.shape[1:])):
         if size is None:
             if parts.contiguous:
-                layout = ListOffsetArray(
-                    Index(parts.offsets),
-                    layout,
-                    parameters=list_params,
-                )
+                layout = ListOffsetArray(Index(parts.offsets), layout)
             else:
                 layout = ListArray(
-                    Index(parts.offsets[:, 0]),
-                    Index(parts.offsets[:, 1]),
-                    layout,
-                    parameters=list_params,
+                    Index(parts.offsets[0, :]), Index(parts.offsets[1, :]), layout
                 )
+            layout = ak.with_parameter(layout, "__list__", "ragged", highlevel=False)
         else:
             layout = RegularArray(layout, size)
+
+        if i == 0 and parts.data.dtype.str == "|S1":
+            layout = ak.with_parameter(
+                layout, "__array__", "bytestring", highlevel=False
+            )
 
     if len(layout) != parts.shape[0]:
         raise ValueError(

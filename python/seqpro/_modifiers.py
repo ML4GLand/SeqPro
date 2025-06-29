@@ -16,7 +16,7 @@ def reverse_complement(
     alphabet: NucleotideAlphabet,
     length_axis: int | None = None,
     ohe_axis: int | None = None,
-) -> NDArray[np.bytes_]:
+) -> NDArray[np.bytes_ | np.uint8]:
     """Reverse complement a sequence.
 
     Parameters
