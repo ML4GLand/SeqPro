@@ -77,6 +77,27 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         offsets
             The offsets to create the Ragged array from.
         """
+        try:
+            rag_dim = shape.index(None)
+        except ValueError:
+            raise ValueError("Shape must have exactly one None dimension.")
+
+        if offsets.ndim == 1:
+            n_rag = len(offsets) - 1
+        else:
+            n_rag = offsets.shape[1]
+        if n_rag != np.prod(shape[:rag_dim], dtype=int):  # type: ignore
+            raise ValueError(
+                f"Number of ragged segments {n_rag} does not match product of ragged components of shape {shape[:rag_dim]}"
+            )
+
+        if offsets.ndim == 1:
+            size = offsets[-1] * np.prod(shape[rag_dim + 1 :], dtype=int)  # type: ignore
+            if data.size != size:
+                raise ValueError(
+                    f"Data size {data.size} does not match size implied by shape and contiguous offsets: {size}"
+                )
+
         parts = RagParts[DTYPE](data, shape, offsets)
         return Ragged(parts)
 
@@ -260,7 +281,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     def apply(
         self,
-        gufunc: Callable[Concatenate[NDArray[RDTYPE], P], DTYPE],
+        gufunc: Callable[Concatenate[NDArray[RDTYPE], P], NDArray[DTYPE]],
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Ragged[DTYPE]:
