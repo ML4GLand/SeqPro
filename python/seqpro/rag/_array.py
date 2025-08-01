@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import TYPE_CHECKING, Callable, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar, cast
 
 import awkward as ak
 import numpy as np
@@ -120,22 +120,24 @@ class Ragged(ak.Array, Generic[RDTYPE]):
     @property
     def parts(self) -> RagParts[RDTYPE]:
         """The parts of the Ragged array."""
+        if not hasattr(self, "_parts"):
+            self._parts = unbox(self)
         return self._parts
 
     @property
     def data(self) -> NDArray[RDTYPE]:
         """The data of the Ragged array."""
-        return self._parts.data
+        return self.parts.data
 
     @property
     def offsets(self) -> NDArray[OFFSET_TYPE]:
         """The offsets of the Ragged array. May be 1- or 2-dimensional."""
-        return self._parts.offsets
+        return self.parts.offsets
 
     @property
     def shape(self) -> tuple[int | None, ...]:
         """The shape of the Ragged array. The ragged dimension is :code:`None`."""
-        return self._parts.shape
+        return self.parts.shape
 
     @property
     def dtype(self) -> np.dtype[RDTYPE]:
@@ -153,7 +155,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         if self.offsets.ndim == 1:
             lengths = np.diff(self.offsets)
         else:
-            lengths = self.offsets[:, 1] - self.offsets[:, 0]
+            lengths = self.offsets[0, :] - self.offsets[1, :]
 
         return lengths.reshape(self.shape[: self.rag_dim])  # type: ignore
 
@@ -224,8 +226,11 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         else:
             return arr
 
-    def squeeze(self, axis: int | tuple[int, ...] | None = None) -> Self:
-        """Squeeze the ragged array along the given non-ragged axis."""
+    def squeeze(
+        self, axis: int | tuple[int, ...] | None = None
+    ) -> Self | NDArray[RDTYPE]:
+        """Squeeze the ragged array along the given non-ragged axis.
+        If squeezing would result in a 1D array, return the data as a numpy array."""
         if axis is None:
             data = self._parts.data.squeeze()
             shape = tuple(s for s in self.shape if s != 1)
@@ -244,6 +249,9 @@ class Ragged(ak.Array, Generic[RDTYPE]):
             s for i, s in enumerate(self.shape) if i not in axis and i > self.rag_dim
         )
         data = self._parts.data.reshape(len(self._parts.data), *data_shape)
+
+        if shape == (None,):
+            return data
 
         parts = RagParts[RDTYPE](data, shape, self.offsets)
         return type(self)(parts)
@@ -293,6 +301,16 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
 behavior = deepcopy(ak.behavior)
 behavior["*", "ragged"] = Ragged
+
+
+def apply_ufunc(
+    ufunc: np.ufunc, method: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+):
+    args = tuple(a.to_ak() if isinstance(a, Ragged) else a for a in args)
+    return Ragged(getattr(ufunc, method)(*args, **kwargs))
+
+
+ak.behavior[np.ufunc, "ragged"] = apply_ufunc
 
 
 def _n_var(arr: ak.Array) -> int:
