@@ -448,6 +448,9 @@ def _parts_to_content(parts: RagParts[DTYPE]) -> Content:
                 layout, "__array__", "bytestring", highlevel=False
             )
 
+    if isinstance(layout, NumpyArray):
+        raise ValueError("Data is effectively a 1D array, and thus not ragged.")
+
     if len(layout) != parts.shape[0]:
         raise ValueError(
             f"Length of layout {len(layout)} does not match size of first dimension {parts.shape[0]}"
