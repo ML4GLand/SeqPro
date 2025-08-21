@@ -16,14 +16,18 @@ from awkward.contents import (
 )
 from awkward.index import Index
 from numpy.typing import NDArray
-from typing_extensions import Concatenate, ParamSpec, Self
+from typing_extensions import Concatenate, ParamSpec, Self, TypeGuard
 
 from ._types import ak_dtypes
 from ._utils import OFFSET_TYPE, lengths_to_offsets
 
-DTYPE = TypeVar("DTYPE", bound=ak_dtypes)
-RDTYPE = TypeVar("RDTYPE", bound=ak_dtypes)
+DTYPE = TypeVar("DTYPE", bound=ak_dtypes, covariant=True)
+RDTYPE = TypeVar("RDTYPE", bound=ak_dtypes, covariant=True)
 P = ParamSpec("P")
+
+
+def is_rag_dtype(rag: Any, dtype: type[DTYPE]) -> TypeGuard[Ragged[DTYPE]]:
+    return isinstance(rag, Ragged) and np.issubdtype(rag.dtype, dtype)
 
 
 class Ragged(ak.Array, Generic[RDTYPE]):
@@ -155,7 +159,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         if self.offsets.ndim == 1:
             lengths = np.diff(self.offsets)
         else:
-            lengths = self.offsets[0, :] - self.offsets[1, :]
+            lengths = np.diff(self.offsets, axis=0)
 
         return lengths.reshape(self.shape[: self.rag_dim])  # type: ignore
 
@@ -174,8 +178,8 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     @classmethod
     def empty(
-        cls, shape: int | tuple[int | None, ...], dtype: type[RDTYPE]
-    ) -> Ragged[RDTYPE]:
+        cls, shape: int | tuple[int | None, ...], dtype: type[DTYPE]
+    ) -> Ragged[DTYPE]:
         """Create an empty Ragged array with the given shape and dtype."""
         data = np.empty(0, dtype=dtype)
         if isinstance(shape, int):
@@ -187,7 +191,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         )
         parts = RagParts(data, shape, offsets)
         content = _parts_to_content(parts)
-        return cls(content)
+        return cast(Ragged[DTYPE], cls(content))
 
     @property
     def is_empty(self) -> bool:
@@ -423,13 +427,16 @@ def unbox(
 
 
 def _parts_to_content(parts: RagParts[DTYPE]) -> Content:
+    if parts.data.ndim > 1:
+        parts.data = parts.data.ravel()
+
     if parts.data.dtype.str == "|S1":
         layout = NumpyArray(
-            parts.data.view(np.uint8).ravel(),  # type: ignore
+            parts.data.view(np.uint8),  # type: ignore
             parameters={"__array__": "byte"},
         )
     else:
-        layout = NumpyArray(parts.data.ravel())  # type: ignore
+        layout = NumpyArray(parts.data)  # type: ignore
 
     for i, size in enumerate(reversed(parts.shape[1:])):
         if size is None:
