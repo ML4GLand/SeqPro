@@ -1,14 +1,22 @@
 import gzip
+import warnings
 from functools import partial
 from pathlib import Path
 
 import pandera.dtypes as pat
 import pandera.polars as pa
 import polars as pl
-import pyranges as pr
 from natsort import natsorted
 
 from ._types import PathLike
+
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message="pkg_resources is deprecated as an API",
+        category=DeprecationWarning,
+    )
+    import pyranges as pr
 
 __all__ = [
     "sort",
