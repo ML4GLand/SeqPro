@@ -1,3 +1,14 @@
+## 0.7.0 (2025-08-22)
+
+### Feat
+
+- is_rag_dtype. fix: 2d offsets length calc
+
+### Fix
+
+- catch depcreation warning from pyranges for having an old packaging workflow
+- add informative errors for Ragged.from_offsets
+
 ## 0.6.1 (2025-06-21)
 
 ### Fix
