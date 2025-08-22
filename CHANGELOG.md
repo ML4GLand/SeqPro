@@ -1,3 +1,9 @@
+## 0.7.1 (2025-08-22)
+
+### Fix
+
+- add rlib crate type for more build flexibility
+
 ## 0.7.0 (2025-08-22)
 
 ### Feat
