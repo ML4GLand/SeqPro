@@ -158,6 +158,13 @@ class NucleotideAlphabet:
         length_axis: Optional[int] = None,
         ohe_axis: Optional[int] = None,
     ) -> NDArray[np.uint8]: ...
+    @overload
+    def reverse_complement(
+        self,
+        seqs: SeqType,
+        length_axis: Optional[int] = None,
+        ohe_axis: Optional[int] = None,
+    ) -> NDArray[Union[np.bytes_, np.uint8]]: ...
     def reverse_complement(
         self,
         seqs: SeqType,

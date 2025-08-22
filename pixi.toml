@@ -12,6 +12,7 @@ py310 = { features = ["py310"] }
 py311 = { features = ["py311"] }
 py312 = { features = ["py312"] }
 py313 = { features = ["py313"] }
+bench = { features = ["bench", "py313"] }
 
 [dependencies]
 numba = "*"
@@ -79,3 +80,12 @@ python = "3.12.*"
 
 [feature.py313.dependencies]
 python = "3.13.*"
+
+[feature.bench.pypi-dependencies]
+tangermeme = "*"
+dinuc-shuf = "*"
+ipykernel = "*"
+ipywidgets = "*"
+
+[feature.bench.tasks]
+i-kernel = "ipython kernel install --user --name seqpro-bench"

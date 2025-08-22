@@ -19,7 +19,6 @@ rayon = "1.8.0"
 thiserror = "1.0.53"
 xxhash-rust = { version = "0.8.8", features = ["xxh3"] }
 
-
 [dependencies.pyo3]
 version = "0.20"
 features = ["abi3-py39"]
