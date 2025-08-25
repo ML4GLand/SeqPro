@@ -1,7 +1,6 @@
 use derive_builder::Builder;
 use rand::{seq::SliceRandom, Rng, SeedableRng};
 use rayon::prelude::*;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use xxhash_rust::xxh3::Xxh3Builder;
 
@@ -20,9 +19,9 @@ pub enum KShuffleError {
 }
 
 #[derive(Builder)]
-#[builder(pattern = "owned")]
-struct Vertex<'a> {
-    indices: &'a mut [usize],
+#[builder(pattern = "immutable")]
+struct Vertex {
+    idx_offset: usize,
     n_indices: usize,
     i_indices: usize,
     intree: bool,
@@ -63,9 +62,7 @@ fn k_shuffle1(
     seed: Option<u64>,
     mut out: ArrayViewMut1<u8>,
 ) -> Result<()> {
-    let seed = seed.unwrap_or_else(|| {
-        rand::thread_rng().gen()
-    });
+    let seed = seed.unwrap_or_else(|| rand::thread_rng().gen());
     let mut rng = SmallRng::seed_from_u64(seed);
     let l = arr.len();
 
@@ -104,35 +101,32 @@ fn k_shuffle1(
     let root = arr.slice(s![-(k as isize - 1)..]).to_vec();
     let mut indices = vec![0 as usize; n_lets - 1];
     let mut vertices = (0..n_vertices)
-        .map(|_| RefCell::new(VertexBuilder::default().intree(false).n_indices(0).next(0)))
+        .map(|_| VertexBuilder::default().intree(false).n_indices(0).next(0))
         .collect::<Vec<_>>();
 
     // set i_sequence and n_indices for each vertex
     for (i, kmer) in arr.windows(k - 1).into_iter().enumerate() {
         let hentry = htable.get(&kmer.to_vec()).unwrap();
-        let v = vertices[hentry.i_vertices].take();
+        let v = &mut vertices[hentry.i_vertices];
 
         if i < n_lets - 1 {
             let n_indices = v.n_indices.map_or(1, |n| n + 1);
-            vertices[hentry.i_vertices] =
-                v.i_sequence(hentry.i_sequence).n_indices(n_indices).into();
+            vertices[hentry.i_vertices] = v.i_sequence(hentry.i_sequence).n_indices(n_indices);
         } else {
-            vertices[hentry.i_vertices] = v.i_sequence(hentry.i_sequence).into();
+            vertices[hentry.i_vertices] = v.i_sequence(hentry.i_sequence);
         }
     }
 
     // distribute indices
-    let mut for_vertex: &mut [usize];
-    let mut indices_slice = indices.as_mut_slice();
+    let mut current_idx = 0usize;
     for v in &mut vertices {
-        let temp = v.take();
-        (for_vertex, indices_slice) = indices_slice.split_at_mut(temp.n_indices.unwrap());
-        *v = temp.indices(for_vertex).into();
+        *v = v.idx_offset(current_idx).into();
+        current_idx += v.n_indices.unwrap();
     }
 
-    let vertices = vertices
+    let mut vertices = vertices
         .into_iter()
-        .map(|v| RefCell::new(v.take().i_indices(0).build().unwrap()))
+        .map(|v| v.i_indices(0).build().unwrap())
         .collect::<Vec<_>>();
 
     // populate indices for each vertex
@@ -145,10 +139,10 @@ fn k_shuffle1(
         let eu = htable.get(&kmer1.to_vec()).unwrap();
         let ev = htable.get(&kmer2.to_vec()).unwrap();
 
-        let mut u = vertices[eu.i_vertices].borrow_mut();
+        let u = &mut vertices[eu.i_vertices];
         if u.n_indices > 0 {
             let i_indices = u.i_indices;
-            u.indices[i_indices] = ev.i_vertices;
+            indices[u.idx_offset + i_indices] = ev.i_vertices;
             u.i_indices += 1;
         }
     }
@@ -156,7 +150,7 @@ fn k_shuffle1(
     // Wilson algorithm for random arborescence
     let root_idx = htable.get(&root).unwrap().i_vertices;
     {
-        let mut root_vertex = vertices[root_idx].borrow_mut();
+        let root_vertex = &mut vertices[root_idx];
         root_vertex.intree = true;
     }
 
@@ -166,18 +160,18 @@ fn k_shuffle1(
             let mut u_idx = i;
             loop {
                 {
-                    let u = vertices[u_idx].borrow();
+                    let u = &vertices[u_idx];
                     if u.intree {
                         break;
                     }
                 }
                 {
-                    let mut u = vertices[u_idx].borrow_mut();
+                    let u = &mut vertices[u_idx];
                     u.next = rng.gen_range(0..u.n_indices);
                 }
                 {
-                    let u = vertices[u_idx].borrow();
-                    u_idx = u.indices[u.next];
+                    let u = &vertices[u_idx];
+                    u_idx = indices[u.idx_offset + u.next];
                 }
             }
         }
@@ -185,18 +179,18 @@ fn k_shuffle1(
             let mut u_idx = i;
             loop {
                 {
-                    let u = vertices[u_idx].borrow();
+                    let u = &vertices[u_idx];
                     if u.intree {
                         break;
                     }
                 }
                 {
-                    let mut u = vertices[u_idx].borrow_mut();
+                    let u = &mut vertices[u_idx];
                     u.intree = true;
                 }
                 {
-                    let u = vertices[u_idx].borrow();
-                    u_idx = u.indices[u.next];
+                    let u = &vertices[u_idx];
+                    u_idx = indices[u.idx_offset + u.next];
                 }
             }
         }
@@ -204,16 +198,16 @@ fn k_shuffle1(
 
     // shuffle indices to prepare for walk
     let mut j;
-    for (i, mut u) in vertices.iter().map(|v| v.borrow_mut()).enumerate() {
+    for (i, u) in vertices.iter_mut().enumerate() {
         if i != root_idx {
             let idx = u.n_indices - 1;
-            j = u.indices[idx];
-            u.indices[idx] = u.indices[u.next];
+            j = indices[u.idx_offset + idx];
+            indices[u.idx_offset + idx] = indices[u.idx_offset + u.next];
             let next = u.next;
-            u.indices[next] = j;
-            u.indices[0..idx].shuffle(&mut rng);
+            indices[u.idx_offset + next] = j;
+            indices[u.idx_offset..u.idx_offset + idx].shuffle(&mut rng);
         } else {
-            u.indices.shuffle(&mut rng);
+            indices[u.idx_offset..u.idx_offset + u.n_indices].shuffle(&mut rng);
         }
         u.i_indices = 0;
     }
@@ -225,21 +219,21 @@ fn k_shuffle1(
     let mut u_idx = 0;
     loop {
         let v_idx = {
-            let u = vertices[u_idx].borrow();
+            let u = &vertices[u_idx];
             if u.i_indices >= u.n_indices {
                 break;
             }
-            u.indices[u.i_indices]
+            indices[u.idx_offset + u.i_indices]
         };
         {
             if u_idx != v_idx {
-                let v = vertices[v_idx].borrow();
+                let v = &vertices[v_idx];
                 j = v.i_sequence + k - 2;
                 out[i] = arr[j];
                 i += 1;
-                vertices[u_idx].borrow_mut().i_indices += 1;
+                vertices[u_idx].i_indices += 1;
             } else {
-                let mut v = vertices[v_idx].borrow_mut();
+                let v = &mut vertices[v_idx];
                 j = v.i_sequence + k - 2;
                 out[i] = arr[j];
                 i += 1;

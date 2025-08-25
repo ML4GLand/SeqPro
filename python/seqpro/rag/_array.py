@@ -1,7 +1,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    Literal,
+    TypeVar,
+    cast,
+    overload,
+)
 
 import awkward as ak
 import numpy as np
@@ -50,12 +59,12 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         data: Content | ak.Array | Ragged[RDTYPE] | RagParts[RDTYPE],
     ):
         if isinstance(data, RagParts):
-            data = _parts_to_content(data)
+            content = _parts_to_content(data)
         else:
-            data = _with_ragged(data)
-        super().__init__(data, behavior=deepcopy(behavior))
+            content = _with_ragged(data, highlevel=False)
+        super().__init__(content, behavior=deepcopy(behavior))
         self._parts = unbox(self)
-        type_parts = []
+        type_parts: list[str] = []
         name = self.parts.data.dtype.name
         if name == "bytes8":
             name = "bytes"
@@ -327,20 +336,39 @@ def _n_var(arr: ak.Array) -> int:
     return n_var
 
 
-def _with_ragged(arr: ak.Array | Content) -> ak.Array:
+@overload
+def _with_ragged(
+    arr: ak.Array | Content, highlevel: Literal[True] = True
+) -> ak.Array: ...
+@overload
+def _with_ragged(arr: ak.Array | Content, highlevel: Literal[False]) -> Content: ...
+def _with_ragged(arr: ak.Array | Content, highlevel: bool = True) -> ak.Array | Content:
     def fn(layout, **kwargs):
         if isinstance(layout, (ListArray, ListOffsetArray)):
             return ak.with_parameter(layout, "__list__", "ragged", highlevel=False)
+        else:
+            for k in layout.parameters:
+                del layout.parameters[k]
 
-    return ak.transform(fn, arr)
+    return ak.transform(fn, arr, highlevel=highlevel)  # type: ignore
 
 
-def _without_ragged(arr: ak.Array | Ragged[DTYPE]) -> ak.Array:
+@overload
+def _without_ragged(
+    arr: ak.Array | Ragged[DTYPE], highlevel: Literal[True] = True
+) -> ak.Array: ...
+@overload
+def _without_ragged(
+    arr: ak.Array | Ragged[DTYPE], highlevel: Literal[False]
+) -> Content: ...
+def _without_ragged(
+    arr: ak.Array | Ragged[DTYPE], highlevel: bool = True
+) -> ak.Array | Content:
     def fn(layout, **kwargs):
         if isinstance(layout, (ListArray, ListOffsetArray)):
             return ak.with_parameter(layout, "__list__", None, highlevel=False)
 
-    return ak.transform(fn, arr)
+    return ak.transform(fn, arr, highlevel=highlevel)  # type: ignore
 
 
 @define
