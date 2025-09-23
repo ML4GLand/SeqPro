@@ -33,15 +33,13 @@ __all__ = [
 def sort(bed: pl.DataFrame):
     """Sort a BED-like DataFrame by chromosome, start, and end position, using the natural
     order of chromosome names e.g. 1, 2, ..., 10, ..."""
-    contigs = bed["chrom"].unique()
-    with pl.StringCache():
-        pl.Series(natsorted(contigs), dtype=pl.Categorical)
-        bed = bed.sort(
-            pl.col("chrom").cast(pl.Categorical),
-            "chromStart",
-            "chromEnd",
-            maintain_order=True,
-        )
+    order = natsorted(bed["chrom"].unique())
+    bed = bed.sort(
+        pl.col("chrom").cast(pl.Enum(order)),
+        "chromStart",
+        "chromEnd",
+        maintain_order=True,
+    )
     return bed
 
 
@@ -100,7 +98,7 @@ def to_pyr(bedlike: pl.DataFrame) -> pr.PyRanges:
                 "strand": "Strand",
             },
             strict=False,
-        ).to_pandas(use_pyarrow_extension_array=True)
+        ).to_pandas()
     )
 
 

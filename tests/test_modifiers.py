@@ -139,7 +139,7 @@ def test_k_shuffle():
 
     for k in range(2, 5):
         counts = _count_kmers(seqs, k, length_axis)
-        shuffled = sp.k_shuffle(seqs, k, length_axis=length_axis, seed=seed)
+        shuffled = sp.k_shuffle(seqs, k, sp.DNA, length_axis=length_axis, seed=seed)
         shuffled_counts = _count_kmers(shuffled, k, length_axis)
 
         assert counts == shuffled_counts
