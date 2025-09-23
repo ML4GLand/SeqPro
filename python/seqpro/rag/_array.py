@@ -65,12 +65,9 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         super().__init__(content, behavior=deepcopy(behavior))
         self._parts = unbox(self)
         type_parts: list[str] = []
-        name = self.parts.data.dtype.name
-        if name == "bytes8":
-            name = "bytes"
         type_parts.append("var")
         type_parts.extend([str(s) for s in self.shape[self.rag_dim + 1 :]])
-        type_parts.append(f"rag[{name}]")
+        type_parts.append("ragged")
         self.behavior["__typestr__", "ragged"] = " * ".join(type_parts)  # type: ignore
 
     @staticmethod
@@ -343,12 +340,12 @@ def _with_ragged(
 @overload
 def _with_ragged(arr: ak.Array | Content, highlevel: Literal[False]) -> Content: ...
 def _with_ragged(arr: ak.Array | Content, highlevel: bool = True) -> ak.Array | Content:
-    def fn(layout, **kwargs):
+    def fn(layout: Content, **kwargs):
         if isinstance(layout, (ListArray, ListOffsetArray)):
             return ak.with_parameter(layout, "__list__", "ragged", highlevel=False)
         else:
-            for k in layout.parameters:
-                del layout.parameters[k]
+            if layout._parameters is not None:
+                layout._parameters = None
 
     return ak.transform(fn, arr, highlevel=highlevel)  # type: ignore
 
@@ -413,6 +410,7 @@ def unbox(
 
     node = cast(Content, arr.layout)
     shape: list[int | None] = [len(node)]
+    n_ragged = 0
     offsets = None
 
     while isinstance(node, (ListArray, ListOffsetArray, RegularArray)):
@@ -420,6 +418,7 @@ def unbox(
             shape.append(node.size)
         else:
             shape.append(None)
+            n_ragged += 1
             if isinstance(node, ListOffsetArray):
                 offsets = node.offsets.data
             else:
@@ -430,11 +429,14 @@ def unbox(
 
         node = node.content
 
+    if n_ragged != 1:
+        raise ValueError(f"Expected 1 ragged dimension, got {n_ragged}")
+
     if isinstance(node, EmptyArray):
         node = node.to_NumpyArray(dtype=np.float64)
 
     if isinstance(node, NumpyArray):
-        data = cast(NDArray, node.data)
+        data = cast(NDArray, node.data)  # type: ignore
 
         if node.parameter("__array__") == "byte":
             # view uint8 as bytes

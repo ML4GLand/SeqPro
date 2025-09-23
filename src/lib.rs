@@ -12,7 +12,7 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
 
 #[pyfunction]
 /// Shuffle sequences while preserving k-mer frequencies.
-/// 
+///
 /// Parameters
 /// ----------
 /// seqs : NDArray[uint8]
@@ -20,15 +20,18 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
 ///    being the sequence length.
 /// k : int
 ///    Length of k-mers to preserve frequencies of.
+/// alphabet_size : int
+///    Number of unique characters in the alphabet.
 /// seed : int, optional
 ///   Seed for the random number generator.
 fn _k_shuffle<'py>(
     py: Python<'py>,
     seqs: PyReadonlyArray<'py, u8, IxDyn>,
     k: usize,
+    alphabet_size: usize,
     seed: Option<u64>,
 ) -> &'py PyArray<u8, IxDyn> {
     let seqs = seqs.as_array();
-    let out = kshuffle::k_shuffle(seqs, k, seed);
+    let out = kshuffle::k_shuffle(seqs, k, seed, alphabet_size);
     out.into_pyarray(py)
 }

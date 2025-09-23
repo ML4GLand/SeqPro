@@ -39,11 +39,11 @@ def reverse_complement(
 def k_shuffle(
     seqs: SeqType,
     k: int,
+    alphabet: NucleotideAlphabet,
     *,
     length_axis: int | None = None,
     ohe_axis: int | None = None,
     seed: int | np.random.Generator | None = None,
-    alphabet: NucleotideAlphabet | None = None,
 ) -> NDArray[Union[np.bytes_, np.uint8]]:
     """Shuffle sequences while preserving k-let frequencies.
 
@@ -52,6 +52,8 @@ def k_shuffle(
     seqs : SeqType
     k : int
         Size of k-lets to preserve frequencies of.
+    alphabet : NucleotideAlphabet
+        Alphabet, needed for OHE sequence input.
     length_axis : Optional[int], optional
         Needed for array input. Axis that corresponds to the length of sequences.
     ohe_axes : Optional[int], optional
@@ -59,14 +61,12 @@ def k_shuffle(
         the same size as the length of the alphabet.
     seed : int, np.random.Generator, optional
         Seed or generator for shuffling.
-    alphabet : Optional[NucleotideAlphabet], optional
-        Alphabet, needed for OHE sequence input.
     """
 
     check_axes(seqs, length_axis, ohe_axis)
 
     if isinstance(seed, np.random.Generator):
-        seed = seed.integers(0, np.iinfo(np.int32).max)
+        seed = seed.integers(0, np.iinfo(np.int32).max)  # type: ignore
 
     seqs = cast_seqs(seqs)
 
@@ -78,16 +78,13 @@ def k_shuffle(
         assert ohe_axis is not None
         seqs = cast(NDArray[np.uint8], seqs)
         ohe = True
-        if alphabet is None:
-            raise ValueError("Need an alphabet to process OHE sequences.")
         seqs = alphabet.decode_ohe(seqs, ohe_axis=ohe_axis)
     else:
         ohe = False
 
     seqs = np.moveaxis(seqs, length_axis, -1)  # length must be final
-    seqs = np.ascontiguousarray(seqs)  # must be contiguous
 
-    shuffled = _k_shuffle(seqs.view("u1"), k, seed).view("S1")
+    shuffled = _k_shuffle(seqs.view("u1"), k, len(alphabet), seed).view("S1")
 
     shuffled = np.moveaxis(shuffled, -1, length_axis)  # put length back where it was
 
