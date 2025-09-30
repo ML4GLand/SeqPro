@@ -307,7 +307,7 @@ class AminoAlphabet:
         self,
         seqs: NDArray[np.uint8],
         ohe_axis: int,
-        unknown_char: str = "N",
+        unknown_char: str = "X",
     ) -> NDArray[np.bytes_]:
         """Convert an OHE array to an S1 byte array.
 
@@ -316,7 +316,7 @@ class AminoAlphabet:
         seqs : NDArray[np.uint8]
         ohe_axis : int
         unknown_char : str, optional
-            Single character to use for unknown values, by default "N"
+            Single character to use for unknown values, by default "X"
 
         Returns
         -------
