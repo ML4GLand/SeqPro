@@ -1,9 +1,11 @@
-from typing import List, Optional, TypeVar, Union, cast, overload
+from __future__ import annotations
+
+from typing import Optional, TypeVar, Union, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
 
-NestedStr = Union[bytes, str, List["NestedStr"]]
+NestedStr = Union[bytes, str, list["NestedStr"]]
 """String or nested list of strings"""
 
 StrSeqType = Union[NestedStr, NDArray[Union[np.str_, np.object_, np.bytes_]]]
