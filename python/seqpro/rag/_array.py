@@ -62,13 +62,13 @@ class Ragged(ak.Array, Generic[RDTYPE]):
             content = _parts_to_content(data)
         else:
             content = _with_ragged(data, highlevel=False)
-        super().__init__(content, behavior=deepcopy(behavior))
+        super().__init__(content, behavior=deepcopy(ak.behavior))
         self._parts = unbox(self)
         type_parts: list[str] = []
         type_parts.append("var")
         type_parts.extend([str(s) for s in self.shape[self.rag_dim + 1 :]])
-        type_parts.append("ragged")
-        self.behavior["__typestr__", "ragged"] = " * ".join(type_parts)  # type: ignore
+        type_parts.append(Ragged.__name__)
+        self.behavior["__typestr__", Ragged.__name__] = " * ".join(type_parts)  # type: ignore
 
     @staticmethod
     def from_offsets(
@@ -309,10 +309,6 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         return Ragged(parts)
 
 
-behavior = deepcopy(ak.behavior)
-behavior["*", "ragged"] = Ragged
-
-
 def apply_ufunc(
     ufunc: np.ufunc, method: str, args: tuple[Any, ...], kwargs: dict[str, Any]
 ):
@@ -320,7 +316,8 @@ def apply_ufunc(
     return Ragged(getattr(ufunc, method)(*args, **kwargs))
 
 
-ak.behavior[np.ufunc, "ragged"] = apply_ufunc
+ak.behavior["*", Ragged.__name__] = Ragged
+ak.behavior[np.ufunc, Ragged.__name__] = apply_ufunc
 
 
 def _n_var(arr: ak.Array) -> int:
@@ -342,7 +339,9 @@ def _with_ragged(arr: ak.Array | Content, highlevel: Literal[False]) -> Content:
 def _with_ragged(arr: ak.Array | Content, highlevel: bool = True) -> ak.Array | Content:
     def fn(layout: Content, **kwargs):
         if isinstance(layout, (ListArray, ListOffsetArray)):
-            return ak.with_parameter(layout, "__list__", "ragged", highlevel=False)
+            return ak.with_parameter(
+                layout, "__list__", Ragged.__name__, highlevel=False
+            )
         else:
             if layout._parameters is not None:
                 layout._parameters = None
@@ -476,7 +475,9 @@ def _parts_to_content(parts: RagParts[DTYPE]) -> Content:
                 layout = ListArray(
                     Index(parts.offsets[0, :]), Index(parts.offsets[1, :]), layout
                 )
-            layout = ak.with_parameter(layout, "__list__", "ragged", highlevel=False)
+            layout = ak.with_parameter(
+                layout, "__list__", Ragged.__name__, highlevel=False
+            )
         else:
             layout = RegularArray(layout, size)
 
