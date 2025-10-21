@@ -1,3 +1,15 @@
+## 0.8.0 (2025-10-21)
+
+### Feat
+
+- k_shuffle for arbitrary alphabets
+
+### Fix
+
+- change ragged subtype display name to match class name
+- default unknown character for AminoAlphabet.decode_ohe should be X not N
+- Ragged from Array with parameters on non-List* content. perf: no RefCell in kshuffle
+
 ## 0.7.1 (2025-08-22)
 
 ### Fix
