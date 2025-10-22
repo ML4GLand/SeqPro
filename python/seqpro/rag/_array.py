@@ -223,7 +223,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         """Note: not zero-copy if offsets or data are non-contiguous."""
         arr = super().to_numpy(allow_missing=allow_missing)
         if self.dtype.type == np.bytes_:
-            arr = arr.view("S1")
+            arr = arr[:, None].view("S1")
         return arr
 
     def __getitem__(self, where):
