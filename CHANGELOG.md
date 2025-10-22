@@ -1,3 +1,9 @@
+## 0.8.1 (2025-10-22)
+
+### Fix
+
+- wrong shape of Ragged[bytes].to_numpy()
+
 ## 0.8.0 (2025-10-21)
 
 ### Feat
