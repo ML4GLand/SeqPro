@@ -2,8 +2,9 @@ from collections import defaultdict
 
 import numpy as np
 import seqpro as sp
-from seqpro._modifiers import _align_axes, _slice_kmers
-from seqpro._utils import check_axes
+from pytest_cases import parametrize_with_cases
+from seqpro._modifiers import _align_axes, _slice_kmers, reverse_complement
+from seqpro._utils import cast_seqs, check_axes
 
 
 def test_align_axes():
@@ -143,3 +144,79 @@ def test_k_shuffle():
         shuffled_counts = _count_kmers(shuffled, k, length_axis)
 
         assert counts == shuffled_counts
+
+
+# Test cases for reverse_complement
+class ReverseComplementCases:
+    def case_single_string(self):
+        """Test single string sequence."""
+        seq = "ATCG"
+        # ATCG -> CGAT (reverse complement)
+        expected = cast_seqs("CGAT")
+        return seq, expected, None, None
+
+    def case_list_of_strings(self):
+        """Test list of string sequences."""
+        seqs = ["ATCG", "GCTA"]
+        # ATCG -> CGAT, GCTA -> TAGC
+        expected = cast_seqs(["CGAT", "TAGC"])
+        return seqs, expected, None, None
+
+    def case_byte_array_1d(self):
+        """Test 1D byte array."""
+        seqs = cast_seqs("ATCG")
+        # ATCG -> CGAT
+        expected = cast_seqs("CGAT")
+        return seqs, expected, -1, None
+
+    def case_byte_array_2d(self):
+        """Test 2D byte array."""
+        seqs = cast_seqs(["ATCG", "GCTA"])
+        # ATCG -> CGAT, GCTA -> TAGC
+        expected = cast_seqs(["CGAT", "TAGC"])
+        return seqs, expected, -1, None
+
+    def case_byte_array_3d(self):
+        """Test 3D byte array with last axis as length."""
+        seqs = cast_seqs([["AT", "CG"], ["GC", "TA"]])
+        # AT -> AT (palindrome), CG -> CG (palindrome)
+        # GC -> GC (palindrome), TA -> TA (palindrome)
+        expected = cast_seqs([["AT", "CG"], ["GC", "TA"]])
+        return seqs, expected, -1, None
+
+    def case_ohe_array_2d(self):
+        """Test 2D one-hot encoded array."""
+        # Create OHE sequence: "AC"
+        # Shape: (2, 4) - length axis x alphabet axis
+        seqs = sp.DNA.ohe("AC")
+        # Reverse complement: "AC" -> "GT"
+        expected = sp.DNA.ohe("GT")
+        return seqs, expected, 0, 1
+
+    def case_ohe_array_3d(self):
+        """Test 3D one-hot encoded array."""
+        # Create two sequences: "AC" and "GT"
+        # Shape: (2, 2, 4) - batch x length x alphabet
+        seqs = sp.DNA.ohe(["AC", "GT"])
+        # Reverse complement:
+        # "AC" -> "GT"
+        # "GT" -> "AC"
+        expected = sp.DNA.ohe(["GT", "AC"])
+        return seqs, expected, 1, 2
+
+    def case_palindrome(self):
+        """Test palindromic sequence (same as its reverse complement)."""
+        seq = "GAATTC"  # EcoRI site - palindrome
+        expected = cast_seqs("GAATTC")
+        return seq, expected, None, None
+
+
+@parametrize_with_cases(
+    "seqs,expected,length_axis,ohe_axis", cases=ReverseComplementCases
+)
+def test_reverse_complement(seqs, expected, length_axis, ohe_axis):
+    """Test reverse_complement with various input types and configurations."""
+    result = reverse_complement(
+        seqs, sp.DNA, length_axis=length_axis, ohe_axis=ohe_axis
+    )
+    np.testing.assert_array_equal(result, expected)

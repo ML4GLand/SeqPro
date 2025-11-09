@@ -1,4 +1,4 @@
-from ._alphabets import AminoAlphabet, NucleotideAlphabet
+from ._alphabets import DNA, AminoAlphabet, NucleotideAlphabet
 
 # NOTE the "*" character is termination i.e. STOP codon
 canonical_codons_to_aas = {
@@ -69,7 +69,6 @@ canonical_codons_to_aas = {
 }
 
 
-DNA = NucleotideAlphabet(alphabet="ACGT", complement="TGCA")
 RNA = NucleotideAlphabet(alphabet="ACGU", complement="UGCA")
 AA = AminoAlphabet(*map(list, zip(*canonical_codons_to_aas.items())))
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Optional, Union, overload
 
 import numba as nb
@@ -132,3 +134,25 @@ def gufunc_translate(
         if (seq_kmers == kmer_keys[i]).all():
             res[0] = kmer_values[i]  # type: ignore
             break
+
+
+@nb.guvectorize(
+    ["(u1, u1[:], u1[:])"],
+    "(),(n)->()",
+    nopython=True,
+    cache=True,
+)
+def gufunc_complement_bytes(
+    seq: NDArray[np.uint8],
+    complement_map: NDArray[np.uint8],
+    res: NDArray[np.uint8] | None = None,
+) -> NDArray[np.uint8]:  # type: ignore
+    res[0] = complement_map[seq]  # type: ignore
+
+
+_COMP = np.frombuffer(bytes.maketrans(b"ACGT", b"TGCA"), np.uint8)
+
+
+@nb.vectorize(["u1(u1)"], nopython=True, cache=True)
+def ufunc_comp_dna(seq: NDArray[np.uint8]) -> NDArray[np.uint8]:
+    return _COMP[seq]

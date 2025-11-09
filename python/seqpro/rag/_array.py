@@ -61,7 +61,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         if isinstance(data, RagParts):
             content = _parts_to_content(data)
         else:
-            content = _with_ragged(data, highlevel=False)
+            content = _as_ragged(data, highlevel=False)
         super().__init__(content, behavior=deepcopy(ak.behavior))
         self._parts = unbox(self)
         type_parts: list[str] = []
@@ -232,7 +232,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
             if _n_var(arr) == 1:
                 return type(self)(arr)
             else:
-                return _without_ragged(arr)
+                return _as_ak(arr)
         else:
             return arr
 
@@ -293,7 +293,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     def to_ak(self):
         """Convert to an Awkward array."""
-        arr = _without_ragged(self)
+        arr = _as_ak(self)
         arr.behavior = None
         return arr
 
@@ -331,12 +331,12 @@ def _n_var(arr: ak.Array) -> int:
 
 
 @overload
-def _with_ragged(
+def _as_ragged(
     arr: ak.Array | Content, highlevel: Literal[True] = True
 ) -> ak.Array: ...
 @overload
-def _with_ragged(arr: ak.Array | Content, highlevel: Literal[False]) -> Content: ...
-def _with_ragged(arr: ak.Array | Content, highlevel: bool = True) -> ak.Array | Content:
+def _as_ragged(arr: ak.Array | Content, highlevel: Literal[False]) -> Content: ...
+def _as_ragged(arr: ak.Array | Content, highlevel: bool = True) -> ak.Array | Content:
     def fn(layout: Content, **kwargs):
         if isinstance(layout, (ListArray, ListOffsetArray)):
             return ak.with_parameter(
@@ -350,16 +350,12 @@ def _with_ragged(arr: ak.Array | Content, highlevel: bool = True) -> ak.Array | 
 
 
 @overload
-def _without_ragged(
+def _as_ak(
     arr: ak.Array | Ragged[DTYPE], highlevel: Literal[True] = True
 ) -> ak.Array: ...
 @overload
-def _without_ragged(
-    arr: ak.Array | Ragged[DTYPE], highlevel: Literal[False]
-) -> Content: ...
-def _without_ragged(
-    arr: ak.Array | Ragged[DTYPE], highlevel: bool = True
-) -> ak.Array | Content:
+def _as_ak(arr: ak.Array | Ragged[DTYPE], highlevel: Literal[False]) -> Content: ...
+def _as_ak(arr: ak.Array | Ragged[DTYPE], highlevel: bool = True) -> ak.Array | Content:
     def fn(layout, **kwargs):
         if isinstance(layout, (ListArray, ListOffsetArray)):
             return ak.with_parameter(layout, "__list__", None, highlevel=False)

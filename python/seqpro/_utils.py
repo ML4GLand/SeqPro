@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Optional, TypeVar, Union, cast, overload
+from typing import TypeVar, Union, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import TypeGuard
 
 NestedStr = Union[bytes, str, list["NestedStr"]]
 """String or nested list of strings"""
@@ -13,20 +14,22 @@ StrSeqType = Union[NestedStr, NDArray[Union[np.str_, np.object_, np.bytes_]]]
 
 SeqType = Union[NestedStr, NDArray[Union[np.str_, np.object_, np.bytes_, np.uint8]]]
 
+DTYPE = TypeVar("DTYPE", bound=np.generic)
+
+
+def is_dtype(
+    obj: object, dtype: DTYPE | np.dtype[DTYPE] | type[DTYPE]
+) -> TypeGuard[NDArray[DTYPE]]:
+    return isinstance(obj, np.ndarray) and np.issubdtype(obj.dtype, dtype)
+
 
 @overload
 def cast_seqs(seqs: NDArray[np.uint8]) -> NDArray[np.uint8]: ...
-
-
 @overload
 def cast_seqs(seqs: StrSeqType) -> NDArray[np.bytes_]: ...
-
-
 @overload
-def cast_seqs(seqs: SeqType) -> NDArray[Union[np.bytes_, np.uint8]]: ...
-
-
-def cast_seqs(seqs: SeqType) -> NDArray[Union[np.bytes_, np.uint8]]:
+def cast_seqs(seqs: SeqType) -> NDArray[np.bytes_ | np.uint8]: ...
+def cast_seqs(seqs: SeqType) -> NDArray[np.bytes_ | np.uint8]:
     """Cast any sequence type to be a NumPy array of ASCII characters (or left alone as
     8-bit unsigned integers if the input is OHE).
 
@@ -54,8 +57,8 @@ def cast_seqs(seqs: SeqType) -> NDArray[Union[np.bytes_, np.uint8]]:
 
 def check_axes(
     seqs: SeqType,
-    length_axis: Optional[Union[int, bool]] = None,
-    ohe_axis: Optional[Union[int, bool]] = None,
+    length_axis: int | bool | None = None,
+    ohe_axis: int | bool | None = None,
 ):
     """Raise errors if length_axis or ohe_axis is missing when they're needed. Pass
     False to corresponding axis to not check for it.
@@ -63,15 +66,15 @@ def check_axes(
     - ndarray with itemsize == 1 => length axis required.
     - OHE array => length and OHE axis required.
     """
+    # OHE
+    if ohe_axis is None and is_dtype(seqs, np.uint8):
+        raise ValueError("Need an one hot encoding axis to process OHE sequences.")
+
     # bytes or OHE
-    if length_axis is None and isinstance(seqs, np.ndarray) and seqs.itemsize == 1:
+    if length_axis is None and is_dtype(seqs, np.bytes_) and seqs.itemsize == 1:
         raise ValueError(
             "Need a length axis to process an ndarray with itemsize == 1 (S1, u1)."
         )
-
-    # OHE
-    if ohe_axis is None and isinstance(seqs, np.ndarray) and seqs.dtype == np.uint8:
-        raise ValueError("Need an one hot encoding axis to process OHE sequences.")
 
     # length_axis != ohe_axis
     if (
@@ -80,9 +83,6 @@ def check_axes(
         and (length_axis == ohe_axis)
     ):
         raise ValueError("Length and OHE axis must be different.")
-
-
-DTYPE = TypeVar("DTYPE", bound=np.generic)
 
 
 def array_slice(a: NDArray[DTYPE], axis: int, slice_: slice) -> NDArray[DTYPE]:
