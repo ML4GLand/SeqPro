@@ -1,3 +1,9 @@
+## 0.9.0 (2025-11-09)
+
+### Feat
+
+- **perf**: faster reverse complementing and option to pass pre-alloc output
+
 ## 0.8.2 (2025-10-22)
 
 ### Fix
