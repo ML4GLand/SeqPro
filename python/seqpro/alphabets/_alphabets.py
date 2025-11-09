@@ -1,10 +1,20 @@
+from __future__ import annotations
+
+from types import MethodType
 from typing import Dict, List, Optional, Union, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import assert_never
 
-from .._numba import gufunc_ohe, gufunc_ohe_char_idx, gufunc_translate
-from .._utils import SeqType, StrSeqType, cast_seqs, check_axes
+from .._numba import (
+    gufunc_complement_bytes,
+    gufunc_ohe,
+    gufunc_ohe_char_idx,
+    gufunc_translate,
+    ufunc_comp_dna,
+)
+from .._utils import SeqType, StrSeqType, cast_seqs, check_axes, is_dtype
 
 
 class NucleotideAlphabet:
@@ -12,10 +22,11 @@ class NucleotideAlphabet:
     """Alphabet excluding ambiguous characters e.g. "N" for DNA."""
     complement: str
     array: NDArray[np.bytes_]
-    complement_map: Dict[str, str]
-    complement_map_bytes: Dict[bytes, bytes]
-    str_comp_table: Dict[int, str]
+    complement_map: dict[str, str]
+    complement_map_bytes: dict[bytes, bytes]
+    str_comp_table: dict[int, str]
     bytes_comp_table: bytes
+    bytes_comp_array: NDArray[np.bytes_]
 
     def __init__(self, alphabet: str, complement: str) -> None:
         """Parse and validate sequence alphabets.
@@ -36,9 +47,7 @@ class NucleotideAlphabet:
         self.array = cast(
             NDArray[np.bytes_], np.frombuffer(self.alphabet.encode("ascii"), "|S1")
         )
-        self.complement_map: Dict[str, str] = dict(
-            zip(list(self.alphabet), list(self.complement))
-        )
+        self.complement_map = dict(zip(list(self.alphabet), list(self.complement)))
         self.complement_map_bytes = {
             k.encode("ascii"): v.encode("ascii") for k, v in self.complement_map.items()
         }
@@ -46,6 +55,7 @@ class NucleotideAlphabet:
         self.bytes_comp_table = bytes.maketrans(
             self.alphabet.encode("ascii"), self.complement.encode("ascii")
         )
+        self.bytes_comp_array = np.frombuffer(self.bytes_comp_table, "S1")
 
     def __len__(self):
         return len(self.alphabet)
@@ -109,23 +119,8 @@ class NucleotideAlphabet:
 
         return _alphabet[idx].reshape(shape)
 
-    def complement_bytes(self, byte_arr: NDArray[np.bytes_]) -> NDArray[np.bytes_]:
-        """Get reverse complement of byte (S1) array.
-
-        Parameters
-        ----------
-        byte_arr : ndarray[bytes]
-        """
-        # * a vectorized implementation using np.unique or np.char.translate is NOT
-        # * faster even for longer alphabets like IUPAC DNA/RNA. Another optimization to
-        # * try would be using vectorized bit manipulations.
-        out = byte_arr.copy()
-        for nuc, comp in self.complement_map_bytes.items():
-            out[byte_arr == nuc] = comp
-        return out
-
-    def rev_comp_byte(
-        self, byte_arr: NDArray[np.bytes_], length_axis: int
+    def complement_bytes(
+        self, byte_arr: NDArray[np.bytes_], out: NDArray[np.bytes_] | None = None
     ) -> NDArray[np.bytes_]:
         """Get reverse complement of byte (S1) array.
 
@@ -133,7 +128,28 @@ class NucleotideAlphabet:
         ----------
         byte_arr : ndarray[bytes]
         """
-        out = self.complement_bytes(byte_arr)
+        if out is None:
+            _out = out
+        else:
+            _out = out.view(np.uint8)
+        _out = gufunc_complement_bytes(
+            byte_arr.view(np.uint8), self.bytes_comp_array.view(np.uint8), _out
+        )
+        return _out.view("S1")
+
+    def rev_comp_byte(
+        self,
+        byte_arr: NDArray[np.bytes_],
+        length_axis: int,
+        out: NDArray[np.bytes_] | None = None,
+    ) -> NDArray[np.bytes_]:
+        """Get reverse complement of byte (S1) array.
+
+        Parameters
+        ----------
+        byte_arr : ndarray[bytes]
+        """
+        out = self.complement_bytes(byte_arr, out)
         return np.flip(out, length_axis)
 
     def rev_comp_string(self, string: str):
@@ -150,6 +166,7 @@ class NucleotideAlphabet:
         seqs: StrSeqType,
         length_axis: Optional[int] = None,
         ohe_axis: Optional[int] = None,
+        out: NDArray[np.bytes_] | None = None,
     ) -> NDArray[np.bytes_]: ...
     @overload
     def reverse_complement(
@@ -157,6 +174,7 @@ class NucleotideAlphabet:
         seqs: NDArray[np.uint8],
         length_axis: Optional[int] = None,
         ohe_axis: Optional[int] = None,
+        out: NDArray[np.bytes_] | None = None,
     ) -> NDArray[np.uint8]: ...
     @overload
     def reverse_complement(
@@ -164,13 +182,15 @@ class NucleotideAlphabet:
         seqs: SeqType,
         length_axis: Optional[int] = None,
         ohe_axis: Optional[int] = None,
+        out: NDArray[np.bytes_] | None = None,
     ) -> NDArray[Union[np.bytes_, np.uint8]]: ...
     def reverse_complement(
         self,
         seqs: SeqType,
         length_axis: Optional[int] = None,
         ohe_axis: Optional[int] = None,
-    ) -> NDArray[Union[np.bytes_, np.uint8]]:
+        out: NDArray[np.bytes_] | None = None,
+    ) -> NDArray[np.bytes_ | np.uint8]:
         """Reverse complement a sequence.
 
         Parameters
@@ -190,14 +210,20 @@ class NucleotideAlphabet:
 
         seqs = cast_seqs(seqs)
 
-        if seqs.dtype == np.uint8:  # OHE
-            assert length_axis is not None
-            assert ohe_axis is not None
-            return np.flip(seqs, axis=(length_axis, ohe_axis))
-        else:
+        if is_dtype(seqs, np.bytes_):
             if length_axis is None:
                 length_axis = -1
-            return self.rev_comp_byte(seqs, length_axis)  # type: ignore
+            return self.rev_comp_byte(seqs, length_axis, out)
+        elif is_dtype(seqs, np.uint8):  # OHE
+            assert length_axis is not None
+            assert ohe_axis is not None
+            _out = np.flip(seqs, axis=(length_axis, ohe_axis))
+            if out is not None:
+                out[:] = _out
+                _out = out
+            return _out
+        else:
+            assert_never(seqs)  # type: ignore
 
 
 class AminoAlphabet:
@@ -334,3 +360,25 @@ class AminoAlphabet:
         _alphabet = np.concatenate([self.aa_array, [unknown_char.encode("ascii")]])
 
         return _alphabet[idx].reshape(shape)
+
+
+DNA = NucleotideAlphabet("ACGT", "TGCA")
+
+
+# * Monkey patch DNA instance with a faster complement function using
+# * a static, const lookup table. The base method is slower because it uses a
+# * dynamic lookup table.
+def complement_bytes(
+    self: NucleotideAlphabet,
+    byte_arr: NDArray[np.bytes_],
+    out: NDArray[np.bytes_] | None = None,
+) -> NDArray[np.bytes_]:
+    if out is None:
+        _out = out
+    else:
+        _out = out.view(np.uint8)
+    _out = ufunc_comp_dna(byte_arr.view(np.uint8), _out)  # type: ignore
+    return _out.view("S1")
+
+
+DNA.complement_bytes = MethodType(complement_bytes, DNA)
