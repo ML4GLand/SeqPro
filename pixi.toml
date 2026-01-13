@@ -2,7 +2,7 @@
 authors = ["d-laub <dlaub@ucsd.edu>"]
 channels = ["conda-forge", "bioconda"]
 name = "SeqPro"
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 
 [environments]
 dev = { features = ["dev", "py39"] }
@@ -64,7 +64,7 @@ sphinx-autodoc-typehints = "*"
 myst-parser = "*"
 
 [feature.doc.tasks]
-doc = { cmd = "make clean && make html", cwd = "docs" }
+doc = { cmd = "make clean && make html", cwd = "docs", depends-on = ["install"] }
 
 [feature.py39.dependencies]
 python = "3.9.*"
