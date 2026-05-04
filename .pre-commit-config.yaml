@@ -25,3 +25,4 @@ repos:
     entry: pixi lock
     language: system
     stages: [pre-push]
+    pass_filenames: false
