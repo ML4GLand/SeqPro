@@ -24,6 +24,7 @@ jobs:
           pixi-version: v0.46.0
           cache: true
           environments: ${{ matrix.environment }}
+          locked: false
       - run: pixi run -e ${{ matrix.environment }} install
       - name: Test
         run: pixi run -e ${{ matrix.environment }} test
