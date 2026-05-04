@@ -21,6 +21,7 @@ from awkward.contents import (
     ListArray,
     ListOffsetArray,
     NumpyArray,
+    RecordArray,
     RegularArray,
 )
 from awkward.index import Index
@@ -47,8 +48,9 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
         - Strings are not supported since ASCII is sufficient for the bioinformatics domain.
         - Bytestrings count as a ragged dimension, and we break from the Awkward convention to not include a "var" in the type string.
-        - Ragged arrays are not tested with support for Awkward fields or union types. Any functionality that appears
-        to work with fields is experimental.
+        - Ragged arrays are not tested with support for Awkward records/fields or union types. Functionality that appears
+        to work with these features may be experimental. Recommended to use depth_limit=1 when using ak.zip with one or more
+        Ragged arrays as input.
 
     """
 
@@ -64,11 +66,6 @@ class Ragged(ak.Array, Generic[RDTYPE]):
             content = _as_ragged(data, highlevel=False)
         super().__init__(content, behavior=deepcopy(ak.behavior))
         self._parts = unbox(self)
-        type_parts: list[str] = []
-        type_parts.append("var")
-        type_parts.extend([str(s) for s in self.shape[self.rag_dim + 1 :]])
-        type_parts.append(Ragged.__name__)
-        self.behavior["__typestr__", Ragged.__name__] = " * ".join(type_parts)  # type: ignore
 
     @staticmethod
     def from_offsets(
@@ -323,7 +320,7 @@ ak.behavior[np.ufunc, Ragged.__name__] = apply_ufunc
 def _n_var(arr: ak.Array) -> int:
     node = cast(Content, arr.layout)
     n_var = 0
-    while not isinstance(node, (EmptyArray, NumpyArray)):
+    while not isinstance(node, (EmptyArray, NumpyArray, RecordArray)):
         if isinstance(node, (ListArray, ListOffsetArray)):
             n_var += 1
         node = node.content  # type: ignore[reportAttributeAccessIssue]
@@ -403,13 +400,17 @@ def unbox(
     if as_contiguous:
         arr = ak.to_packed(arr)
 
-    node = cast(Content, arr.layout)
+    node = cast(Content, ak.to_layout(arr, allow_record=False))
     shape: list[int | None] = [len(node)]
     n_ragged = 0
     offsets = None
 
-    while isinstance(node, (ListArray, ListOffsetArray, RegularArray)):
-        if isinstance(node, RegularArray):
+    while isinstance(node, (ListArray, ListOffsetArray, RegularArray, RecordArray)):
+        if isinstance(node, RecordArray):
+            raise ValueError(
+                "Must extract a single field before unboxing a Ragged array of records."
+            )
+        elif isinstance(node, RegularArray):
             shape.append(node.size)
         else:
             shape.append(None)

@@ -5,15 +5,13 @@ from typing import TypeVar
 import numpy as np
 from numpy.typing import NDArray
 
-from ._types import ak_dtypes
-
-DTYPE = TypeVar("DTYPE", bound=ak_dtypes)
+DTYPE = TypeVar("DTYPE", bound=np.integer)
 LENGTH_TYPE = np.uint32
 OFFSET_TYPE = np.int64
 
 
 def lengths_to_offsets(
-    lengths: NDArray[np.integer], dtype: type[DTYPE] = OFFSET_TYPE
+    lengths: NDArray[np.integer], dtype: type[DTYPE] | DTYPE = OFFSET_TYPE
 ) -> NDArray[DTYPE]:
     """Convert lengths to offsets.
 

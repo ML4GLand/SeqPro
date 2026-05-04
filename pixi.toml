@@ -14,28 +14,22 @@ py312 = { features = ["py312"] }
 py313 = { features = ["py313"] }
 bench = { features = ["bench", "py313"] }
 
+[tasks]
+test = "pytest tests"
+prek-install = "prek install -t commit-msg -t pre-commit -t pre-push"
+
 [dependencies]
-numba = "*"
-numpy = "*"
-polars = "*"
-pandera = "*"
-pandas = "*"
-natsort = "*"
-pyarrow = "*"
-awkward = "*"
+python = "<3.14"
 uv = "*"
 maturin = "*"
 pytest = "*"
 pytest-cases = "*"
 biopython = "*"
 hypothesis = "*"
+prek = "*"
 
 [pypi-dependencies]
-pyranges = "*"
-
-[tasks]
-install = "uv pip install -e ."
-test = { cmd = "pytest tests", depends-on = ["install"] }
+seqpro = { path = ".", editable = true }
 
 [feature.dev.dependencies]
 numba = "==0.58.1"
@@ -47,12 +41,13 @@ pandas = "*"
 natsort = "*"
 pyarrow = "*"
 ipykernel = "*"
+prek = "*"
 
 [feature.dev.pypi-dependencies]
 pyranges = "==0.1.3"
 
 [feature.dev.tasks]
-pre-commit = "pre-commit install --hook-type commit-msg"
+prek = "prek install --hook-type commit-msg"
 i-kernel = "ipython kernel install --user --name seqpro"
 bump-dry = "cz bump --dry-run"
 
