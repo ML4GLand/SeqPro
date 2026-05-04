@@ -14,6 +14,10 @@ py312 = { features = ["py312"] }
 py313 = { features = ["py313"] }
 bench = { features = ["bench", "py313"] }
 
+[tasks]
+test = "pytest tests"
+prek-install = "prek install -t commit-msg -t pre-commit -t pre-push"
+
 [dependencies]
 python = "*"
 uv = "*"
@@ -25,9 +29,6 @@ hypothesis = "*"
 
 [pypi-dependencies]
 seqpro = { path = ".", editable = true }
-
-[tasks]
-test = "pytest tests"
 
 [feature.dev.dependencies]
 numba = "==0.58.1"
