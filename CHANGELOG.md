@@ -1,3 +1,13 @@
+## 0.10.0 (2026-05-04)
+
+### Feat
+
+- extend AA.translate to accept Ragged[bytes] and Ragged[uint8] inputs
+
+### Fix
+
+- handling RecordArrays
+
 ## 0.9.0 (2025-11-09)
 
 ### Feat
