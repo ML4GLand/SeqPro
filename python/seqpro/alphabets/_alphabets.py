@@ -3,11 +3,13 @@ from __future__ import annotations
 from types import MethodType
 from typing import Dict, List, Optional, Union, cast, overload
 
+import awkward as ak
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import assert_never
 
 from .._numba import (
+    _nb_find_stop_ends,
     gufunc_complement_bytes,
     gufunc_ohe,
     gufunc_ohe_char_idx,
@@ -15,6 +17,7 @@ from .._numba import (
     ufunc_comp_dna,
 )
 from .._utils import SeqType, StrSeqType, cast_seqs, check_axes, is_dtype
+from ..rag import Ragged
 
 
 class NucleotideAlphabet:
@@ -268,50 +271,147 @@ class AminoAlphabet:
 
         self.codon_to_aa = dict(zip(codons, amino_acids))
 
+    @overload
     def translate(
-        self, seqs: StrSeqType, length_axis: Optional[int] = None
-    ) -> NDArray[np.bytes_]:
+        self,
+        seqs: StrSeqType,
+        length_axis: Optional[int] = None,
+        *,
+        nuc_alphabet: NucleotideAlphabet | None = None,
+        truncate_stop: bool = False,
+    ) -> NDArray[np.bytes_]: ...
+    @overload
+    def translate(
+        self,
+        seqs: Ragged[np.bytes_],
+        length_axis: Optional[int] = None,
+        *,
+        nuc_alphabet: NucleotideAlphabet | None = None,
+        truncate_stop: bool = False,
+    ) -> Ragged[np.bytes_]: ...
+    @overload
+    def translate(
+        self,
+        seqs: Ragged[np.uint8],
+        length_axis: Optional[int] = None,
+        *,
+        nuc_alphabet: NucleotideAlphabet,
+        truncate_stop: bool = False,
+    ) -> Ragged[np.uint8]: ...
+    def translate(
+        self,
+        seqs: StrSeqType | Ragged[np.bytes_] | Ragged[np.uint8],
+        length_axis: int | None = None,
+        *,
+        nuc_alphabet: NucleotideAlphabet | None = None,
+        truncate_stop: bool = False,
+    ) -> NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]:
         """Translate nucleotide sequences to amino acids.
 
         Parameters
         ----------
-        seqs : StrSeqType
-            Nucleotide sequences
+        seqs : StrSeqType | Ragged[np.bytes_] | Ragged[np.uint8]
+            Nucleotide sequences. Ragged inputs must have all lengths divisible by
+            the codon size. For OHE Ragged (uint8), nuc_alphabet is required.
         length_axis : Optional[int], optional
+            Only used for non-Ragged array input.
+        nuc_alphabet : NucleotideAlphabet, optional
+            Required when seqs is a Ragged OHE (uint8) array, to decode OHE → bytes.
+        truncate_stop : bool, optional
+            When True, each output sequence is truncated at the first stop codon
+            (inclusive). Only valid for Ragged input. Default False.
 
         Returns
         -------
-        NDArray[np.bytes_]
-            Amino acid sequences.
+        NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]
         """
-        # TODO this doesn't respect start and stop codons, doing so would also require ragged arrays
-        check_axes(seqs, length_axis, False)
 
-        seqs = cast_seqs(seqs)
+        if not isinstance(seqs, Ragged):
+            check_axes(seqs, length_axis, False)
+            seqs = cast_seqs(seqs)
+            codon_size = self.codon_array.shape[-1]
+            if length_axis is None:
+                length_axis = -1
+            if seqs.shape[length_axis] % codon_size != 0:
+                raise ValueError(
+                    "Sequence length is not evenly divisible by codon length."
+                )
+            if length_axis < 0:
+                length_axis = seqs.ndim + length_axis
+            codons = np.lib.stride_tricks.sliding_window_view(
+                seqs, window_shape=codon_size, axis=-1
+            )[..., ::codon_size, :]
+            codon_axis = length_axis + 1
+            return gufunc_translate(
+                codons.view(np.uint8),
+                self.codon_array.view(np.uint8),
+                self.aa_array.view(np.uint8),
+                axes=[codon_axis, (-2, -1), (-1), ()],  # type: ignore
+            ).view("S1")
+
+        # --- Ragged path ---
+        # Pack to ListOffsetArray so .data and .offsets are contiguous and valid.
+        seqs = Ragged(ak.to_packed(seqs))
+
+        is_ohe = np.issubdtype(seqs.dtype, np.uint8)
+        if is_ohe and nuc_alphabet is None:
+            raise ValueError("nuc_alphabet is required for OHE Ragged input.")
 
         codon_size = self.codon_array.shape[-1]
+        lengths = seqs.lengths.ravel()
+        offsets = seqs.offsets  # 1D (n+1,) after to_packed
 
-        if length_axis is None:
-            length_axis = -1
+        if (lengths % codon_size != 0).any():
+            raise ValueError(
+                "All Ragged sequence lengths must be divisible by codon length."
+            )
 
-        if seqs.shape[length_axis] % codon_size != 0:
-            raise ValueError("Sequence length is not evenly divisible by codon length.")
+        n = len(lengths)
 
-        if length_axis < 0:
-            length_axis = seqs.ndim + length_axis
+        # Decode OHE → bytes if needed. seqs.data is (total, n_nuc) for OHE or (total,) for bytes.
+        if is_ohe:
+            nuc_bytes_flat: NDArray[np.bytes_] = nuc_alphabet.decode_ohe(  # type: ignore[union-attr]
+                seqs.data, ohe_axis=-1
+            )
+        else:
+            nuc_bytes_flat = seqs.data
 
-        # get k-mers (codons)
-        codons = np.lib.stride_tricks.sliding_window_view(
-            seqs, window_shape=codon_size, axis=-1
-        )[..., ::codon_size, :]
-        codon_axis = length_axis + 1
+        # Translate the entire flat buffer in one vectorized call. This is valid because
+        # translation is invariant to splitting/concatenation when all lengths % codon_size == 0.
+        total = nuc_bytes_flat.shape[0]
+        if total > 0:
+            codons = np.lib.stride_tricks.sliding_window_view(
+                nuc_bytes_flat, codon_size, axis=0
+            )[::codon_size, :]  # (total // codon_size, codon_size)
+            translated_flat: NDArray[np.bytes_] = gufunc_translate(
+                codons.view(np.uint8),
+                self.codon_array.view(np.uint8),
+                self.aa_array.view(np.uint8),
+                axes=[1, (-2, -1), (-1), ()],  # type: ignore
+            ).view("S1")  # (total // codon_size,)
+        else:
+            translated_flat = np.empty(0, dtype="S1")
 
-        return gufunc_translate(
-            codons.view(np.uint8),
-            self.codon_array.view(np.uint8),
-            self.aa_array.view(np.uint8),
-            axes=[codon_axis, (-2, -1), (-1), ()],  # type: ignore
-        ).view("S1")
+        new_offsets = offsets // codon_size  # (n+1,) position-based in translated_flat
+
+        if truncate_stop:
+            starts = new_offsets[:-1].astype(np.int64)
+            full_ends = new_offsets[1:].astype(np.int64)
+            ends = _nb_find_stop_ends(
+                translated_flat.view(np.uint8), starts, full_ends, np.uint8(ord("*"))
+            )
+            out_offsets = np.stack(
+                [starts, ends]
+            )  # (2, n) — ListArray (non-contiguous view)
+        else:
+            out_offsets = new_offsets  # 1D — ListOffsetArray
+
+        if is_ohe:
+            n_aa = len(self.aa_array)
+            ohe_flat = self.ohe(translated_flat).flatten()
+            return Ragged.from_offsets(ohe_flat, (n, None, n_aa), out_offsets)
+        else:
+            return Ragged.from_offsets(translated_flat, (n, None), out_offsets)
 
     def ohe(self, seqs: StrSeqType) -> NDArray[np.uint8]:
         """One hot encode an amino acid sequence.
@@ -365,9 +465,9 @@ class AminoAlphabet:
 DNA = NucleotideAlphabet("ACGT", "TGCA")
 
 
-# * Monkey patch DNA instance with a faster complement function using
-# * a static, const lookup table. The base method is slower because it uses a
-# * dynamic lookup table.
+# Monkey patch DNA instance with a faster complement function using
+# a static, const lookup table. The base method is slower because it uses a
+# dynamic lookup table.
 def complement_bytes(
     self: NucleotideAlphabet,
     byte_arr: NDArray[np.bytes_],

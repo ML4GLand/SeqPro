@@ -156,3 +156,41 @@ _COMP = np.frombuffer(bytes.maketrans(b"ACGT", b"TGCA"), np.uint8)
 @nb.vectorize(["u1(u1)"], nopython=True, cache=True)
 def ufunc_comp_dna(seq: NDArray[np.uint8]) -> NDArray[np.uint8]:
     return _COMP[seq]
+
+
+@nb.njit(parallel=True, cache=True)
+def _nb_find_stop_ends(
+    data: NDArray[np.uint8],
+    starts: NDArray[np.int64],
+    full_ends: NDArray[np.int64],
+    stop_char: np.uint8,
+) -> NDArray[np.int64]:
+    """Find per-sequence end positions in a flat translated AA buffer, truncating at the
+    first occurrence of stop_char (inclusive). Runs in parallel across sequences.
+
+    Parameters
+    ----------
+    data : NDArray[np.uint8]
+        Flat translated AA buffer viewed as uint8.
+    starts : NDArray[np.int64]
+        Start position of each sequence in data.
+    full_ends : NDArray[np.int64]
+        Full (non-truncated) end position of each sequence in data.
+    stop_char : np.uint8
+        uint8 value of the stop codon character (ord('*') = 42).
+
+    Returns
+    -------
+    NDArray[np.int64]
+        Truncated end positions (exclusive), one per sequence.
+    """
+    n = len(starts)
+    ends = np.empty(n, dtype=np.int64)
+    for i in nb.prange(n):
+        end = full_ends[i]
+        for j in range(starts[i], full_ends[i]):
+            if data[j] == stop_char:
+                end = j + 1
+                break
+        ends[i] = end
+    return ends
