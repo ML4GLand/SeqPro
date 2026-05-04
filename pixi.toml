@@ -19,13 +19,14 @@ test = "pytest tests"
 prek-install = "prek install -t commit-msg -t pre-commit -t pre-push"
 
 [dependencies]
-python = "*"
+python = "<3.14"
 uv = "*"
 maturin = "*"
 pytest = "*"
 pytest-cases = "*"
 biopython = "*"
 hypothesis = "*"
+prek = "*"
 
 [pypi-dependencies]
 seqpro = { path = ".", editable = true }
