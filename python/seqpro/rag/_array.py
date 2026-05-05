@@ -40,6 +40,32 @@ def is_rag_dtype(rag: Any, dtype: type[DTYPE]) -> TypeGuard[Ragged[DTYPE]]:
     return isinstance(rag, Ragged) and np.issubdtype(rag.dtype, dtype)
 
 
+def _is_record_layout(layout: Content) -> bool:
+    """Return True if a list layer wraps a RecordArray (past any regular wrappers)."""
+    node = layout
+    has_list = False
+    while isinstance(node, (ListOffsetArray, ListArray, RegularArray)):
+        if isinstance(node, (ListOffsetArray, ListArray)):
+            has_list = True
+        node = node.content  # type: ignore[reportAttributeAccessIssue]
+    return has_list and isinstance(node, RecordArray)
+
+
+def _extract_list_offsets(layout: Content) -> NDArray[OFFSET_TYPE]:
+    """Extract offsets from the outermost list layer of a layout.
+
+    Returns a 1-D ``(N+1,)`` array for ``ListOffsetArray`` or a 2-D ``(2, N)``
+    starts/stops array for ``ListArray`` — same convention as ``unbox()``.
+    """
+    node = layout
+    while not isinstance(node, (ListOffsetArray, ListArray)):
+        node = node.content  # type: ignore[reportAttributeAccessIssue]
+    if isinstance(node, ListOffsetArray):
+        return cast(NDArray, node.offsets.data)
+    else:
+        return np.stack([node.starts.data, node.stops.data], 0)  # type: ignore
+
+
 class Ragged(ak.Array, Generic[RDTYPE]):
     """An awkward array with exactly 1 ragged dimension. The ragged dimension is :code:`None` in its shape tuple.
 
@@ -54,7 +80,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     """
 
-    _parts: RagParts[RDTYPE]
+    _parts: RagParts[RDTYPE] | None
 
     def __init__(
         self,
@@ -65,7 +91,14 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         else:
             content = _as_ragged(data, highlevel=False)
         super().__init__(content, behavior=deepcopy(ak.behavior))
-        self._parts = unbox(self)
+        if isinstance(content, RecordArray) or _is_record_layout(content):
+            # ak._update_class() demotes RecordArray layouts to plain ak.Array
+            # because there is no "__list__" parameter at the record level.
+            # Restore the Ragged subclass and leave _parts unset for records.
+            self.__class__ = Ragged
+            self._parts = None
+        else:
+            self._parts = unbox(self)
 
     @staticmethod
     def from_offsets(
@@ -129,6 +162,10 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         """The parts of the Ragged array."""
         if not hasattr(self, "_parts"):
             self._parts = unbox(self)
+        if self._parts is None:
+            raise TypeError(
+                "Cannot access parts of a record Ragged array; index a field first."
+            )
         return self._parts
 
     @property
