@@ -89,9 +89,19 @@ class TestRecordRagged:
         expected = np.array([0, 2, 3, 6], dtype=OFFSET_TYPE)
         np.testing.assert_array_equal(rag.offsets, expected)
 
-    def test_data_raises(self, rag: Ragged):
-        with pytest.raises(TypeError):
-            _ = rag.data
+    def test_data_dict(self, rag: Ragged):
+        d = rag.data
+        assert isinstance(d, dict)
+        assert list(d.keys()) == ["field0", "field1"]
+        np.testing.assert_array_equal(d["field0"], np.array([1, 2, 3, 4, 5, 6]))
+        np.testing.assert_array_equal(
+            d["field1"], np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        )
+
+    def test_data_dict_zero_copy(self, rag: Ragged):
+        d = rag.data
+        assert d["field0"].base is not None
+        assert d["field1"].base is not None
 
     def test_field_access_by_key(self, rag: Ragged):
         np.testing.assert_array_equal(rag["field0"].data, np.array([1, 2, 3, 4, 5, 6]))

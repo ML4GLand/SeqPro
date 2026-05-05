@@ -192,14 +192,13 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         return self._parts
 
     @property
-    def data(self) -> NDArray[RDTYPE]:
-        """The data of the Ragged array."""
+    def data(self) -> NDArray[RDTYPE] | dict[str, NDArray]:
+        """The data of the Ragged array. For record layouts, a dict of
+        field name -> zero-copy ndarray view, in awkward field order."""
         self._ensure_parts()
         if self._parts is None:
-            raise TypeError(
-                "Cannot access data of a record Ragged array; index a field first."
-            )
-        return self.parts.data
+            return {f: self[f].data for f in ak.fields(self)}
+        return self._parts.data
 
     @property
     def offsets(self) -> NDArray[OFFSET_TYPE]:
