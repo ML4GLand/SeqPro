@@ -1,5 +1,6 @@
 import awkward as ak
 import numpy as np
+import pytest
 from pytest_cases import parametrize_with_cases
 from seqpro.rag import OFFSET_TYPE, Ragged, lengths_to_offsets
 
@@ -70,3 +71,46 @@ def l2o_2d():
 def test_len_to_offsets(lengths, desired):
     actual = lengths_to_offsets(lengths)
     np.testing.assert_equal(actual, desired)
+
+
+class TestRecordRagged:
+    @pytest.fixture
+    def rag(self):
+        return Ragged(
+            ak.Array(
+                {
+                    "field0": [[1, 2], [3], [4, 5, 6]],
+                    "field1": [[1.0, 2.0], [3.0], [4.0, 5.0, 6.0]],
+                }
+            )
+        )
+
+    def test_offsets(self, rag):
+        expected = np.array([0, 2, 3, 6], dtype=OFFSET_TYPE)
+        np.testing.assert_array_equal(rag.offsets, expected)
+
+    def test_data_raises(self, rag):
+        with pytest.raises(TypeError):
+            _ = rag.data
+
+    def test_field_access_by_key(self, rag):
+        np.testing.assert_array_equal(
+            rag["field0"].data, np.array([1, 2, 3, 4, 5, 6])
+        )
+        np.testing.assert_array_equal(
+            rag["field1"].data, np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        )
+
+    def test_field_access_by_attr(self, rag):
+        np.testing.assert_array_equal(rag.field0.data, rag["field0"].data)
+        np.testing.assert_array_equal(rag.field1.data, rag["field1"].data)
+
+    def test_offsets_shared_with_field(self, rag):
+        assert rag["field0"].offsets is rag.offsets
+
+    def test_offsets_shared_across_fields(self, rag):
+        assert rag["field0"].offsets is rag["field1"].offsets
+
+    def test_field_returns_ragged(self, rag):
+        assert isinstance(rag["field0"], Ragged)
+        assert isinstance(rag["field1"], Ragged)

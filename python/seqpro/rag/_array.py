@@ -284,7 +284,13 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         arr = super().__getitem__(where)
         if isinstance(arr, ak.Array):
             if _n_var(arr) == 1:
-                return type(self)(arr)
+                result = type(self)(arr)
+                # For record field access, share the parent's offsets object (zero-copy).
+                if isinstance(where, str) and self._parts is None:
+                    result._parts = RagParts(
+                        result._parts.data, result._parts.shape, self.offsets
+                    )
+                return result
             else:
                 return _as_ak(arr)
         else:
