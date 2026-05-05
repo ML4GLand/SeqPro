@@ -1,18 +1,15 @@
 name: Merge main -> stable
 
 on:
-  workflow_run:
-    workflows: ["Bump and release"]
-    branches: [main]
-    types:
-      - completed
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
   merge:
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name == 'release'
     environment: pypi
     permissions:
       id-token: write

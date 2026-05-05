@@ -6,11 +6,8 @@
 name: Publish wheels
 
 on:
-  workflow_run:
-    workflows: ["Bump and release"]
-    branches: [main]
-    types:
-      - completed
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -20,7 +17,7 @@ jobs:
   linux:
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name == 'release'
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -65,7 +62,7 @@ jobs:
   musllinux:
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name == 'release'
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -106,7 +103,7 @@ jobs:
   windows:
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name == 'release'
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -136,7 +133,7 @@ jobs:
   macos:
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name == 'release'
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
@@ -166,7 +163,7 @@ jobs:
   sdist:
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -187,7 +184,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name == 'release'
     needs: [linux, musllinux, windows, macos, sdist]
     permissions:
       # Use to sign the release artifacts

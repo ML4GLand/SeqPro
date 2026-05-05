@@ -1,15 +1,13 @@
-name: Bump and release
+name: Bump version
 
 on:
   workflow_dispatch:
 
 jobs:
-  bump-version:
+  bump:
     runs-on: ubuntu-latest
-    name: "Bump version and create changelog with commitizen"
     steps:
-      - name: Check out
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: "${{ secrets.GH_TOKEN }}"
@@ -22,33 +20,26 @@ jobs:
         run: |
           PROJECT_VERSION=$(cz version --project)
           LATEST_TAG=$(git tag --sort=-version:refname | head -1)
-          echo "project_version=$PROJECT_VERSION" >> $GITHUB_OUTPUT
-          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$PROJECT_VERSION" ]; then
-            echo "tag_exists=true" >> $GITHUB_OUTPUT
-            echo "REVISION=$LATEST_TAG" >> $GITHUB_ENV
+            echo "partial=true" >> $GITHUB_OUTPUT
+            echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           else
-            echo "tag_exists=false" >> $GITHUB_OUTPUT
+            echo "partial=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create bump and changelog
-        if: steps.detect.outputs.tag_exists != 'true'
+      - name: Bump version
+        if: steps.detect.outputs.partial != 'true'
         uses: commitizen-tools/commitizen-action@master
         with:
           github_token: ${{ secrets.GH_TOKEN }}
-          changelog_increment_filename: body.md
 
-      - name: Generate release body for existing tag
-        if: steps.detect.outputs.tag_exists == 'true'
+      - name: Fix partial bump (tag exists on remote, update files only)
+        if: steps.detect.outputs.partial == 'true'
         run: |
-          PREV="${{ steps.detect.outputs.project_version }}"
-          CURR="${{ steps.detect.outputs.latest_tag }}"
-          git log "${PREV}..${CURR}" --pretty=format:"- %s" --no-merges > body.md
-
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        with:
-          body_path: "body.md"
-          tag_name: ${{ env.REVISION }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -d "${{ steps.detect.outputs.tag }}"
+          cz bump --files-only --yes
+          git add pyproject.toml CHANGELOG.md
+          git commit -m "bump: version → ${{ steps.detect.outputs.tag }}"
+          git push origin main
