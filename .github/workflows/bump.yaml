@@ -17,15 +17,16 @@ jobs:
       - name: Install commitizen
         run: pip install commitizen --quiet
 
-      - name: Detect next version
+      - name: Detect partial bump
         id: detect
         run: |
-          DRY=$(cz bump --dry-run 2>&1)
-          NEXT=$(echo "$DRY" | grep -oP 'bump: version \S+ → \K\S+' || echo "")
-          echo "next_version=$NEXT" >> $GITHUB_OUTPUT
-          if [ -n "$NEXT" ] && git rev-parse "refs/tags/$NEXT" >/dev/null 2>&1; then
+          PROJECT_VERSION=$(cz version --project)
+          LATEST_TAG=$(git tag --sort=-version:refname | head -1)
+          echo "project_version=$PROJECT_VERSION" >> $GITHUB_OUTPUT
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$PROJECT_VERSION" ]; then
             echo "tag_exists=true" >> $GITHUB_OUTPUT
-            echo "REVISION=$NEXT" >> $GITHUB_ENV
+            echo "REVISION=$LATEST_TAG" >> $GITHUB_ENV
           else
             echo "tag_exists=false" >> $GITHUB_OUTPUT
           fi
@@ -40,9 +41,9 @@ jobs:
       - name: Generate release body for existing tag
         if: steps.detect.outputs.tag_exists == 'true'
         run: |
-          PREV=$(git tag --sort=-version:refname | grep -v "^${{ steps.detect.outputs.next_version }}$" | head -1)
-          git log "${PREV}..${{ steps.detect.outputs.next_version }}" \
-            --pretty=format:"- %s" --no-merges > body.md
+          PREV="${{ steps.detect.outputs.project_version }}"
+          CURR="${{ steps.detect.outputs.latest_tag }}"
+          git log "${PREV}..${CURR}" --pretty=format:"- %s" --no-merges > body.md
 
       - name: Release
         uses: softprops/action-gh-release@v2
