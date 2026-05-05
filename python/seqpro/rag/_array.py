@@ -321,6 +321,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
             if _n_var(arr) == 1:
                 result = type(self)(arr)
                 # For record field access, share the parent's offsets object (zero-copy).
+                self._ensure_parts()
                 if isinstance(where, str) and self._parts is None:
                     result._parts = RagParts(
                         result._parts.data, result._parts.shape, self.offsets

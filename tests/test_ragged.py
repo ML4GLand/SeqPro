@@ -201,3 +201,46 @@ class TestRecordRagged:
         np.testing.assert_array_equal(
             z.offsets, np.array([0, 2, 3, 6], dtype=z.offsets.dtype)
         )
+
+
+class TestZip:
+    def _mk(self, dtype):
+        return Ragged.from_lengths(np.arange(6, dtype=dtype), np.array([2, 1, 3]))
+
+    def test_zip_auto_returns_ragged(self):
+        r1, r2 = self._mk(np.int64), self._mk(np.float64)
+        z = ak.zip({"a": r1, "b": r2})
+        assert isinstance(z, Ragged)
+
+    def test_zip_explicit_wrap_returns_ragged(self):
+        r1, r2 = self._mk(np.int64), self._mk(np.float64)
+        z = Ragged(ak.zip({"a": r1, "b": r2}))
+        assert isinstance(z, Ragged)
+
+    def test_zip_three_fields(self):
+        r1, r2, r3 = self._mk(np.int64), self._mk(np.float64), self._mk(np.int32)
+        z = ak.zip({"a": r1, "b": r2, "c": r3})
+        assert list(z.dtype.keys()) == ["a", "b", "c"]
+        np.testing.assert_array_equal(z["c"].data, np.arange(6, dtype=np.int32))
+
+    def test_zip_field_order_preserved(self):
+        r1, r2 = self._mk(np.int64), self._mk(np.float64)
+        z = ak.zip({"zeta": r1, "alpha": r2})
+        assert list(z.dtype.keys()) == ["zeta", "alpha"]
+
+    def test_zip_offsets_shared_across_fields(self):
+        r1, r2 = self._mk(np.int64), self._mk(np.float64)
+        z = ak.zip({"a": r1, "b": r2})
+        assert z["a"].offsets is z["b"].offsets
+
+    def test_zip_depth_limit_with_extra_dim(self):
+        # With depth_limit=1, the outer layer of the zipped result is a
+        # RecordArray (not a list-tagged layer), so behavior dispatch does
+        # not auto-coerce to Ragged. Use the explicit wrap path.
+        data_a = np.arange(12, dtype=np.int64).reshape(6, 2)
+        data_b = np.arange(12, dtype=np.float64).reshape(6, 2)
+        r1 = Ragged.from_lengths(data_a, np.array([2, 1, 3]))
+        r2 = Ragged.from_lengths(data_b, np.array([2, 1, 3]))
+        z = Ragged(ak.zip({"a": r1, "b": r2}, depth_limit=1))
+        assert isinstance(z, Ragged)
+        np.testing.assert_array_equal(z["a"].data, data_a)
