@@ -1,5 +1,7 @@
 import pytest
-from seqpro._coords import CoordSchema, _SCHEMAS, _resolve_schema
+import polars as pl
+import pandas as pd
+from seqpro._coords import CoordSchema, _SCHEMAS, _resolve_schema, detect_schema
 
 
 def test_coordschema_fields():
@@ -95,3 +97,72 @@ def test_resolve_schema_coordschema_passthrough():
 def test_resolve_schema_bad_type():
     with pytest.raises(TypeError):
         _resolve_schema(42)  # type: ignore
+
+
+def _bed_df():
+    return pl.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100], "strand": ["+"]})
+
+
+def _pb_df():
+    return pl.DataFrame({"chrom": ["chr1"], "start": [0], "end": [100], "strand": ["+"]})
+
+
+def _pr_df():
+    return pl.DataFrame({"Chromosome": ["chr1"], "Start": [0], "End": [100], "Strand": ["+"]})
+
+
+def _gtf_df():
+    return pl.DataFrame({"seqname": ["chr1"], "start": [0], "end": [100], "strand": ["+"]})
+
+
+def test_detect_schema_bed():
+    assert detect_schema(_bed_df()) == _SCHEMAS["bed"]
+
+
+def test_detect_schema_pb():
+    assert detect_schema(_pb_df()) == _SCHEMAS["pb"]
+
+
+def test_detect_schema_pr():
+    assert detect_schema(_pr_df()) == _SCHEMAS["pr"]
+
+
+def test_detect_schema_gtf():
+    assert detect_schema(_gtf_df()) == _SCHEMAS["gtf"]
+
+
+def test_detect_schema_hint_string():
+    assert detect_schema(_bed_df(), hint="bed") == _SCHEMAS["bed"]
+
+
+def test_detect_schema_hint_tuple():
+    assert detect_schema(_bed_df(), hint=("chrom", "chromStart", "chromEnd")) == CoordSchema(
+        "chrom", "chromStart", "chromEnd", zero_based=False
+    )
+
+
+def test_detect_schema_hint_missing_col():
+    df = pl.DataFrame({"chrom": ["chr1"], "chromStart": [0]})  # missing chromEnd
+    with pytest.raises(ValueError, match="missing"):
+        detect_schema(df, hint="bed")
+
+
+def test_detect_schema_no_match():
+    df = pl.DataFrame({"foo": [1], "bar": [2]})
+    with pytest.raises(ValueError, match="no known schema"):
+        detect_schema(df)
+
+
+def test_detect_schema_ambiguous():
+    # Has both bed and pb coord columns
+    df = pl.DataFrame({
+        "chrom": ["chr1"], "chromStart": [0], "chromEnd": [100],
+        "start": [0], "end": [100],
+    })
+    with pytest.raises(ValueError, match="match"):
+        detect_schema(df)
+
+
+def test_detect_schema_pandas():
+    df = pd.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100]})
+    assert detect_schema(df) == _SCHEMAS["bed"]
