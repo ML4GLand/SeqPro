@@ -27,19 +27,20 @@ class CoordSchema:
     start: str
     end: str
     zero_based: bool
+    strand: str | None = None  # None = schema has no defined strand column name
 ```
 
-Strand is not part of the schema definition — it is passed through unchanged by all operations.
+`strand` is optional: when present in the DataFrame, `set_schema` renames it; when absent from the DataFrame, it is silently skipped. Detection (`detect_schema`) matches only on the three required columns.
 
 ### Built-in registry
 
 ```python
 _SCHEMAS: dict[str, CoordSchema] = {
-    "bed": CoordSchema("chrom", "chromStart", "chromEnd", zero_based=True),
-    "pb":  CoordSchema("chrom", "start",      "end",      zero_based=True),
-    "pr":  CoordSchema("Chromosome", "Start", "End",      zero_based=True),
-    "gtf": CoordSchema("seqname",    "start", "end",      zero_based=False),
-    "gff": CoordSchema("seqname",    "start", "end",      zero_based=False),
+    "bed": CoordSchema("chrom", "chromStart", "chromEnd", zero_based=True,  strand="strand"),
+    "pb":  CoordSchema("chrom", "start",      "end",      zero_based=True,  strand="strand"),
+    "pr":  CoordSchema("Chromosome", "Start", "End",      zero_based=True,  strand="Strand"),
+    "gtf": CoordSchema("seqname",    "start", "end",      zero_based=False, strand="strand"),
+    "gff": CoordSchema("seqname",    "start", "end",      zero_based=False, strand="strand"),
 }
 ```
 
@@ -47,8 +48,8 @@ _SCHEMAS: dict[str, CoordSchema] = {
 
 Private helper. Accepts:
 - A shorthand string (`"bed"`, `"pb"`, `"pr"`, `"gtf"`, `"gff"`) → looks up `_SCHEMAS`.
-- A 3-tuple `(chrom_col, start_col, end_col)` → constructs `CoordSchema(..., zero_based=False)`.
-- A 4-tuple `(chrom_col, start_col, end_col, strand_col)` → constructs `CoordSchema` from the first three columns; `strand_col` is accepted for convenience but ignored (strand is not part of the schema definition).
+- A 3-tuple `(chrom_col, start_col, end_col)` → constructs `CoordSchema(..., zero_based=False, strand=None)`.
+- A 4-tuple `(chrom_col, start_col, end_col, strand_col)` → constructs `CoordSchema(..., zero_based=False, strand=strand_col)`.
 - A `CoordSchema` instance → returned as-is.
 
 Raises `ValueError` for unrecognized strings or wrong-length tuples.
@@ -68,7 +69,7 @@ Public, `@nw.narwhalify`.
 
 1. Resolve source: `src = detect_schema(df, hint=from_)`.
 2. Resolve target: `tgt = _resolve_schema(to)`.
-3. Build rename map for the three coord columns: `{src.chrom: tgt.chrom, src.start: tgt.start, src.end: tgt.end}`. Skip any pair where source == target.
+3. Build rename map for coord columns: `{src.chrom: tgt.chrom, src.start: tgt.start, src.end: tgt.end}`, plus `{src.strand: tgt.strand}` if both `src.strand` and `tgt.strand` are non-None and the source strand column exists in the DataFrame. Skip any pair where source == target.
 4. Call `nw.to_native(df.rename(rename_map))` to get the native result before returning.
 5. If `to` resolves to `"pb"` and the native result is a `pl.DataFrame`, call `result.config_meta.set(coordinate_system_zero_based=True)` guarded by `hasattr(result, "config_meta")`.
 6. Return the native result directly (do not use `@nw.narwhalify` for this function — manage wrapping manually via `nw.from_native` / `nw.to_native` so the config_meta call happens before the return).
