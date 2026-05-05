@@ -2,7 +2,7 @@
 authors = ["d-laub <dlaub@ucsd.edu>"]
 channels = ["conda-forge", "bioconda"]
 name = "SeqPro"
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 
 [environments]
 dev = { features = ["dev", "py39"] }
