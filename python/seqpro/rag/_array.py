@@ -87,9 +87,10 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
         - Strings are not supported since ASCII is sufficient for the bioinformatics domain.
         - Bytestrings count as a ragged dimension, and we break from the Awkward convention to not include a "var" in the type string.
-        - Ragged arrays are not tested with support for Awkward records/fields or union types. Functionality that appears
-        to work with these features may be experimental. Recommended to use depth_limit=1 when using ak.zip with one or more
-        Ragged arrays as input.
+        - Record-layout Ragged arrays (produced by ``ak.zip`` of Ragged inputs or by passing a record-layout
+          ``ak.Array``) return field-keyed dicts from ``dtype``, ``data``, and ``parts``. Use ``rag["field"]``
+          for zero-copy single-field access. ``view``, ``apply``, and ``to_numpy`` are not defined on record
+          layouts; access individual fields. Union types remain unsupported.
 
     """
 
