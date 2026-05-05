@@ -52,18 +52,31 @@ def _is_record_layout(layout: Content) -> bool:
 
 
 def _extract_list_offsets(layout: Content) -> NDArray[OFFSET_TYPE]:
-    """Extract offsets from the outermost list layer of a layout.
+    """Extract offsets from the (single) list layer in a record-layout Ragged.
+
+    The list layer can sit outside the RecordArray (e.g., ``ak.zip`` output:
+    ``ListOffsetArray(RecordArray(...))``) or inside it (e.g., dict-of-lists
+    ``ak.Array({"f0": [[...]], "f1": [[...]]})``: ``RecordArray({"f0": ListOffsetArray, ...})``).
+    Walks past any ``RegularArray`` / ``RecordArray`` (diving into field 0,
+    since all fields share the same list layer for a Ragged record).
 
     Returns a 1-D ``(N+1,)`` array for ``ListOffsetArray`` or a 2-D ``(2, N)``
     starts/stops array for ``ListArray`` — same convention as ``unbox()``.
     """
     node = layout
-    while not isinstance(node, (ListOffsetArray, ListArray)):
-        node = node.content  # type: ignore[reportAttributeAccessIssue]
-    if isinstance(node, ListOffsetArray):
-        return cast(NDArray, node.offsets.data)
-    else:
-        return np.stack([node.starts.data, node.stops.data], 0)  # type: ignore
+    while True:
+        if isinstance(node, ListOffsetArray):
+            return cast(NDArray, node.offsets.data)
+        if isinstance(node, ListArray):
+            return np.stack([node.starts.data, node.stops.data], 0)  # type: ignore
+        if isinstance(node, RegularArray):
+            node = node.content
+        elif isinstance(node, RecordArray):
+            node = node.content(0)
+        else:
+            raise ValueError(
+                f"No list layer found while extracting offsets from layout:\n{layout.form}"
+            )
 
 
 class Ragged(ak.Array, Generic[RDTYPE]):
@@ -99,6 +112,17 @@ class Ragged(ak.Array, Generic[RDTYPE]):
             self._parts = None
         else:
             self._parts = unbox(self)
+
+    def _ensure_parts(self) -> None:
+        """Idempotent lazy init for ``_parts``. Handles Ragged instances created
+        via awkward behavior dispatch (e.g. ``ak.zip``) that bypass ``__init__``."""
+        if hasattr(self, "_parts"):
+            return
+        layout = cast(Content, ak.to_layout(self))
+        if isinstance(layout, RecordArray) or _is_record_layout(layout):
+            object.__setattr__(self, "_parts", None)
+        else:
+            object.__setattr__(self, "_parts", unbox(self))
 
     @staticmethod
     def from_offsets(
@@ -160,8 +184,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
     @property
     def parts(self) -> RagParts[RDTYPE]:
         """The parts of the Ragged array."""
-        if not hasattr(self, "_parts"):
-            self._parts = unbox(self)
+        self._ensure_parts()
         if self._parts is None:
             raise TypeError(
                 "Cannot access parts of a record Ragged array; index a field first."
@@ -171,8 +194,7 @@ class Ragged(ak.Array, Generic[RDTYPE]):
     @property
     def data(self) -> NDArray[RDTYPE]:
         """The data of the Ragged array."""
-        if not hasattr(self, "_parts"):
-            self._parts = unbox(self)
+        self._ensure_parts()
         if self._parts is None:
             raise TypeError(
                 "Cannot access data of a record Ragged array; index a field first."
@@ -182,18 +204,13 @@ class Ragged(ak.Array, Generic[RDTYPE]):
     @property
     def offsets(self) -> NDArray[OFFSET_TYPE]:
         """The offsets of the Ragged array. May be 1- or 2-dimensional."""
-        if not hasattr(self, "_parts"):
-            self._parts = unbox(self)
+        self._ensure_parts()
         if self._parts is None:
-            # Record layout — extract offsets from field 0's list layer, cache for sharing.
+            # Record layout — extract offsets via the unified helper, cache for sharing.
             # object.__setattr__ used in case ak.Array intercepts __setattr__.
             if not hasattr(self, "_offsets_cache"):
-                layout = ak.to_layout(self)
-                node = layout
-                while not isinstance(node, RecordArray):
-                    node = node.content  # no-arg property on ListOffsetArray/ListArray/RegularArray
-                field_layout = node.content(0)
-                offsets = _extract_list_offsets(field_layout)
+                layout = cast(Content, ak.to_layout(self))
+                offsets = _extract_list_offsets(layout)
                 object.__setattr__(self, "_offsets_cache", offsets)
             return self._offsets_cache  # type: ignore[return-value]
         return self.parts.offsets

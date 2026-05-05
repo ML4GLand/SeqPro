@@ -85,32 +85,39 @@ class TestRecordRagged:
             )
         )
 
-    def test_offsets(self, rag):
+    def test_offsets(self, rag: Ragged):
         expected = np.array([0, 2, 3, 6], dtype=OFFSET_TYPE)
         np.testing.assert_array_equal(rag.offsets, expected)
 
-    def test_data_raises(self, rag):
+    def test_data_raises(self, rag: Ragged):
         with pytest.raises(TypeError):
             _ = rag.data
 
-    def test_field_access_by_key(self, rag):
-        np.testing.assert_array_equal(
-            rag["field0"].data, np.array([1, 2, 3, 4, 5, 6])
-        )
+    def test_field_access_by_key(self, rag: Ragged):
+        np.testing.assert_array_equal(rag["field0"].data, np.array([1, 2, 3, 4, 5, 6]))
         np.testing.assert_array_equal(
             rag["field1"].data, np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         )
 
-    def test_field_access_by_attr(self, rag):
+    def test_field_access_by_attr(self, rag: Ragged):
         np.testing.assert_array_equal(rag.field0.data, rag["field0"].data)
         np.testing.assert_array_equal(rag.field1.data, rag["field1"].data)
 
-    def test_offsets_shared_with_field(self, rag):
+    def test_offsets_shared_with_field(self, rag: Ragged):
         assert rag["field0"].offsets is rag.offsets
 
-    def test_offsets_shared_across_fields(self, rag):
+    def test_offsets_shared_across_fields(self, rag: Ragged):
         assert rag["field0"].offsets is rag["field1"].offsets
 
-    def test_field_returns_ragged(self, rag):
+    def test_field_returns_ragged(self, rag: Ragged):
         assert isinstance(rag["field0"], Ragged)
         assert isinstance(rag["field1"], Ragged)
+
+    def test_zip_produces_initialized_ragged(self):
+        r1 = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
+        r2 = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))
+        z = ak.zip({"a": r1, "b": r2})
+        assert isinstance(z, Ragged)
+        np.testing.assert_array_equal(
+            z.offsets, np.array([0, 2, 3, 6], dtype=z.offsets.dtype)
+        )
