@@ -166,6 +166,20 @@ class TestRecordRagged:
         rag["field0"] = rag["field0"].view(np.uint64)
         np.testing.assert_array_equal(rag["field0"].data.view(np.int64), original)
 
+    def test_squeeze_record(self):
+        f0 = Ragged.from_lengths(
+            np.arange(6, dtype=np.int64).reshape(6, 1), np.array([2, 1, 3])
+        )
+        f1 = Ragged.from_lengths(
+            np.arange(6, dtype=np.float64).reshape(6, 1), np.array([2, 1, 3])
+        )
+        rag = Ragged(ak.zip({"a": f0, "b": f1}, depth_limit=1))
+        sq = rag.squeeze()
+        assert isinstance(sq, Ragged)
+        assert sq.shape == (3, None)
+        np.testing.assert_array_equal(sq["a"].data, np.arange(6))
+        assert sq["a"].offsets is sq.offsets
+
     def test_zip_produces_initialized_ragged(self):
         r1 = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
         r2 = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))

@@ -216,7 +216,11 @@ class Ragged(ak.Array, Generic[RDTYPE]):
     @property
     def shape(self) -> tuple[int | None, ...]:
         """The shape of the Ragged array. The ragged dimension is :code:`None`."""
-        return self.parts.shape
+        self._ensure_parts()
+        if self._parts is None:
+            # All fields share the ragged structure; derive from any.
+            return self[ak.fields(self)[0]].shape
+        return self._parts.shape
 
     @property
     def dtype(self) -> np.dtype[RDTYPE] | dict[str, np.dtype]:
@@ -329,9 +333,18 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     def squeeze(
         self, axis: int | tuple[int, ...] | None = None
-    ) -> Self | NDArray[RDTYPE]:
+    ) -> Self | NDArray[RDTYPE] | dict[str, NDArray[RDTYPE]]:
         """Squeeze the ragged array along the given non-ragged axis.
-        If squeezing would result in a 1D array, return the data as a numpy array."""
+        If squeezing would result in a 1D array, return the data as a numpy array.
+        For record layouts, dispatches per-field; if fields collapse to 1D ndarrays,
+        returns a dict of ndarrays, otherwise returns a record Ragged."""
+        self._ensure_parts()
+        if self._parts is None:
+            squeezed = {f: self[f].squeeze(axis) for f in ak.fields(self)}
+            first = next(iter(squeezed.values()))
+            if isinstance(first, np.ndarray):
+                return squeezed
+            return type(self)(ak.zip(squeezed, depth_limit=1))
         if axis is None:
             data = self._parts.data.squeeze()
             shape = tuple(s for s in self.shape if s != 1)
