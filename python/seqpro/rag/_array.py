@@ -244,6 +244,12 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     def view(self, dtype: type[DTYPE] | str) -> Ragged[DTYPE]:
         """Return a view of the data with the given dtype."""
+        self._ensure_parts()
+        if self._parts is None:
+            raise NotImplementedError(
+                "view is not defined on record-layout Ragged arrays; "
+                "update fields individually, e.g. rag['f'] = rag['f'].view(dtype)."
+            )
         # get a new layout, same data
         view = ak.without_parameters(self)
 
@@ -294,6 +300,12 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     def to_numpy(self, allow_missing: bool = False) -> NDArray[RDTYPE]:
         """Note: not zero-copy if offsets or data are non-contiguous."""
+        self._ensure_parts()
+        if self._parts is None:
+            raise NotImplementedError(
+                "to_numpy is not defined on record-layout Ragged arrays; "
+                "convert fields individually."
+            )
         arr = super().to_numpy(allow_missing=allow_missing)
         if self.dtype.type == np.bytes_:
             arr = arr[..., None].view("S1")
@@ -383,6 +395,12 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         **kwargs: P.kwargs,
     ) -> Ragged[DTYPE]:
         """Apply a gufunc to the data of the Ragged array that does not alter the shape of the data."""
+        self._ensure_parts()
+        if self._parts is None:
+            raise NotImplementedError(
+                "apply is not defined on record-layout Ragged arrays; "
+                "apply per field instead."
+            )
         data = gufunc(self.data, *args, **kwargs)
         parts = RagParts(data, self.shape, self.offsets)
         return Ragged(parts)

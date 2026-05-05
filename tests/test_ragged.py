@@ -149,6 +149,23 @@ class TestRecordRagged:
         rag = Ragged(ak.zip({"zeta": r1, "alpha": r2}))
         assert list(rag.dtype.keys()) == ["zeta", "alpha"]
 
+    def test_view_raises_on_record(self, rag: Ragged):
+        with pytest.raises(NotImplementedError, match="record"):
+            _ = rag.view(np.float32)
+
+    def test_apply_raises_on_record(self, rag: Ragged):
+        with pytest.raises(NotImplementedError, match="record"):
+            _ = rag.apply(lambda x: x + 1)
+
+    def test_to_numpy_raises_on_record(self, rag: Ragged):
+        with pytest.raises(NotImplementedError, match="record"):
+            _ = rag.to_numpy()
+
+    def test_field_setitem_roundtrip(self, rag: Ragged):
+        original = rag["field0"].data.copy()
+        rag["field0"] = rag["field0"].view(np.uint64)
+        np.testing.assert_array_equal(rag["field0"].data.view(np.int64), original)
+
     def test_zip_produces_initialized_ragged(self):
         r1 = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
         r2 = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))
