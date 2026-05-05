@@ -113,6 +113,19 @@ class TestRecordRagged:
         assert isinstance(rag["field0"], Ragged)
         assert isinstance(rag["field1"], Ragged)
 
+    def test_dtype_dict(self, rag: Ragged):
+        dt = rag.dtype
+        assert isinstance(dt, dict)
+        assert list(dt.keys()) == ["field0", "field1"]
+        assert dt["field0"] == np.int64
+        assert dt["field1"] == np.float64
+
+    def test_dtype_field_order_preserved(self):
+        r1 = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
+        r2 = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))
+        rag = Ragged(ak.zip({"zeta": r1, "alpha": r2}))
+        assert list(rag.dtype.keys()) == ["zeta", "alpha"]
+
     def test_zip_produces_initialized_ragged(self):
         r1 = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
         r2 = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))

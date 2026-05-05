@@ -221,9 +221,13 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         return self.parts.shape
 
     @property
-    def dtype(self) -> np.dtype[RDTYPE]:
-        """The dtype of the Ragged array."""
-        return self.data.dtype
+    def dtype(self) -> np.dtype[RDTYPE] | dict[str, np.dtype]:
+        """The dtype of the Ragged array. For record layouts, a dict of
+        field name -> dtype, in awkward field order."""
+        self._ensure_parts()
+        if self._parts is None:
+            return {f: self[f].dtype for f in ak.fields(self)}
+        return self._parts.data.dtype
 
     @property
     def rag_dim(self) -> int:
