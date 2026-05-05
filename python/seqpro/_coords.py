@@ -89,3 +89,49 @@ def detect_schema(df, hint: SchemaLike | None = None) -> CoordSchema:
     raise ValueError(
         f"Could not detect coordinate schema: columns match {names!r}. " + _HINT_MSG
     )
+
+
+def set_schema(df, to: SchemaLike, from_: SchemaLike | None = None):
+    """Rename coordinate columns to match a target schema.
+
+    Parameters
+    ----------
+    df
+        A polars or pandas DataFrame with genomic coordinate columns.
+    to
+        Target schema: a shorthand string ("bed", "pb", "pr", "gtf") or
+        a tuple of column names (chrom, start, end[, strand]).
+    from_
+        Source schema hint. Auto-detected if not provided.
+    """
+    import polars as pl
+
+    nw_df = nw.from_native(df, eager_only=True)
+    src = detect_schema(nw_df, hint=from_)
+    tgt = _resolve_schema(to)
+
+    cols = nw_df.columns
+    rename_map: dict[str, str] = {}
+    for src_col, tgt_col in [
+        (src.chrom, tgt.chrom),
+        (src.start, tgt.start),
+        (src.end, tgt.end),
+    ]:
+        if src_col != tgt_col and src_col in cols:
+            rename_map[src_col] = tgt_col
+
+    if (
+        src.strand is not None
+        and tgt.strand is not None
+        and src.strand != tgt.strand
+        and src.strand in cols
+    ):
+        rename_map[src.strand] = tgt.strand
+
+    result = nw.to_native(nw_df.rename(rename_map))
+
+    if tgt == _SCHEMAS["pb"] and isinstance(result, pl.DataFrame):
+        if hasattr(result, "config_meta"):
+            result.config_meta.set(coordinate_system_zero_based=True)
+
+    return result

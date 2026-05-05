@@ -1,7 +1,7 @@
 import pytest
 import polars as pl
 import pandas as pd
-from seqpro._coords import CoordSchema, _SCHEMAS, _resolve_schema, detect_schema
+from seqpro._coords import CoordSchema, _SCHEMAS, _resolve_schema, detect_schema, set_schema
 
 
 def test_coordschema_fields():
@@ -166,3 +166,49 @@ def test_detect_schema_ambiguous():
 def test_detect_schema_pandas():
     df = pd.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100]})
     assert detect_schema(df) == _SCHEMAS["bed"]
+
+
+def test_set_schema_bed_to_pb():
+    df = pl.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100], "strand": ["+"], "score": [1.0]})
+    result = set_schema(df, to="pb")
+    assert result.columns == ["chrom", "start", "end", "strand", "score"]
+    assert isinstance(result, pl.DataFrame)
+
+
+def test_set_schema_bed_to_pr():
+    df = pl.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100], "strand": ["+"]})
+    result = set_schema(df, to="pr")
+    assert set(result.columns) >= {"Chromosome", "Start", "End", "Strand"}
+
+
+def test_set_schema_pr_to_bed():
+    df = pl.DataFrame({"Chromosome": ["chr1"], "Start": [0], "End": [100], "Strand": ["+"]})
+    result = set_schema(df, to="bed")
+    assert set(result.columns) >= {"chrom", "chromStart", "chromEnd", "strand"}
+
+
+def test_set_schema_no_strand_col():
+    df = pl.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100]})
+    result = set_schema(df, to="pb")
+    assert "strand" not in result.columns
+    assert result.columns == ["chrom", "start", "end"]
+
+
+def test_set_schema_explicit_from():
+    df = pl.DataFrame({"chrom": ["chr1"], "start": [0], "end": [100], "strand": ["+"]})
+    result = set_schema(df, to="pr", from_="pb")
+    assert set(result.columns) >= {"Chromosome", "Start", "End", "Strand"}
+
+
+def test_set_schema_pandas_in_pandas_out():
+    df = pd.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100]})
+    result = set_schema(df, to="pb")
+    assert isinstance(result, pd.DataFrame)
+    assert list(result.columns) == ["chrom", "start", "end"]
+
+
+def test_set_schema_preserves_values():
+    df = pl.DataFrame({"chrom": ["chr1", "chr2"], "chromStart": [0, 10], "chromEnd": [100, 200]})
+    result = set_schema(df, to="pb")
+    assert result["start"].to_list() == [0, 10]
+    assert result["end"].to_list() == [100, 200]
