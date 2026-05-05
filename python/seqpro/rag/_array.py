@@ -171,11 +171,31 @@ class Ragged(ak.Array, Generic[RDTYPE]):
     @property
     def data(self) -> NDArray[RDTYPE]:
         """The data of the Ragged array."""
+        if not hasattr(self, "_parts"):
+            self._parts = unbox(self)
+        if self._parts is None:
+            raise TypeError(
+                "Cannot access data of a record Ragged array; index a field first."
+            )
         return self.parts.data
 
     @property
     def offsets(self) -> NDArray[OFFSET_TYPE]:
         """The offsets of the Ragged array. May be 1- or 2-dimensional."""
+        if not hasattr(self, "_parts"):
+            self._parts = unbox(self)
+        if self._parts is None:
+            # Record layout — extract offsets from field 0's list layer, cache for sharing.
+            # object.__setattr__ used in case ak.Array intercepts __setattr__.
+            if not hasattr(self, "_offsets_cache"):
+                layout = ak.to_layout(self)
+                node = layout
+                while not isinstance(node, RecordArray):
+                    node = node.content  # no-arg property on ListOffsetArray/ListArray/RegularArray
+                field_layout = node.content(0)
+                offsets = _extract_list_offsets(field_layout)
+                object.__setattr__(self, "_offsets_cache", offsets)
+            return self._offsets_cache  # type: ignore[return-value]
         return self.parts.offsets
 
     @property
