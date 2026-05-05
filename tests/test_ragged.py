@@ -180,6 +180,19 @@ class TestRecordRagged:
         np.testing.assert_array_equal(sq["a"].data, np.arange(6))
         assert sq["a"].offsets is sq.offsets
 
+    def test_reshape_record(self):
+        lengths = np.array([2, 1, 3, 1, 2, 1])
+        data_a = np.arange(10, dtype=np.int64)
+        data_b = np.arange(10, dtype=np.float64)
+        f0 = Ragged.from_lengths(data_a, lengths)
+        f1 = Ragged.from_lengths(data_b, lengths)
+        rag = Ragged(ak.zip({"a": f0, "b": f1}, depth_limit=1))
+        re = rag.reshape(2, 3, None)
+        assert isinstance(re, Ragged)
+        assert re.shape == (2, 3, None)
+        assert re["a"].offsets is re.offsets
+        np.testing.assert_array_equal(re["a"].data, data_a)
+
     def test_zip_produces_initialized_ragged(self):
         r1 = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
         r2 = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))

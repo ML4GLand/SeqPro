@@ -372,6 +372,10 @@ class Ragged(ak.Array, Generic[RDTYPE]):
 
     def reshape(self, *shape: int | None | tuple[int | None, ...]) -> Self:
         """Reshape non-ragged axes."""
+        self._ensure_parts()
+        if self._parts is None:
+            reshaped = {f: self[f].reshape(*shape) for f in ak.fields(self)}
+            return type(self)(ak.zip(reshaped, depth_limit=1))
         # this is correct because all reshaping operations preserve the layout i.e. raveled ordered
         if isinstance(shape[0], tuple):
             if len(shape) > 1:
