@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 from pytest_cases import parametrize_with_cases
 from seqpro.rag import OFFSET_TYPE, Ragged, lengths_to_offsets
+from seqpro.rag._array import RagParts
 
 
 def case_int32():
@@ -97,6 +98,18 @@ class TestRecordRagged:
         np.testing.assert_array_equal(
             d["field1"], np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         )
+
+    def test_parts_dict(self, rag: Ragged):
+        p = rag.parts
+        assert isinstance(p, dict)
+        assert list(p.keys()) == ["field0", "field1"]
+        for v in p.values():
+            assert isinstance(v, RagParts)
+
+    def test_parts_dict_shares_offsets(self, rag: Ragged):
+        p = rag.parts
+        assert p["field0"].offsets is rag.offsets
+        assert p["field1"].offsets is rag.offsets
 
     def test_data_dict_zero_copy(self, rag: Ragged):
         d = rag.data

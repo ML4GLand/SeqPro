@@ -182,13 +182,12 @@ class Ragged(ak.Array, Generic[RDTYPE]):
         return Ragged(parts)
 
     @property
-    def parts(self) -> RagParts[RDTYPE]:
-        """The parts of the Ragged array."""
+    def parts(self) -> RagParts[RDTYPE] | dict[str, RagParts]:
+        """The parts of the Ragged array. For record layouts, a dict of
+        field name -> RagParts; all share the same offsets ndarray."""
         self._ensure_parts()
         if self._parts is None:
-            raise TypeError(
-                "Cannot access parts of a record Ragged array; index a field first."
-            )
+            return {f: self[f].parts for f in ak.fields(self)}
         return self._parts
 
     @property
