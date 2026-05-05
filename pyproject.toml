@@ -42,7 +42,7 @@ python-source = "python"
 features = ["pyo3/extension-module"]
 
 [tool.basedpyright]
-include = ['python/seqpro', 'notebooks', 'tests']
+include = ['python/seqpro', 'tests']
 enableTypeIgnoreComments = true
 reportMissingTypeArgument = false
 

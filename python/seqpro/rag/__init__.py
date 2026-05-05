@@ -1,11 +1,11 @@
-from ._array import DTYPE, RDTYPE, Ragged, is_rag_dtype
+from ._array import DTYPE_co, Ragged, RDTYPE_co, is_rag_dtype
 from ._utils import OFFSET_TYPE, lengths_to_offsets
 
 __all__ = [
-    "Ragged",
     "OFFSET_TYPE",
-    "lengths_to_offsets",
-    "DTYPE",
-    "RDTYPE",
+    "DTYPE_co",
+    "RDTYPE_co",
+    "Ragged",
     "is_rag_dtype",
+    "lengths_to_offsets",
 ]
