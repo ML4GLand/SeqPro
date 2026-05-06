@@ -150,3 +150,11 @@ def test_read_broadpeak(bed: pl.DataFrame):
             pl.col("pValue", "qValue").fill_null(-1),
         ).write_csv(f.name, include_header=False, separator="\t")
         assert_frame_equal(sp.bed.read(f.name), bed)
+
+
+def test_read_returns_polars_dataframe(tmp_path):
+    bed_content = "chr1\t0\t100\tname\t0\t+\n"
+    bed_file = tmp_path / "test.bed"
+    bed_file.write_text(bed_content)
+    result = sp.bed.read(bed_file)
+    assert isinstance(result, pl.DataFrame)

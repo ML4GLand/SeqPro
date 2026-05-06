@@ -11,6 +11,7 @@ from narwhals.typing import FrameT
 from natsort import natsorted
 
 from ._types import PathLike
+from ._coords import CoordSchema, detect_schema, set_schema
 
 with warnings.catch_warnings():
     warnings.filterwarnings(
@@ -29,6 +30,9 @@ __all__ = [
     "BEDSchema",
     "NarrowPeakSchema",
     "BroadPeakSchema",
+    "CoordSchema",
+    "detect_schema",
+    "set_schema",
 ]
 
 
@@ -146,16 +150,19 @@ def read(path: PathLike) -> pl.DataFrame:
     """
     path = Path(path)
     if ".bed" in path.suffixes:
-        return _read_bed(path)
+        result = _read_bed(path)
     elif ".narrowPeak" in path.suffixes:
-        return _read_narrowpeak(path)
+        result = _read_narrowpeak(path)
     elif ".broadPeak" in path.suffixes:
-        return _read_broadpeak(path)
+        result = _read_broadpeak(path)
     else:
         raise ValueError(
-            f"""Unrecognized file extension: {"".join(path.suffixes)}. Expected one of 
+            f"""Unrecognized file extension: {"".join(path.suffixes)}. Expected one of
             .bed, .narrowPeak, or .broadPeak (potentially gzipped)."""
         )
+    if hasattr(result, "config_meta"):
+        result.config_meta.set(coordinate_system_zero_based=True)
+    return result
 
 
 BEDSchema = pa.DataFrameSchema(
