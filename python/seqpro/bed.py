@@ -37,12 +37,12 @@ def sort(bed: FrameT) -> FrameT:
     """Sort a BED-like DataFrame by chromosome, start, and end position, using the natural
     order of chromosome names e.g. 1, 2, ..., 10, ..."""
     order = natsorted(
-        bed.select(nw.col("chrom").unique()).lazy().collect()["chrom"].to_list()
+        [x for x in bed.select(nw.col("chrom").unique()).lazy().collect()["chrom"].to_list() if x is not None]
     )
     return (
-        bed.with_columns(__chrom_key=nw.col("chrom").cast(nw.Enum(order)))
-        .sort("__chrom_key", "chromStart", "chromEnd")
-        .drop("__chrom_key")
+        bed.with_columns(_seqpro_chrom_sort_key_=nw.col("chrom").cast(nw.Enum(order)))
+        .sort("_seqpro_chrom_sort_key_", "chromStart", "chromEnd")
+        .drop("_seqpro_chrom_sort_key_")
     )
 
 
