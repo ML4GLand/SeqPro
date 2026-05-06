@@ -3,15 +3,6 @@
 ::: seqpro
     options:
       members:
-        - AA
-        - AminoAlphabet
-        - DNA
-        - NestedStr
-        - NucleotideAlphabet
-        - PathLike
-        - RNA
-        - SeqType
-        - StrSeqType
         - bin_coverage
         - cast_seqs
         - decode_ohe

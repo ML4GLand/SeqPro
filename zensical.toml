@@ -13,9 +13,11 @@ nav = [
   { "Ragged Arrays" = "ragged.md" },
   { "API Reference" = [
     "api/index.md",
+    { "Alphabets" = "api/alphabets.md" },
     { "BED" = "api/bed.md" },
     { "GTF" = "api/gtf.md" },
     { "Ragged" = "api/ragged.md" },
+    { "Types" = "api/types.md" },
   ] },
 ]
 
