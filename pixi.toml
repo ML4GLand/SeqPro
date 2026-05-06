@@ -52,15 +52,13 @@ prek = "prek install --hook-type commit-msg"
 i-kernel = "ipython kernel install --user --name seqpro"
 bump-dry = "cz bump --dry-run"
 
-[feature.doc.dependencies]
-sphinx = "*"
-sphinx-book-theme = "*"
-sphinx-autobuild = "*"
-sphinx-autodoc-typehints = "*"
-myst-parser = "*"
+[feature.doc.pypi-dependencies]
+zensical = "*"
+mkdocstrings-python = "*"
 
 [feature.doc.tasks]
-doc = { cmd = "make clean && make html", cwd = "docs" }
+doc = "zensical serve"
+build-doc = "zensical build --clean"
 
 [feature.py310.dependencies]
 python = "3.10.*"
