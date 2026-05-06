@@ -46,7 +46,8 @@ def sort(bed: FrameT) -> FrameT:
     )
 
 
-def with_len(bed: pl.DataFrame, length: int) -> pl.DataFrame:
+@nw.narwhalify
+def with_len(bed: FrameT, length: int) -> FrameT:
     """Set the length of regions in a BED-like DataFrame to a fixed length by expanding or shrinking
     relative to the center (or peak) of the window. If the original region size + length is odd, the
     center will be 1 position closer the right end.
@@ -61,15 +62,14 @@ def with_len(bed: pl.DataFrame, length: int) -> pl.DataFrame:
     if length < 0:
         raise ValueError("Length must be non-negative.")
 
-    # * Avoid any floating point math for consistent results
-    if "peak" in bed:
+    if "peak" in bed.columns:
         double_center = (
-            pl.when(pl.col("peak").is_null())
-            .then(pl.col("chromStart") + pl.col("chromEnd"))
-            .otherwise(2 * (pl.col("chromStart") + pl.col("peak")))
+            nw.when(nw.col("peak").is_null())
+            .then(nw.col("chromStart") + nw.col("chromEnd"))
+            .otherwise(2 * (nw.col("chromStart") + nw.col("peak")))
         )
     else:
-        double_center = pl.col("chromStart") + pl.col("chromEnd")
+        double_center = nw.col("chromStart") + nw.col("chromEnd")
 
     return bed.with_columns(
         chromStart=(double_center - length) // 2,
