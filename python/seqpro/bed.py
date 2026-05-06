@@ -3,15 +3,16 @@ import warnings
 from functools import partial
 from pathlib import Path
 
+import narwhals as nw
 import pandera.dtypes as pat
 import pandera.polars as pa
-import narwhals as nw
 import polars as pl
+import polars_config_meta  # noqa: F401
 from narwhals.typing import FrameT
 from natsort import natsorted
 
-from ._types import PathLike
 from ._coords import CoordSchema, detect_schema, set_schema
+from ._types import PathLike
 
 with warnings.catch_warnings():
     warnings.filterwarnings(
@@ -22,17 +23,17 @@ with warnings.catch_warnings():
     import pyranges as pr
 
 __all__ = [
-    "sort",
-    "with_len",
-    "to_pyr",
-    "from_pyr",
-    "read",
     "BEDSchema",
-    "NarrowPeakSchema",
     "BroadPeakSchema",
     "CoordSchema",
+    "NarrowPeakSchema",
     "detect_schema",
+    "from_pyr",
+    "read",
     "set_schema",
+    "sort",
+    "to_pyr",
+    "with_len",
 ]
 
 
@@ -165,8 +166,7 @@ def read(path: PathLike) -> pl.DataFrame:
             f"""Unrecognized file extension: {"".join(path.suffixes)}. Expected one of
             .bed, .narrowPeak, or .broadPeak (potentially gzipped)."""
         )
-    if hasattr(result, "config_meta"):
-        result.config_meta.set(coordinate_system_zero_based=True)
+    result.config_meta.set(coordinate_system_zero_based=True)
     return result
 
 

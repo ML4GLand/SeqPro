@@ -212,3 +212,25 @@ def test_set_schema_preserves_values():
     result = set_schema(df, to="pb")
     assert result["start"].to_list() == [0, 10]
     assert result["end"].to_list() == [100, 200]
+
+
+@pytest.mark.parametrize("schema", ["bed", "pb", "pr"])
+def test_set_schema_zero_based_sets_meta_true(schema):
+    df = pl.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100]})
+    result = set_schema(df, to=schema)
+    assert result.config_meta.get_metadata().get("coordinate_system_zero_based") is True
+
+
+@pytest.mark.parametrize("schema", ["gtf", "gff"])
+def test_set_schema_one_based_sets_meta_false(schema):
+    df = pl.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100]})
+    result = set_schema(df, to=schema)
+    assert result.config_meta.get_metadata().get("coordinate_system_zero_based") is False
+
+
+def test_set_schema_pandas_no_config_meta():
+    import pandas as pd
+    df = pd.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100]})
+    result = set_schema(df, to="pb")
+    assert isinstance(result, pd.DataFrame)
+    assert not hasattr(result, "config_meta")

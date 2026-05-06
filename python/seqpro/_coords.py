@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Union
 
 import narwhals as nw
+import polars_config_meta  # noqa: F401
+from attrs import define
 
 
-@dataclass(frozen=True)
+@define(frozen=True)
 class CoordSchema:
     chrom: str
     start: str
@@ -16,11 +17,13 @@ class CoordSchema:
 
 
 _SCHEMAS: dict[str, CoordSchema] = {
-    "bed": CoordSchema("chrom", "chromStart", "chromEnd", zero_based=True,  strand="strand"),
-    "pb":  CoordSchema("chrom", "start",      "end",      zero_based=True,  strand="strand"),
-    "pr":  CoordSchema("Chromosome", "Start", "End",      zero_based=True,  strand="Strand"),
-    "gtf": CoordSchema("seqname",    "start", "end",      zero_based=False, strand="strand"),
-    "gff": CoordSchema("seqname",    "start", "end",      zero_based=False, strand="strand"),
+    "bed": CoordSchema(
+        "chrom", "chromStart", "chromEnd", zero_based=True, strand="strand"
+    ),
+    "pb": CoordSchema("chrom", "start", "end", zero_based=True, strand="strand"),
+    "pr": CoordSchema("Chromosome", "Start", "End", zero_based=True, strand="Strand"),
+    "gtf": CoordSchema("seqname", "start", "end", zero_based=False, strand="strand"),
+    "gff": CoordSchema("seqname", "start", "end", zero_based=False, strand="strand"),
 }
 
 SchemaLike = Union[str, tuple, "CoordSchema"]
@@ -130,8 +133,7 @@ def set_schema(df, to: SchemaLike, from_: SchemaLike | None = None):
 
     result = nw.to_native(nw_df.rename(rename_map))
 
-    if tgt == _SCHEMAS["pb"] and isinstance(result, pl.DataFrame):
-        if hasattr(result, "config_meta"):
-            result.config_meta.set(coordinate_system_zero_based=True)
+    if isinstance(result, pl.DataFrame):
+        result.config_meta.set(coordinate_system_zero_based=tgt.zero_based)
 
     return result
