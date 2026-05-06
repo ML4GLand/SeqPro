@@ -1,7 +1,13 @@
-import pytest
-import polars as pl
 import pandas as pd
-from seqpro._coords import CoordSchema, _SCHEMAS, _resolve_schema, detect_schema, set_schema
+import polars as pl
+import pytest
+from seqpro._coords import (
+    _SCHEMAS,
+    CoordSchema,
+    _resolve_schema,
+    detect_schema,
+    set_schema,
+)
 
 
 def test_coordschema_fields():
@@ -31,28 +37,44 @@ def test_schemas_keys():
 def test_schemas_bed():
     s = _SCHEMAS["bed"]
     assert (s.chrom, s.start, s.end, s.strand, s.zero_based) == (
-        "chrom", "chromStart", "chromEnd", "strand", True
+        "chrom",
+        "chromStart",
+        "chromEnd",
+        "strand",
+        True,
     )
 
 
 def test_schemas_pb():
     s = _SCHEMAS["pb"]
     assert (s.chrom, s.start, s.end, s.strand, s.zero_based) == (
-        "chrom", "start", "end", "strand", True
+        "chrom",
+        "start",
+        "end",
+        "strand",
+        True,
     )
 
 
 def test_schemas_pr():
     s = _SCHEMAS["pr"]
     assert (s.chrom, s.start, s.end, s.strand, s.zero_based) == (
-        "Chromosome", "Start", "End", "Strand", True
+        "Chromosome",
+        "Start",
+        "End",
+        "Strand",
+        True,
     )
 
 
 def test_schemas_gtf():
     s = _SCHEMAS["gtf"]
     assert (s.chrom, s.start, s.end, s.strand, s.zero_based) == (
-        "seqname", "start", "end", "strand", False
+        "seqname",
+        "start",
+        "end",
+        "strand",
+        False,
     )
     assert _SCHEMAS["gff"] == _SCHEMAS["gtf"]
 
@@ -100,19 +122,27 @@ def test_resolve_schema_bad_type():
 
 
 def _bed_df():
-    return pl.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100], "strand": ["+"]})
+    return pl.DataFrame(
+        {"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100], "strand": ["+"]}
+    )
 
 
 def _pb_df():
-    return pl.DataFrame({"chrom": ["chr1"], "start": [0], "end": [100], "strand": ["+"]})
+    return pl.DataFrame(
+        {"chrom": ["chr1"], "start": [0], "end": [100], "strand": ["+"]}
+    )
 
 
 def _pr_df():
-    return pl.DataFrame({"Chromosome": ["chr1"], "Start": [0], "End": [100], "Strand": ["+"]})
+    return pl.DataFrame(
+        {"Chromosome": ["chr1"], "Start": [0], "End": [100], "Strand": ["+"]}
+    )
 
 
 def _gtf_df():
-    return pl.DataFrame({"seqname": ["chr1"], "start": [0], "end": [100], "strand": ["+"]})
+    return pl.DataFrame(
+        {"seqname": ["chr1"], "start": [0], "end": [100], "strand": ["+"]}
+    )
 
 
 def test_detect_schema_bed():
@@ -136,9 +166,9 @@ def test_detect_schema_hint_string():
 
 
 def test_detect_schema_hint_tuple():
-    assert detect_schema(_bed_df(), hint=("chrom", "chromStart", "chromEnd")) == CoordSchema(
-        "chrom", "chromStart", "chromEnd", zero_based=False
-    )
+    assert detect_schema(
+        _bed_df(), hint=("chrom", "chromStart", "chromEnd")
+    ) == CoordSchema("chrom", "chromStart", "chromEnd", zero_based=False)
 
 
 def test_detect_schema_hint_missing_col():
@@ -155,10 +185,15 @@ def test_detect_schema_no_match():
 
 def test_detect_schema_ambiguous():
     # Has both bed and pb coord columns
-    df = pl.DataFrame({
-        "chrom": ["chr1"], "chromStart": [0], "chromEnd": [100],
-        "start": [0], "end": [100],
-    })
+    df = pl.DataFrame(
+        {
+            "chrom": ["chr1"],
+            "chromStart": [0],
+            "chromEnd": [100],
+            "start": [0],
+            "end": [100],
+        }
+    )
     with pytest.raises(ValueError, match="match"):
         detect_schema(df)
 
@@ -169,20 +204,32 @@ def test_detect_schema_pandas():
 
 
 def test_set_schema_bed_to_pb():
-    df = pl.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100], "strand": ["+"], "score": [1.0]})
+    df = pl.DataFrame(
+        {
+            "chrom": ["chr1"],
+            "chromStart": [0],
+            "chromEnd": [100],
+            "strand": ["+"],
+            "score": [1.0],
+        }
+    )
     result = set_schema(df, to="pb")
     assert result.columns == ["chrom", "start", "end", "strand", "score"]
     assert isinstance(result, pl.DataFrame)
 
 
 def test_set_schema_bed_to_pr():
-    df = pl.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100], "strand": ["+"]})
+    df = pl.DataFrame(
+        {"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100], "strand": ["+"]}
+    )
     result = set_schema(df, to="pr")
     assert set(result.columns) >= {"Chromosome", "Start", "End", "Strand"}
 
 
 def test_set_schema_pr_to_bed():
-    df = pl.DataFrame({"Chromosome": ["chr1"], "Start": [0], "End": [100], "Strand": ["+"]})
+    df = pl.DataFrame(
+        {"Chromosome": ["chr1"], "Start": [0], "End": [100], "Strand": ["+"]}
+    )
     result = set_schema(df, to="bed")
     assert set(result.columns) >= {"chrom", "chromStart", "chromEnd", "strand"}
 
@@ -208,7 +255,9 @@ def test_set_schema_pandas_in_pandas_out():
 
 
 def test_set_schema_preserves_values():
-    df = pl.DataFrame({"chrom": ["chr1", "chr2"], "chromStart": [0, 10], "chromEnd": [100, 200]})
+    df = pl.DataFrame(
+        {"chrom": ["chr1", "chr2"], "chromStart": [0, 10], "chromEnd": [100, 200]}
+    )
     result = set_schema(df, to="pb")
     assert result["start"].to_list() == [0, 10]
     assert result["end"].to_list() == [100, 200]
@@ -225,11 +274,14 @@ def test_set_schema_zero_based_sets_meta_true(schema):
 def test_set_schema_one_based_sets_meta_false(schema):
     df = pl.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100]})
     result = set_schema(df, to=schema)
-    assert result.config_meta.get_metadata().get("coordinate_system_zero_based") is False
+    assert (
+        result.config_meta.get_metadata().get("coordinate_system_zero_based") is False
+    )
 
 
 def test_set_schema_pandas_no_config_meta():
     import pandas as pd
+
     df = pd.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [100]})
     result = set_schema(df, to="pb")
     assert isinstance(result, pd.DataFrame)
