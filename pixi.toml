@@ -15,6 +15,7 @@ bench = { features = ["bench", "py313"] }
 
 [tasks]
 test = "pytest tests"
+lint = "prek run --all-files --stage pre-commit"
 prek-install = "prek install -t commit-msg -t pre-commit -t pre-push"
 
 [dependencies]
