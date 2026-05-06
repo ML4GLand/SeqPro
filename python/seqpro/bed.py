@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pandera.dtypes as pat
 import pandera.polars as pa
+import narwhals as nw
 import polars as pl
+from narwhals.typing import FrameT
 from natsort import natsorted
 
 from ._types import PathLike
@@ -30,17 +32,18 @@ __all__ = [
 ]
 
 
-def sort(bed: pl.DataFrame):
+@nw.narwhalify
+def sort(bed: FrameT) -> FrameT:
     """Sort a BED-like DataFrame by chromosome, start, and end position, using the natural
     order of chromosome names e.g. 1, 2, ..., 10, ..."""
-    order = natsorted(bed["chrom"].unique())
-    bed = bed.sort(
-        pl.col("chrom").cast(pl.Enum(order)),
-        "chromStart",
-        "chromEnd",
-        maintain_order=True,
+    order = natsorted(
+        bed.select(nw.col("chrom").unique()).lazy().collect()["chrom"].to_list()
     )
-    return bed
+    return (
+        bed.with_columns(__chrom_key=nw.col("chrom").cast(nw.Enum(order)))
+        .sort("__chrom_key", "chromStart", "chromEnd")
+        .drop("__chrom_key")
+    )
 
 
 def with_len(bed: pl.DataFrame, length: int) -> pl.DataFrame:

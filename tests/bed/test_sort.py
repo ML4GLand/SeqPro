@@ -15,3 +15,19 @@ def test_sort():
     actual_sort = sp.bed.sort(bed)
     desired_sort = sp.bed.from_pyr(sp.bed.to_pyr(bed).sort())
     assert_frame_equal(actual_sort, desired_sort)
+
+
+import pandas as pd
+
+
+def test_sort_pandas_in_pandas_out():
+    bed = pd.DataFrame(
+        {
+            "chrom": ["10", "1", "2", "2"],
+            "chromStart": [1, 2, 3, 3],
+            "chromEnd": [2, 3, 5, 4],
+        }
+    )
+    result = sp.bed.sort(bed)
+    assert isinstance(result, pd.DataFrame)
+    assert list(result["chrom"]) == ["1", "2", "2", "10"]
