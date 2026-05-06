@@ -106,8 +106,8 @@ def set_schema(df, to: SchemaLike, from_: SchemaLike | None = None):
     """
     import polars as pl
 
+    src = detect_schema(df, hint=from_)
     nw_df = nw.from_native(df, eager_only=True)
-    src = detect_schema(nw_df, hint=from_)
     tgt = _resolve_schema(to)
 
     cols = nw_df.columns

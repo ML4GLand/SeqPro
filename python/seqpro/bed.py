@@ -39,10 +39,15 @@ __all__ = [
 @nw.narwhalify
 def sort(bed: FrameT) -> FrameT:
     """Sort a BED-like DataFrame by chromosome, start, and end position, using the natural
-    order of chromosome names e.g. 1, 2, ..., 10, ..."""
-    order = natsorted(
-        [x for x in bed.select(nw.col("chrom").unique()).lazy().collect()["chrom"].to_list() if x is not None]
-    )
+    order of chromosome names e.g. 1, 2, ..., 10, ...
+
+    Parameters
+    ----------
+    bed
+        DataFrame with BED-format columns: "chrom", "chromStart", "chromEnd".
+        Accepts polars or pandas DataFrames.
+    """
+    order = natsorted(bed["chrom"].unique().to_list())
     return (
         bed.with_columns(_seqpro_chrom_sort_key_=nw.col("chrom").cast(nw.Enum(order)))
         .sort("_seqpro_chrom_sort_key_", "chromStart", "chromEnd")
