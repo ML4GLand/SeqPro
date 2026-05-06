@@ -1,5 +1,3 @@
-from typing import Optional
-
 import numpy as np
 
 from ._utils import StrSeqType, cast_seqs, check_axes
@@ -34,14 +32,14 @@ def remove_only_N_seqs(seqs):
     list
         List of sequences without only 'N'.
     """
-    return [seq for seq in seqs if not all([x == "N" for x in seq])]
+    return [seq for seq in seqs if not all(x == "N" for x in seq)]
 
 
 def remove_whitespace(seqs: StrSeqType):
     pass
 
 
-def sanitize(seqs: StrSeqType, length_axis: Optional[int] = None):
+def sanitize(seqs: StrSeqType, length_axis: int | None = None):
     """Capitalize characters, remove whitespace, and coerce to fixed length.
 
     Parameters

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import MethodType
-from typing import Dict, List, Optional, Union, cast, overload
+from typing import cast, overload
 
 import awkward as ak
 import numpy as np
@@ -167,31 +167,31 @@ class NucleotideAlphabet:
     def reverse_complement(
         self,
         seqs: StrSeqType,
-        length_axis: Optional[int] = None,
-        ohe_axis: Optional[int] = None,
+        length_axis: int | None = None,
+        ohe_axis: int | None = None,
         out: NDArray[np.bytes_] | None = None,
     ) -> NDArray[np.bytes_]: ...
     @overload
     def reverse_complement(
         self,
         seqs: NDArray[np.uint8],
-        length_axis: Optional[int] = None,
-        ohe_axis: Optional[int] = None,
+        length_axis: int | None = None,
+        ohe_axis: int | None = None,
         out: NDArray[np.bytes_] | None = None,
     ) -> NDArray[np.uint8]: ...
     @overload
     def reverse_complement(
         self,
         seqs: SeqType,
-        length_axis: Optional[int] = None,
-        ohe_axis: Optional[int] = None,
+        length_axis: int | None = None,
+        ohe_axis: int | None = None,
         out: NDArray[np.bytes_] | None = None,
-    ) -> NDArray[Union[np.bytes_, np.uint8]]: ...
+    ) -> NDArray[np.bytes_ | np.uint8]: ...
     def reverse_complement(
         self,
         seqs: SeqType,
-        length_axis: Optional[int] = None,
-        ohe_axis: Optional[int] = None,
+        length_axis: int | None = None,
+        ohe_axis: int | None = None,
         out: NDArray[np.bytes_] | None = None,
     ) -> NDArray[np.bytes_ | np.uint8]:
         """Reverse complement a sequence.
@@ -230,13 +230,13 @@ class NucleotideAlphabet:
 
 
 class AminoAlphabet:
-    codons: List[str]
-    amino_acids: List[str]
+    codons: list[str]
+    amino_acids: list[str]
     codon_array: NDArray[np.bytes_]
     aa_array: NDArray[np.bytes_]
-    codon_to_aa: Dict[str, str]
+    codon_to_aa: dict[str, str]
 
-    def __init__(self, codons: List[str], amino_acids: List[str]) -> None:
+    def __init__(self, codons: list[str], amino_acids: list[str]) -> None:
         """Construct an alphabet of amino acids and their mappings to codons.
 
         Parameters
@@ -275,7 +275,7 @@ class AminoAlphabet:
     def translate(
         self,
         seqs: StrSeqType,
-        length_axis: Optional[int] = None,
+        length_axis: int | None = None,
         *,
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
@@ -284,7 +284,7 @@ class AminoAlphabet:
     def translate(
         self,
         seqs: Ragged[np.bytes_],
-        length_axis: Optional[int] = None,
+        length_axis: int | None = None,
         *,
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
@@ -293,7 +293,7 @@ class AminoAlphabet:
     def translate(
         self,
         seqs: Ragged[np.uint8],
-        length_axis: Optional[int] = None,
+        length_axis: int | None = None,
         *,
         nuc_alphabet: NucleotideAlphabet,
         truncate_stop: bool = False,

@@ -74,9 +74,9 @@ AA = AminoAlphabet(*map(list, zip(*canonical_codons_to_aas.items())))
 
 
 __all__ = [
-    "NucleotideAlphabet",
-    "AminoAlphabet",
+    "AA",
     "DNA",
     "RNA",
-    "AA",
+    "AminoAlphabet",
+    "NucleotideAlphabet",
 ]

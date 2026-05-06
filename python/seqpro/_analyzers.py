@@ -1,4 +1,4 @@
-from typing import List, Optional, Union, cast
+from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -7,7 +7,7 @@ from ._utils import SeqType, cast_seqs, check_axes
 from .alphabets._alphabets import NucleotideAlphabet
 
 
-def length(seqs: Union[str, List[str]]) -> NDArray[np.integer]:
+def length(seqs: str | list[str]) -> NDArray[np.integer]:
     """Calculate the length of each sequence.
 
     Parameters
@@ -27,10 +27,10 @@ def length(seqs: Union[str, List[str]]) -> NDArray[np.integer]:
 def gc_content(
     seqs: SeqType,
     normalize=True,
-    length_axis: Optional[int] = None,
-    alphabet: Optional[NucleotideAlphabet] = None,
-    ohe_axis: Optional[int] = None,
-) -> NDArray[Union[np.integer, np.float64]]:
+    length_axis: int | None = None,
+    alphabet: NucleotideAlphabet | None = None,
+    ohe_axis: int | None = None,
+) -> NDArray[np.integer | np.float64]:
     """Compute the number or proportion of G & C nucleotides.
 
     Parameters
@@ -84,9 +84,9 @@ def gc_content(
 def nucleotide_content(
     seqs: SeqType,
     normalize=True,
-    length_axis: Optional[int] = None,
-    alphabet: Optional[NucleotideAlphabet] = None,
-) -> NDArray[Union[np.integer, np.floating]]:
+    length_axis: int | None = None,
+    alphabet: NucleotideAlphabet | None = None,
+) -> NDArray[np.integer | np.floating]:
     """Compute the number or proportion of each nucleotide.
 
     Parameters
@@ -162,7 +162,7 @@ def _count_kmers(
     seqs: SeqType,
     k: int,
     alphabet: NucleotideAlphabet,
-    length_axis: Optional[int] = None,
+    length_axis: int | None = None,
 ) -> NDArray[np.unsignedinteger]:
     """
     Count unique k-mers.

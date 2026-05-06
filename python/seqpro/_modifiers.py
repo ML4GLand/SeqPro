@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -44,7 +44,7 @@ def k_shuffle(
     length_axis: int | None = None,
     ohe_axis: int | None = None,
     seed: int | np.random.Generator | None = None,
-) -> NDArray[Union[np.bytes_, np.uint8]]:
+) -> NDArray[np.bytes_ | np.uint8]:
     """Shuffle sequences while preserving k-let frequencies.
 
     Parameters

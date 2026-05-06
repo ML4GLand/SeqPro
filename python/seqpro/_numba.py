@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Union, overload
+from typing import overload
 
 import numba as nb
 import numpy as np
@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 @nb.guvectorize(["(u1[:], u1[:])"], "(n)->(n)", target="parallel", cache=True)
 def gufunc_pad_left(
-    seq: NDArray[np.uint8], res: Optional[NDArray[np.uint8]] = None
+    seq: NDArray[np.uint8], res: NDArray[np.uint8] | None = None
 ) -> NDArray[np.uint8]:  # type: ignore
     shift = (seq == 0).sum()
     for i in nb.prange(len(seq)):
@@ -18,7 +18,7 @@ def gufunc_pad_left(
 
 @nb.guvectorize(["(u1[:], u1[:])"], "(n)->(n)", target="parallel", cache=True)
 def gufunc_pad_both(
-    seq: NDArray[np.uint8], res: Optional[NDArray[np.uint8]] = None
+    seq: NDArray[np.uint8], res: NDArray[np.uint8] | None = None
 ) -> NDArray[np.uint8]:  # type: ignore
     shift = (seq == 0).sum() // 2
     for i in nb.prange(len(seq)):
@@ -27,9 +27,9 @@ def gufunc_pad_both(
 
 @nb.guvectorize(["(u1, u1[:], u1[:])"], "(),(n)->(n)", target="parallel", cache=True)
 def gufunc_ohe(
-    char: Union[np.uint8, NDArray[np.uint8]],
+    char: np.uint8 | NDArray[np.uint8],
     alphabet: NDArray[np.uint8],
-    res: Optional[NDArray[np.uint8]] = None,
+    res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:  # type: ignore
     for i in nb.prange(len(alphabet)):
         res[i] = np.uint8(alphabet[i] == char)  # type: ignore
@@ -38,7 +38,7 @@ def gufunc_ohe(
 @nb.guvectorize(["(u1[:], intp[:])"], "(n)->()", target="parallel", cache=True)
 def gufunc_ohe_char_idx(
     seq: NDArray[np.uint8],
-    res: Optional[NDArray[np.intp]] = None,
+    res: NDArray[np.intp] | None = None,
 ) -> NDArray[np.intp]:  # type: ignore
     """Get the index of each character in an OHE array, leaving unknown as -1.
 
@@ -67,7 +67,7 @@ def gufunc_tokenize(
     source: NDArray[np.uint8],
     target: NDArray[np.int32],
     unknown_token: np.int32,
-    res: Optional[NDArray[np.int32]] = None,
+    res: NDArray[np.int32] | None = None,
 ) -> NDArray[np.int32]: ...
 
 
@@ -77,7 +77,7 @@ def gufunc_tokenize(
     source: NDArray[np.int32],
     target: NDArray[np.uint8],
     unknown_token: np.uint8,
-    res: Optional[NDArray[np.uint8]] = None,
+    res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]: ...
 
 
@@ -88,12 +88,12 @@ def gufunc_tokenize(
     cache=True,
 )
 def gufunc_tokenize(
-    seq: NDArray[Union[np.int32, np.uint8]],
-    source: NDArray[Union[np.int32, np.uint8]],
-    target: NDArray[Union[np.int32, np.uint8]],
-    unknown_token: Union[np.int32, np.uint8],
-    res: Optional[NDArray[Union[np.int32, np.uint8]]] = None,
-) -> NDArray[Union[np.int32, np.uint8]]:  # type: ignore
+    seq: NDArray[np.int32 | np.uint8],
+    source: NDArray[np.int32 | np.uint8],
+    target: NDArray[np.int32 | np.uint8],
+    unknown_token: np.int32 | np.uint8,
+    res: NDArray[np.int32 | np.uint8] | None = None,
+) -> NDArray[np.int32 | np.uint8]:  # type: ignore
     """Tokenize a sequence.
 
     Note: np.int32 is returned since token IDs are generally used as indices into an array of embeddings
@@ -115,7 +115,7 @@ def gufunc_translate(
     seq_kmers: NDArray[np.uint8],
     kmer_keys: NDArray[np.uint8],
     kmer_values: NDArray[np.uint8],
-    res: Optional[NDArray[np.uint8]] = None,
+    res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:  # type: ignore
     """Translate 3-mers into amino acids.
 

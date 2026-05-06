@@ -1,5 +1,3 @@
-from typing import Union
-
 import numpy as np
 from numpy.typing import NDArray
 
@@ -11,14 +9,14 @@ try:
 except ImportError:
     raise ImportError("Need to install Xarray to use seqpro.xr")
 
-__all__ = ["ohe", "bin_coverage"]
+__all__ = ["bin_coverage", "ohe"]
 
 
 def ohe(
-    seqs: Union[xr.DataArray, xr.Dataset],
+    seqs: xr.DataArray | xr.Dataset,
     alphabet: NucleotideAlphabet,
     ohe_dim: str = "_ohe",
-) -> Union[xr.DataArray, xr.Dataset]:
+) -> xr.DataArray | xr.Dataset:
     """Ohe hot encode sequences in an xr.Dataset.
 
     Parameters
@@ -51,12 +49,12 @@ def ohe(
 
 
 def bin_coverage(
-    coverage: Union[xr.DataArray, xr.Dataset],
+    coverage: xr.DataArray | xr.Dataset,
     bin_width: int,
     length_dim: str,
     binned_dim="_bin",
     normalize=False,
-) -> Union[xr.DataArray, xr.Dataset]:
+) -> xr.DataArray | xr.Dataset:
     """Bin coverage to a lower resolution by summing across non-overlapping windows.
 
     Parameters
@@ -104,11 +102,11 @@ def bin_coverage(
 
 
 def translate(
-    seqs: Union[xr.DataArray, xr.Dataset],
+    seqs: xr.DataArray | xr.Dataset,
     alphabet: AminoAlphabet,
     length_dim: str,
     aa_length_dim="_aa_length",
-) -> Union[xr.DataArray, xr.Dataset]:
+) -> xr.DataArray | xr.Dataset:
     """Translate DNA sequences to amino acid sequences.
 
     Parameters

@@ -1,4 +1,4 @@
-from typing import Dict, Literal, Optional, Union, cast
+from typing import Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -11,10 +11,10 @@ from .alphabets._alphabets import AminoAlphabet, NucleotideAlphabet
 def pad_seqs(
     seqs: SeqType,
     pad: Literal["left", "both", "right"],
-    pad_value: Optional[str] = None,
-    length: Optional[int] = None,
-    length_axis: Optional[int] = None,
-) -> NDArray[Union[np.bytes_, np.uint8]]:
+    pad_value: str | None = None,
+    length: int | None = None,
+    length_axis: int | None = None,
+) -> NDArray[np.bytes_ | np.uint8]:
     """Pad (or truncate) sequences on either the left, right, or both sides.
 
     Parameters
@@ -104,7 +104,7 @@ def pad_seqs(
 
 
 def ohe(
-    seqs: StrSeqType, alphabet: Union[NucleotideAlphabet, AminoAlphabet]
+    seqs: StrSeqType, alphabet: NucleotideAlphabet | AminoAlphabet
 ) -> NDArray[np.uint8]:
     """One hot encode a nucleotide sequence.
 
@@ -124,7 +124,7 @@ def ohe(
 def decode_ohe(
     seqs: NDArray[np.uint8],
     ohe_axis: int,
-    alphabet: Union[NucleotideAlphabet, AminoAlphabet],
+    alphabet: NucleotideAlphabet | AminoAlphabet,
     unknown_char: str = "N",
 ) -> NDArray[np.bytes_]:
     """Convert an OHE array to an S1 byte array.
@@ -146,9 +146,9 @@ def decode_ohe(
 
 def tokenize(
     seqs: StrSeqType,
-    token_map: Dict[str, int],
+    token_map: dict[str, int],
     unknown_token: int,
-    out: Optional[NDArray[np.int32]] = None,
+    out: NDArray[np.int32] | None = None,
 ) -> NDArray[np.int32]:
     """Tokenize nucleotides. Replaces each nucleotide with its corresponding token, if provided. Otherwise, uses each
     nucleotide's index in the alphabet. Nucleotides not in the alphabet or list of tokens are replaced with -1.
@@ -174,7 +174,7 @@ def tokenize(
 
 def decode_tokens(
     seqs: NDArray[np.int32],
-    token_map: Dict[str, int],
+    token_map: dict[str, int],
     unknown_char: str = "N",
 ) -> NDArray[np.bytes_]:
     """Untokenize nucleotides. Replaces each token/index with its corresponding

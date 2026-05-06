@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from typing import TypeVar, Union, cast, overload
+from collections.abc import Sequence
+from typing import TypeGuard, TypeVar, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TypeGuard
 
-NestedStr = Union[bytes, str, list["NestedStr"]]
-"""String or nested list of strings"""
+NestedStr = bytes | str | Sequence["NestedStr"]
+"""String or nested sequence of strings"""
 
-StrSeqType = Union[NestedStr, NDArray[Union[np.str_, np.object_, np.bytes_]]]
-"""String sequence type (i.e. SeqType but not)"""
+StrSeqType = NestedStr | NDArray[np.str_ | np.object_ | np.bytes_]
+"""String sequence type (i.e. SeqType but not OHE)"""
 
-SeqType = Union[NestedStr, NDArray[Union[np.str_, np.object_, np.bytes_, np.uint8]]]
+SeqType = NestedStr | NDArray[np.str_ | np.object_ | np.bytes_ | np.uint8]
+"""Sequence type (i.e. StrSeqType but can be OHE)"""
 
 DTYPE = TypeVar("DTYPE", bound=np.generic)
 
@@ -47,12 +48,12 @@ def cast_seqs(seqs: SeqType) -> NDArray[np.bytes_ | np.uint8]:
         return np.array([seqs], "S").view("S1")
     elif isinstance(seqs, bytes):
         return np.array([seqs]).view("S1")
-    elif isinstance(seqs, list):
+    elif isinstance(seqs, Sequence):
         return np.array(seqs, "S")[..., None].view("S1")
     elif seqs.dtype.itemsize > 1:  # dtype == U or bigger than S1
         return seqs.astype("S")[..., None].view("S1")
     else:
-        return cast(NDArray[Union[np.bytes_, np.uint8]], seqs)
+        return cast(NDArray[np.bytes_ | np.uint8], seqs)
 
 
 def check_axes(
