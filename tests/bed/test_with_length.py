@@ -2,6 +2,7 @@ import math
 from fractions import Fraction
 
 import hypothesis.strategies as st
+import pandas as pd
 import polars as pl
 import pytest
 import seqpro as sp
@@ -112,9 +113,6 @@ def test_bed(bed: pl.DataFrame, length: int):
 
     assert adj_end - adj_start == length
     assert adj_start == desired_start
-
-
-import pandas as pd
 
 
 def test_with_len_pandas_in_pandas_out():

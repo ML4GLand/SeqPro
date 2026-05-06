@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
+    Concatenate,
     Generic,
     Literal,
+    TypeGuard,
     TypeVar,
     cast,
     overload,
@@ -27,7 +28,7 @@ from awkward.contents import (
 )
 from awkward.index import Index
 from numpy.typing import NDArray
-from typing_extensions import Concatenate, ParamSpec, Self, TypeGuard
+from typing_extensions import ParamSpec, Self
 
 from ._types import ak_dtypes
 from ._utils import OFFSET_TYPE, lengths_to_offsets
