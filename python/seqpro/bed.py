@@ -77,7 +77,7 @@ def with_len(bed: FrameT, length: int) -> FrameT:
     )
 
 
-def to_pyr(bedlike: pl.DataFrame) -> pr.PyRanges:
+def to_pyr(bedlike) -> pr.PyRanges:
     """Convert a BED-like DataFrame to a PyRanges object.
 
     .. important::
@@ -90,18 +90,18 @@ def to_pyr(bedlike: pl.DataFrame) -> pr.PyRanges:
     Parameters
     ----------
     bedlike
-        BED-like DataFrame with at least the columns "chrom", "chromStart", and "chromEnd".
+        BED-like DataFrame (polars or pandas) with at least the columns "chrom", "chromStart", and "chromEnd".
     """
+    pdf = nw.from_native(bedlike, eager_only=True).to_pandas()
     return pr.PyRanges(
-        bedlike.rename(
-            {
+        pdf.rename(
+            columns={
                 "chrom": "Chromosome",
                 "chromStart": "Start",
                 "chromEnd": "End",
                 "strand": "Strand",
-            },
-            strict=False,
-        ).to_pandas()
+            }
+        )
     )
 
 
