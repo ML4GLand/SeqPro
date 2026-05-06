@@ -1,0 +1,55 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install doc dependencies
+        run: uv pip install --system zensical mkdocstrings-python
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust extension
+        run: |
+          uv pip install --system maturin
+          maturin build --release
+
+      - name: Install seqpro wheel
+        run: uv pip install --system target/wheels/*.whl
+
+      - name: Install remaining seqpro Python dependencies
+        run: uv pip install --system numba numpy polars pyranges pandera pandas pyarrow natsort narwhals awkward polars-config-meta
+
+      - name: Build documentation
+        run: zensical build --clean
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - uses: actions/deploy-pages@v4
+        id: deployment
