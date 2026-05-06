@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import (
     TYPE_CHECKING,
     Any,
-    Concatenate,
     Generic,
     Literal,
     TypeGuard,
@@ -39,15 +37,27 @@ P = ParamSpec("P")
 
 
 def is_rag_dtype(
-    rag: Any, dtype: DTYPE_co | type[DTYPE_co] | Mapping[str, DTYPE_co | type[DTYPE_co]]
+    rag: Any, dtype: DTYPE_co | type[DTYPE_co]
 ) -> TypeGuard[Ragged[DTYPE_co]]:
+    """Check if an object is a `Ragged` array with the given dtype (fails for record-layout Ragged arrays).
+
+    Parameters
+    ----------
+    rag
+        Object to check.
+    dtype
+        Expected dtype.
+
+    Returns
+    -------
+    TypeGuard[Ragged[DTYPE_co]]
+        True if `rag` is a `Ragged` array whose dtype is a subtype of `dtype`.
+    """
     if not isinstance(rag, Ragged):
         return False
-    if isinstance(dtype, Mapping) and isinstance(rag.dtype, Mapping):
-        return all(is_rag_dtype(rag[f], d) for f, d in dtype.items())
-    if not isinstance(dtype, Mapping) and not isinstance(rag.dtype, Mapping):
-        return np.issubdtype(rag.dtype, dtype)
-    return False
+    if isinstance(rag.dtype, dict):
+        return False
+    return np.issubdtype(rag.dtype, dtype)
 
 
 def _is_record_layout(layout: Content) -> bool:
@@ -64,14 +74,14 @@ def _is_record_layout(layout: Content) -> bool:
 def _extract_list_offsets(layout: Content) -> NDArray[OFFSET_TYPE]:
     """Extract offsets from the (single) list layer in a record-layout Ragged.
 
-    The list layer can sit outside the RecordArray (e.g., ``ak.zip`` output:
-    ``ListOffsetArray(RecordArray(...))``) or inside it (e.g., dict-of-lists
-    ``ak.Array({"f0": [[...]], "f1": [[...]]})``: ``RecordArray({"f0": ListOffsetArray, ...})``).
-    Walks past any ``RegularArray`` / ``RecordArray`` (diving into field 0,
+    The list layer can sit outside the RecordArray (e.g., `ak.zip` output:
+    `ListOffsetArray(RecordArray(...))`) or inside it (e.g., dict-of-lists
+    `ak.Array({"f0": [[...]], "f1": [[...]]})`: `RecordArray({"f0": ListOffsetArray, ...})`).
+    Walks past any `RegularArray` / `RecordArray` (diving into field 0,
     since all fields share the same list layer for a Ragged record).
 
-    Returns a 1-D ``(N+1,)`` array for ``ListOffsetArray`` or a 2-D ``(2, N)``
-    starts/stops array for ``ListArray`` — same convention as ``unbox()``.
+    Returns a 1-D `(N+1,)` array for `ListOffsetArray` or a 2-D `(2, N)`
+    starts/stops array for `ListArray` — same convention as `unbox()`.
     """
     node = layout
     while True:
@@ -90,16 +100,16 @@ def _extract_list_offsets(layout: Content) -> NDArray[OFFSET_TYPE]:
 
 
 class Ragged(ak.Array, Generic[RDTYPE_co]):
-    """An awkward array with exactly 1 ragged dimension. The ragged dimension is :code:`None` in its shape tuple.
+    """An awkward array with exactly 1 ragged dimension. The ragged dimension is `None` in its shape tuple.
 
-    .. important::
+    !!! warning
         Ragged arrays only support a subset of Awkward array features.
 
         - Strings are not supported since ASCII is sufficient for the bioinformatics domain.
         - Bytestrings count as a ragged dimension, and we break from the Awkward convention to not include a "var" in the type string.
-        - Record-layout Ragged arrays (produced by ``ak.zip`` of Ragged inputs or by passing a record-layout
-          ``ak.Array``) return field-keyed dicts from ``dtype``, ``data``, and ``parts``. Use ``rag["field"]``
-          for zero-copy single-field access. ``view``, ``apply``, and ``to_numpy`` are not defined on record
+        - Record-layout Ragged arrays (produced by `ak.zip` of Ragged inputs or by passing a record-layout
+          `ak.Array`) return field-keyed dicts from `dtype`, `data`, and `parts`. Use `rag["field"]`
+          for zero-copy single-field access. `view`, `apply`, and `to_numpy` are not defined on record
           layouts; access individual fields. Union types remain unsupported.
 
     """
@@ -125,8 +135,8 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
             self._parts = unbox(self)
 
     def _ensure_parts(self) -> None:
-        """Idempotent lazy init for ``_parts``. Handles Ragged instances created
-        via awkward behavior dispatch (e.g. ``ak.zip``) that bypass ``__init__``."""
+        """Idempotent lazy init for `_parts`. Handles Ragged instances created
+        via awkward behavior dispatch (e.g. `ak.zip`) that bypass `__init__`."""
         if hasattr(self, "_parts"):
             return
         layout = cast(Content, ak.to_layout(self))
@@ -151,6 +161,10 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
             The shape of the Ragged array.
         offsets
             The offsets to create the Ragged array from.
+
+        Returns
+        -------
+        Ragged[DTYPE_co]
         """
         try:
             rag_dim = shape.index(None)
@@ -188,6 +202,10 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
             The data to create the Ragged array from.
         lengths
             The lengths of the segments.
+
+        Returns
+        -------
+        Ragged[DTYPE_co]
         """
         parts = RagParts[DTYPE_co].from_lengths(data, lengths)
         return Ragged(parts)
@@ -195,7 +213,12 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
     @property
     def parts(self) -> RagParts[RDTYPE_co] | dict[str, RagParts]:
         """The parts of the Ragged array. For record layouts, a dict of
-        field name -> RagParts; all share the same offsets ndarray."""
+        field name -> RagParts; all share the same offsets ndarray.
+
+        Returns
+        -------
+        RagParts[RDTYPE_co] | dict[str, RagParts]
+        """
         self._ensure_parts()
         if self._parts is None:
             return {f: self[f].parts for f in ak.fields(self)}  # type: ignore[reportUnknownReturnType]
@@ -204,7 +227,12 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
     @property
     def data(self) -> NDArray[RDTYPE_co] | dict[str, NDArray]:
         """The data of the Ragged array. For record layouts, a dict of
-        field name -> zero-copy ndarray view, in awkward field order."""
+        field name -> zero-copy ndarray view, in awkward field order.
+
+        Returns
+        -------
+        NDArray[RDTYPE_co] | dict[str, NDArray]
+        """
         self._ensure_parts()
         if self._parts is None:
             return {f: self[f].data for f in ak.fields(self)}  # type: ignore[reportUnknownReturnType]
@@ -212,7 +240,12 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
 
     @property
     def offsets(self) -> NDArray[OFFSET_TYPE]:
-        """The offsets of the Ragged array. May have shape (n_ragged + 1) or (2, n_ragged)."""
+        """The offsets of the Ragged array. May have shape (n_ragged + 1) or (2, n_ragged).
+
+        Returns
+        -------
+        NDArray[np.int64]
+        """
         self._ensure_parts()
         if self._parts is None:
             # Record layout — extract offsets via the unified helper, cache for sharing.
@@ -226,7 +259,12 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
 
     @property
     def shape(self) -> tuple[int | None, ...]:
-        """The shape of the Ragged array. The ragged dimension is :code:`None`."""
+        """The shape of the Ragged array. The ragged dimension is `None`.
+
+        Returns
+        -------
+        tuple[int | None, ...]
+        """
         self._ensure_parts()
         if self._parts is None:
             # All fields share the ragged structure; derive from any.
@@ -236,7 +274,12 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
     @property
     def dtype(self) -> np.dtype[RDTYPE_co] | dict[str, np.dtype]:
         """The dtype of the Ragged array. For record layouts, a dict of
-        field name -> dtype, in awkward field order."""
+        field name -> dtype, in awkward field order.
+
+        Returns
+        -------
+        np.dtype[RDTYPE_co] | dict[str, np.dtype]
+        """
         self._ensure_parts()
         if self._parts is None:
             return {f: self[f].dtype for f in ak.fields(self)}  # type: ignore[reportUnknownReturnType]
@@ -244,12 +287,22 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
 
     @property
     def rag_dim(self) -> int:
-        """The index of the ragged dimension."""
+        """The index of the ragged dimension.
+
+        Returns
+        -------
+        int
+        """
         return self.shape.index(None)
 
     @property
     def lengths(self) -> NDArray[np.integer]:
-        """The lengths of the segments."""
+        """The lengths of the segments.
+
+        Returns
+        -------
+        NDArray[np.integer]
+        """
         if self.offsets.ndim == 1:
             lengths = np.diff(self.offsets)
         else:
@@ -258,7 +311,18 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         return lengths.reshape(self.shape[: self.rag_dim])  # type: ignore
 
     def view(self, dtype: type[DTYPE_co] | str) -> Ragged[DTYPE_co]:
-        """Return a view of the data with the given dtype."""
+        """Return a view of the data with the given dtype.
+
+        Parameters
+        ----------
+        dtype
+            Target dtype.
+
+        Returns
+        -------
+        Ragged[DTYPE_co]
+            Zero-copy view with reinterpreted dtype.
+        """
         self._ensure_parts()
         if self._parts is None:
             raise NotImplementedError(
@@ -280,7 +344,19 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
     def empty(
         cls, shape: int | tuple[int | None, ...], dtype: type[DTYPE_co]
     ) -> Ragged[DTYPE_co]:
-        """Create an empty Ragged array with the given shape and dtype."""
+        """Create an empty Ragged array with the given shape and dtype.
+
+        Parameters
+        ----------
+        shape
+            Shape of the array. Must include exactly one `None` for the ragged dimension.
+        dtype
+            Element dtype.
+
+        Returns
+        -------
+        Ragged[DTYPE_co]
+        """
         data = np.empty(0, dtype=dtype)
         if isinstance(shape, int):
             shape = (shape,)
@@ -295,7 +371,12 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
 
     @property
     def is_empty(self) -> bool:
-        """Whether the Ragged array is empty."""
+        """Whether the Ragged array is empty.
+
+        Returns
+        -------
+        bool
+        """
         if self.offsets.ndim == 1:
             return self.offsets[-1] == 0
         else:
@@ -303,7 +384,12 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
 
     @property
     def is_contiguous(self) -> bool:
-        """Whether the Ragged array is contiguous."""
+        """Whether the Ragged array is contiguous.
+
+        Returns
+        -------
+        bool
+        """
         contiguous_offsets = self.offsets.ndim == 1
         if isinstance(self.data, dict):
             contiguous_data = all(d.flags.contiguous for d in self.data.values())
@@ -313,7 +399,12 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
 
     @property
     def is_base(self) -> bool:
-        """Whether the Ragged array is a base array."""
+        """Whether the Ragged array is a base array (owns its data, contiguous, no offset).
+
+        Returns
+        -------
+        bool
+        """
         if isinstance(self.data, dict):
             base_data = all(d.base is None for d in self.data.values())
             data_size = next(iter(self.data.values())).size
@@ -328,7 +419,17 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         )
 
     def to_numpy(self, allow_missing: bool = False) -> NDArray[RDTYPE_co]:
-        """Note: not zero-copy if offsets or data are non-contiguous."""
+        """Convert to a dense NumPy array. Not zero-copy if offsets or data are non-contiguous.
+
+        Parameters
+        ----------
+        allow_missing
+            Passed through to `ak.Array.to_numpy`.
+
+        Returns
+        -------
+        NDArray[RDTYPE_co]
+        """
         self._ensure_parts()
         if self._parts is None:
             raise NotImplementedError(
@@ -365,7 +466,17 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         """Squeeze the ragged array along the given non-ragged axis.
         If squeezing would result in a 1D array, return the data as a numpy array.
         For record layouts, dispatches per-field; if fields collapse to 1D ndarrays,
-        returns a dict of ndarrays, otherwise returns a record Ragged."""
+        returns a dict of ndarrays, otherwise returns a record Ragged.
+
+        Parameters
+        ----------
+        axis
+            Axis or axes to squeeze. Must have size 1. If `None`, squeeze all size-1 axes.
+
+        Returns
+        -------
+        Self | NDArray[RDTYPE_co] | dict[str, NDArray[RDTYPE_co]]
+        """
         self._ensure_parts()
         if self._parts is None:
             squeezed = {f: self[f].squeeze(axis) for f in ak.fields(self)}
@@ -399,7 +510,17 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         return type(self)(parts)
 
     def reshape(self, *shape: int | None | tuple[int | None, ...]) -> Self:
-        """Reshape non-ragged axes."""
+        """Reshape non-ragged axes.
+
+        Parameters
+        ----------
+        *shape
+            New shape including exactly one `None` for the ragged dimension.
+
+        Returns
+        -------
+        Self
+        """
         self._ensure_parts()
         if self._parts is None:
             reshaped = {f: self[f].reshape(*shape) for f in ak.fields(self)}
@@ -427,28 +548,16 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         parts = RagParts[RDTYPE_co](data, new_shape, self.offsets)
         return type(self)(parts)
 
-    def to_ak(self):
-        """Convert to an Awkward array."""
+    def to_ak(self) -> ak.Array:
+        """Convert to a plain Awkward array, stripping the Ragged behavior.
+
+        Returns
+        -------
+        ak.Array
+        """
         arr = _as_ak(self)
         arr.behavior = None
         return arr
-
-    def apply(
-        self,
-        gufunc: Callable[Concatenate[NDArray[RDTYPE_co], P], NDArray[DTYPE_co]],
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> Ragged[DTYPE_co]:
-        """Apply a gufunc to the data of the Ragged array that does not alter the shape of the data."""
-        self._ensure_parts()
-        if self._parts is None:
-            raise NotImplementedError(
-                "apply is not defined on record-layout Ragged arrays; "
-                "apply per field instead."
-            )
-        data = gufunc(self.data, *args, **kwargs)  # type: ignore[reportUnknownReturnType]
-        parts = RagParts(data, self.shape, self.offsets)
-        return Ragged(parts)
 
 
 def apply_ufunc(
@@ -516,12 +625,31 @@ class RagParts(Generic[DTYPE_co]):
 
     @property
     def contiguous(self) -> bool:
+        """Whether offsets are stored as a contiguous (N+1,) array rather than (2, N) starts/stops.
+
+        Returns
+        -------
+        bool
+        """
         return self.offsets.ndim == 1
 
     @classmethod
     def from_lengths(
         cls, data: NDArray[DTYPE_co], lengths: NDArray[np.integer]
     ) -> Self:
+        """Create a RagParts from data and segment lengths.
+
+        Parameters
+        ----------
+        data
+            Flat data array.
+        lengths
+            Lengths of the segments.
+
+        Returns
+        -------
+        Self
+        """
         offsets = lengths_to_offsets(lengths)
         shape = (*lengths.shape, None, *data.shape[1:])
         return cls(data, shape, offsets)

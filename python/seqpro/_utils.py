@@ -21,6 +21,20 @@ DTYPE = TypeVar("DTYPE", bound=np.generic)
 def is_dtype(
     obj: object, dtype: DTYPE | np.dtype[DTYPE] | type[DTYPE]
 ) -> TypeGuard[NDArray[DTYPE]]:
+    """Check if an object is a NumPy array with a dtype that is a subtype of the given dtype.
+
+    Parameters
+    ----------
+    obj
+        Object to check.
+    dtype
+        Expected dtype.
+
+    Returns
+    -------
+    TypeGuard[NDArray[DTYPE]]
+        True if `obj` is an ndarray whose dtype is a subtype of `dtype`.
+    """
     return isinstance(obj, np.ndarray) and np.issubdtype(obj.dtype, dtype)
 
 
@@ -87,5 +101,20 @@ def check_axes(
 
 
 def array_slice(a: NDArray[DTYPE], axis: int, slice_: slice) -> NDArray[DTYPE]:
-    """Slice an array from a dynamic axis."""
+    """Slice an array along a dynamic axis.
+
+    Parameters
+    ----------
+    a
+        Array to slice.
+    axis
+        Axis to slice along.
+    slice_
+        Slice to apply.
+
+    Returns
+    -------
+    NDArray[DTYPE]
+        Sliced array view.
+    """
     return a[(slice(None),) * (axis % a.ndim) + (slice_,)]

@@ -5,13 +5,18 @@ from pathlib import Path
 import polars as pl
 
 
-def scan(path: str | Path):
+def scan(path: str | Path) -> pl.LazyFrame:
     """Scan a GFF or GTF file.
 
     Parameters
     ----------
     path
         The path to the GTF file.
+
+    Returns
+    -------
+    pl.LazyFrame
+        A lazy frame with columns: seqname, source, feature, start, end, score, strand, frame, attribute.
     """
     REQUIRED_COLUMNS = [
         "seqname",
@@ -50,15 +55,20 @@ def scan(path: str | Path):
     )
 
 
-def attr(attr: str):
+def attr(attr: str) -> pl.Expr:
     """Extract a column from the attribute field. In general, GTF/GFF attributes can be any
     type, so this always returns a Utf8 column. If an explicit cast is necessary, it can be
-    done by e.g. :code:`seqpro.gtf.attr(attr).cast(pl.Int32)`.
+    done by e.g. `seqpro.gtf.attr(attr).cast(pl.Int32)`.
 
     Parameters
     ----------
     attr
         The attribute to extract.
+
+    Returns
+    -------
+    pl.Expr
+        A Polars expression that extracts the named attribute as a Utf8 column.
     """
     return (
         pl.col("attribute")

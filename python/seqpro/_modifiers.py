@@ -61,6 +61,11 @@ def k_shuffle(
         the same size as the length of the alphabet.
     seed
         Seed or generator for shuffling.
+
+    Returns
+    -------
+    NDArray[np.bytes_ | np.uint8]
+        Shuffled sequences as bytes (S1) or uint8 for string or OHE input, respectively.
     """
 
     check_axes(seqs, length_axis, ohe_axis)
