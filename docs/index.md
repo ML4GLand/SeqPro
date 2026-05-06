@@ -1,26 +1,23 @@
-![PyPI - Downloads](https://img.shields.io/pypi/dm/seqpro)
-![GitHub stars](https://img.shields.io/github/stars/ML4GLand/SeqPro)
+# SeqPro
 
-# SeqPro (Sequence processing toolkit)
-```python
-import seqpro as sp
-```
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/seqpro)](https://pypi.org/project/seqpro/)
+[![GitHub stars](https://img.shields.io/github/stars/ML4GLand/SeqPro)](https://github.com/ML4GLand/SeqPro)
 
-SeqPro is a Python package for processing DNA/RNA sequences, with support for protein sequences. SeqPro is fully functional on its own but is heavily utilized by other packages including [SeqData](https://github.com/ML4GLand/SeqData), [MotifData](https://github.com/ML4GLand/MotifData), [SeqExplainer](https://github.com/ML4GLand/SeqExplainer), and [EUGENe](https://github.com/ML4GLand/EUGENe).
+SeqPro is a Python package for processing DNA/RNA sequences, with support for protein sequences. It makes almost zero compromises on speed — NumPy vectorization throughout, Numba JIT for bottlenecks, and a Rust extension for graph algorithms like k-mer shuffling.
 
-All functions in SeqPro take as input a string, a list of strings, a NumPy array of strings, a NumPy array of single character bytes (`S1`), or a NumPy array of one-hot encoded sequences (`uint8`). Variable-length sequence collections are supported via the `seqpro.rag` submodule (`Ragged` arrays). There is also experimental integration with XArray through the `seqpro.xr` submodule.
+All functions accept strings, lists of strings, NumPy arrays of strings or single-byte ASCII (`S1`), or one-hot encoded (`uint8`) arrays. Variable-length sequence collections are supported via the `seqpro.rag` submodule (`Ragged` arrays). There is also experimental integration with XArray through the `seqpro.xr` submodule.
 
-Computational bottlenecks or code that is impossible to vectorize with NumPy alone are accelerated with Numba (e.g. padding sequences, one-hot encoding, decoding) and Rust via PyO3/maturin (e.g. k-mer shuffling).
-
-# Installation
+## Installation
 
 ```bash
 pip install seqpro
 ```
 
-## API
+## Quick Start
 
 ```python
+import seqpro as sp
+
 N = 2
 L = 9
 
@@ -77,6 +74,4 @@ SeqPro ships three built-in alphabets:
 
 Each alphabet exposes `.ohe()`, `.decode_ohe()`, and `.reverse_complement()` (nucleotide alphabets) or `.translate()` (amino acid alphabet) directly on the object.
 
-# More to come!
-
-All contributions, including bug reports, documentation improvements, and enhancement suggestions are welcome. Everyone within the community is expected to abide by our [code of conduct](https://github.com/ML4GLand/EUGENe/blob/main/CODE_OF_CONDUCT.md)
+See the [API Reference](api/index.md) for full documentation.

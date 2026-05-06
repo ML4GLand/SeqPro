@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from typing import TypeVar, Union, cast, overload
+from collections.abc import Sequence
+from typing import TypeAlias, TypeGuard, TypeVar, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TypeGuard
 
-NestedStr = Union[bytes, str, list["NestedStr"]]
-"""String or nested list of strings"""
+NestedStr: TypeAlias = bytes | str | Sequence["NestedStr"]
+"""A single string/bytes value or any nesting of sequences thereof."""
 
-StrSeqType = Union[NestedStr, NDArray[Union[np.str_, np.object_, np.bytes_]]]
-"""String sequence type (i.e. SeqType but not)"""
+StrSeqType: TypeAlias = NestedStr | NDArray[np.str_ | np.object_ | np.bytes_]
+"""Any string sequence input: scalars, nested lists, or string/bytes arrays. Excludes OHE."""
 
-SeqType = Union[NestedStr, NDArray[Union[np.str_, np.object_, np.bytes_, np.uint8]]]
+SeqType: TypeAlias = StrSeqType | NDArray[np.uint8]
+"""Any sequence input accepted by SeqPro functions: strings, nested lists, string/bytes arrays, or OHE uint8 arrays."""
 
 DTYPE = TypeVar("DTYPE", bound=np.generic)
 
@@ -20,6 +21,20 @@ DTYPE = TypeVar("DTYPE", bound=np.generic)
 def is_dtype(
     obj: object, dtype: DTYPE | np.dtype[DTYPE] | type[DTYPE]
 ) -> TypeGuard[NDArray[DTYPE]]:
+    """Check if an object is a NumPy array with a dtype that is a subtype of the given dtype.
+
+    Parameters
+    ----------
+    obj
+        Object to check.
+    dtype
+        Expected dtype.
+
+    Returns
+    -------
+    TypeGuard[NDArray[DTYPE]]
+        True if `obj` is an ndarray whose dtype is a subtype of `dtype`.
+    """
     return isinstance(obj, np.ndarray) and np.issubdtype(obj.dtype, dtype)
 
 
@@ -35,11 +50,11 @@ def cast_seqs(seqs: SeqType) -> NDArray[np.bytes_ | np.uint8]:
 
     Parameters
     ----------
-    seqs : str, (nested) list[str], ndarray[str, object (Python strings), bytes, uint8]
+    seqs
 
     Returns
     -------
-    ndarray with dtype |S1 or uint8
+    result
     """
     if isinstance(seqs, str):
         if len(seqs) == 0:
@@ -47,12 +62,12 @@ def cast_seqs(seqs: SeqType) -> NDArray[np.bytes_ | np.uint8]:
         return np.array([seqs], "S").view("S1")
     elif isinstance(seqs, bytes):
         return np.array([seqs]).view("S1")
-    elif isinstance(seqs, list):
+    elif isinstance(seqs, Sequence):
         return np.array(seqs, "S")[..., None].view("S1")
     elif seqs.dtype.itemsize > 1:  # dtype == U or bigger than S1
         return seqs.astype("S")[..., None].view("S1")
     else:
-        return cast(NDArray[Union[np.bytes_, np.uint8]], seqs)
+        return cast(NDArray[np.bytes_ | np.uint8], seqs)
 
 
 def check_axes(
@@ -86,5 +101,20 @@ def check_axes(
 
 
 def array_slice(a: NDArray[DTYPE], axis: int, slice_: slice) -> NDArray[DTYPE]:
-    """Slice an array from a dynamic axis."""
+    """Slice an array along a dynamic axis.
+
+    Parameters
+    ----------
+    a
+        Array to slice.
+    axis
+        Axis to slice along.
+    slice_
+        Slice to apply.
+
+    Returns
+    -------
+    NDArray[DTYPE]
+        Sliced array view.
+    """
     return a[(slice(None),) * (axis % a.ndim) + (slice_,)]

@@ -1,0 +1,69 @@
+[project]
+site_name = "SeqPro"
+site_url = "https://ML4GLand.github.io/SeqPro"
+site_description = "Fast biological sequence processing for Python"
+site_author = "David Laub, Adam Klie"
+repo_url = "https://github.com/ML4GLand/SeqPro"
+repo_name = "ML4GLand/SeqPro"
+edit_uri = "edit/main/docs/"
+docs_dir = "docs"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Ragged Arrays" = "ragged.md" },
+  { "API Reference" = [
+    "api/index.md",
+    { "BED" = "api/bed.md" },
+    { "GTF" = "api/gtf.md" },
+    { "Ragged" = "api/ragged.md" },
+  ] },
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.theme]
+variant = "modern"
+features = [
+  "navigation.tabs",
+  "navigation.top",
+  "navigation.footer",
+  "toc.follow",
+  "content.action.edit",
+  "content.action.view",
+  "search.highlight",
+  "content.code.annotate",
+]
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["python"]
+plugins = ["autorefs"]
+inventories = [
+  "https://docs.python.org/3/objects.inv",
+  "https://numpy.org/doc/stable/objects.inv",
+  "https://docs.pola.rs/api/python/stable/objects.inv",
+  "https://awkward-array.org/doc/stable/objects.inv",
+]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "numpy"
+inherited_members = false
+show_source = true
+members_order = "alphabetical"
+show_root_heading = true
+show_root_full_path = false
+annotations_path = "brief"

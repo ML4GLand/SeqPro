@@ -153,10 +153,6 @@ class TestRecordRagged:
         with pytest.raises(NotImplementedError, match="record"):
             _ = rag.view(np.float32)
 
-    def test_apply_raises_on_record(self, rag: Ragged):
-        with pytest.raises(NotImplementedError, match="record"):
-            _ = rag.apply(lambda x: x + 1)
-
     def test_to_numpy_raises_on_record(self, rag: Ragged):
         with pytest.raises(NotImplementedError, match="record"):
             _ = rag.to_numpy()

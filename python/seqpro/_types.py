@@ -1,4 +1,5 @@
 from pathlib import Path
-from typing import Union
+from typing import TypeAlias
 
-PathLike = Union[str, Path]
+PathLike: TypeAlias = str | Path
+"""A file-system path accepted as either a plain string or a `pathlib.Path`."""

@@ -1,5 +1,3 @@
-from typing import Union
-
 import numpy as np
 from numpy.typing import NDArray
 
@@ -11,26 +9,26 @@ try:
 except ImportError:
     raise ImportError("Need to install Xarray to use seqpro.xr")
 
-__all__ = ["ohe", "bin_coverage"]
+__all__ = ["bin_coverage", "ohe"]
 
 
 def ohe(
-    seqs: Union[xr.DataArray, xr.Dataset],
+    seqs: xr.DataArray | xr.Dataset,
     alphabet: NucleotideAlphabet,
     ohe_dim: str = "_ohe",
-) -> Union[xr.DataArray, xr.Dataset]:
+) -> xr.DataArray | xr.Dataset:
     """Ohe hot encode sequences in an xr.Dataset.
 
     Parameters
     ----------
-    seqs : Union[xr.DataArray, xr.Dataset]
-    alphabet : NucleotideAlphabet
-    ohe_dim : Optional[str], optional
+    seqs
+    alphabet
+    ohe_dim
         Name to give the new one hot encoding dimension, by default "_ohe"
 
     Returns
     -------
-    xr.DataArray, xr.Dataset
+    result
         One hot encoded sequences.
     """
     alpha = xr.DataArray(alphabet.array, dims=ohe_dim)
@@ -51,30 +49,30 @@ def ohe(
 
 
 def bin_coverage(
-    coverage: Union[xr.DataArray, xr.Dataset],
+    coverage: xr.DataArray | xr.Dataset,
     bin_width: int,
     length_dim: str,
     binned_dim="_bin",
     normalize=False,
-) -> Union[xr.DataArray, xr.Dataset]:
+) -> xr.DataArray | xr.Dataset:
     """Bin coverage to a lower resolution by summing across non-overlapping windows.
 
     Parameters
     ----------
-    coverage : Union[xr.DataArray, xr.Dataset]
+    coverage
         Array of coverage.
-    bin_width : int
+    bin_width
         Size of the bins (aka windows)
-    length_dim : str
+    length_dim
         Name of the length dimension.
-    binned_dim : str, optional
+    binned_dim
         Name of the binned dimension, by default '_bin'
-    normalize : bool, optional
+    normalize
         Whether to divide by bin width, by default False
 
     Returns
     -------
-    Union[xr.DataArray, xr.Dataset]
+    result
         DataArray or Dataset of binned coverage.
 
     Raises
@@ -104,19 +102,19 @@ def bin_coverage(
 
 
 def translate(
-    seqs: Union[xr.DataArray, xr.Dataset],
+    seqs: xr.DataArray | xr.Dataset,
     alphabet: AminoAlphabet,
     length_dim: str,
     aa_length_dim="_aa_length",
-) -> Union[xr.DataArray, xr.Dataset]:
+) -> xr.DataArray | xr.Dataset:
     """Translate DNA sequences to amino acid sequences.
 
     Parameters
     ----------
-    seqs : Union[xr.DataArray, xr.Dataset]
-    alphabet : AminoAlphabet
-    length_dim : str
-    aa_length_dim : str, optional
+    seqs
+    alphabet
+    length_dim
+    aa_length_dim
         Amino acid length dimension, by default "_aa_length"
     """
     k = alphabet.codon_array.shape[-1]

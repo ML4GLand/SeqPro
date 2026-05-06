@@ -22,7 +22,7 @@ def lengths_to_offsets(
 
     Returns
     -------
-    offsets
+    result
         Offsets of the segments.
     """
     offsets = np.empty(lengths.size + 1, dtype=dtype)

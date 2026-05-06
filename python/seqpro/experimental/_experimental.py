@@ -14,17 +14,17 @@ def edit_distance(seq1: str, seq2: str, dual: bool = False) -> int:
 
     Parameters
     ----------
-    seq1 : str
+    seq1
         First nucleotide sequence expressed as a string.
-    seq2 : str
+    seq2
         Second ucleotide sequence expressed as a string.
-    dual : bool
+    dual
         Whether to calculate the forwards and backwards edit distance, and return the lesser.
         Defaults to False.
 
     Returns
     -------
-    edits : int
+    edits
         Amount of edits between sequences.
     """
     assert len(seq1) == len(seq2), "Both sequences must be of same length."

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -21,16 +21,16 @@ def reverse_complement(
 
     Parameters
     ----------
-    seqs : str, list[str], ndarray[str, bytes, uint8]
-    alphabet : NucleotideAlphabet
-    length_axis : Optional[int], optional
+    seqs
+    alphabet
+    length_axis
         Needed for array input. Length axis, by default None
-    ohe_axis : Optional[int], optional
+    ohe_axis
         Needed for OHE input. One hot encoding axis, by default None
 
     Returns
     -------
-    ndarray[bytes, uint8]
+    result
         Array of bytes (S1) or uint8 for string or OHE input, respectively.
     """
     return alphabet.reverse_complement(seqs, length_axis, ohe_axis)
@@ -44,23 +44,28 @@ def k_shuffle(
     length_axis: int | None = None,
     ohe_axis: int | None = None,
     seed: int | np.random.Generator | None = None,
-) -> NDArray[Union[np.bytes_, np.uint8]]:
+) -> NDArray[np.bytes_ | np.uint8]:
     """Shuffle sequences while preserving k-let frequencies.
 
     Parameters
     ----------
-    seqs : SeqType
-    k : int
+    seqs
+    k
         Size of k-lets to preserve frequencies of.
-    alphabet : NucleotideAlphabet
+    alphabet
         Alphabet, needed for OHE sequence input.
-    length_axis : Optional[int], optional
+    length_axis
         Needed for array input. Axis that corresponds to the length of sequences.
-    ohe_axes : Optional[int], optional
+    ohe_axes
         Needed for OHE input. Axis that corresponds to the one hot encoding, should be
         the same size as the length of the alphabet.
-    seed : int, np.random.Generator, optional
+    seed
         Seed or generator for shuffling.
+
+    Returns
+    -------
+    NDArray[np.bytes_ | np.uint8]
+        Shuffled sequences as bytes (S1) or uint8 for string or OHE input, respectively.
     """
 
     check_axes(seqs, length_axis, ohe_axis)
@@ -107,17 +112,17 @@ def bin_coverage(
 
     Parameters
     ----------
-    coverage_array : NDArray
-    bin_width : int
+    coverage_array
+    bin_width
         Width of the windows to sum over. Must be an even divisor of the length
         of the coverage array. If not, raises an error.
-    length_axis: int
-    normalize : bool, default False
+    length_axis
+    normalize
         Whether to normalize by the length of the bin.
 
     Returns
     -------
-    binned_coverage : NDArray
+    binned_coverage
     """
     length = coverage.shape[length_axis]
     if length % bin_width != 0:
@@ -141,23 +146,23 @@ def jitter(
 
     Parameters
     ----------
-    *arrays : NDArray
+    *arrays
         Arrays to be jittered. They must have the same sized jitter and length
         axes.
-    max_jitter : int
+    max_jitter
         Maximum jitter amount.
-    length_axis : int
-    jitter_axes : Tuple[int, ...]
+    length_axis
+    jitter_axes
         Each slice along the jitter axes will be randomly jittered *independently*.
         Thus, if jitter_axes = 0, then every slice of data along axis 0 would be
         jittered independently. If jitter_axes = (0, 1), then each slice along axes 0
         and 1 would be randomly jittered independently.
-    seed : int, np.random.Generator, optional
+    seed
         Random seed or generator, by default None
 
     Returns
     -------
-    arrays
+    result
         Jittered arrays. Each will have a new length equal to length - 2*max_jitter.
 
     Raises
@@ -201,16 +206,16 @@ def _align_axes(*arrays: NDArray, axes: int | tuple[int, ...]):
 
     Parameters
     ----------
-    *arrays : NDArray
+    *arrays
         Arrays to align axes of.
-    axes : Union[int, Tuple[int, ...]]
+    axes
         Axes to align.
 
     Returns
     -------
-    Tuple[NDArray]
+    result
         Aligned arrays.
-    Tuple[int]
+    result
         Destination axes.
 
     Raises
@@ -239,16 +244,16 @@ def _slice_kmers(array: NDArray, starts: NDArray, k: int):
 
     Parameters
     ----------
-    array : NDArray
+    array
         Array to slice.
-    starts : NDArray
+    starts
         Start indices of k-mers.
-    k : int
+    k
         Size of k-mers.
 
     Returns
     -------
-    NDArray
+    result
         Sliced array.
     """
     n_axes_sliced = starts.ndim
@@ -274,16 +279,16 @@ def random_seqs(
 
     Parameters
     ----------
-    shape : int, tuple[int]
+    shape
         Shape of sequences to generate
-    alphabet : NucleotideAlphabet
+    alphabet
         Alphabet to sample nucleotides from.
-    seed : int, np.random.Generator, optional
+    seed
         Random seed or generator.
 
     Returns
     -------
-    ndarray
+    result
         Randomly generated sequences.
     """
     if isinstance(seed, int) or seed is None:
@@ -309,18 +314,18 @@ def normalize_coverage(
 
     Parameters
     ----------
-    coverage : NDArray
+    coverage
         Array of coverage.
-    method : Union[Literal['CPM', 'CPKM'], NormalizationMethod]
+    method
         Normalization method, either CPM (counts per million) or CPKM (counts per
         kilobase per million).
-    total_counts : Union[int, NDArray]
+    total_counts
         The total number of reads or fragments from the experiment.
-    length_axis : int
+    length_axis
 
     Returns
     -------
-    NDArray
+    result
         Array of normalized coverage.
     """
     length = coverage.shape[length_axis]

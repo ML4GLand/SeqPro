@@ -1,4 +1,5 @@
-from typing import Callable, Dict, Literal, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -36,17 +37,17 @@ class ReverseComplement:
         self,
         *types: Literal["dna", "track"],
         length_axis: int,
-        ohe_axis: Optional[int],
+        ohe_axis: int | None,
     ):
         """Reverse complement for DNA sequences or tracks.
 
         Parameters
         ----------
-        types : str
+        types
             The type of input. "dna" for DNA sequences and "track" for tracks.
-        length_axis : int
+        length_axis
             The axis that represents the length of the sequence.
-        ohe_axis : int, optional
+        ohe_axis
             The axis that represents the one-hot encoding. Use None for input that is not one-hot encoded.
         """
         self.types = types
@@ -76,6 +77,7 @@ class KShuffle:
         return k_shuffle(
             x,
             self.k,
+            DNA,
             length_axis=self.length_axis,
             seed=self.rng.integers(np.iinfo(np.uint32).max, dtype=np.uint32),
         )
@@ -86,7 +88,7 @@ class Jitter:
         self,
         max_jitter: int,
         length_axis: int,
-        jitter_axes: Union[int, Tuple[int]],
+        jitter_axes: int | tuple[int],
         seed=None,
     ):
         self.max_jitter = max_jitter
@@ -108,7 +110,7 @@ class Jitter:
 
 
 class Tokenize:
-    def __init__(self, token_map: Dict[str, int], unknown_token: int = -1):
+    def __init__(self, token_map: dict[str, int], unknown_token: int = -1):
         self.token_map = token_map
         self.source = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
         self.target = np.array(list(token_map.values()), dtype=np.int32)

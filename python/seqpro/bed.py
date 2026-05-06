@@ -23,10 +23,7 @@ with warnings.catch_warnings():
     import pyranges as pr
 
 __all__ = [
-    "BEDSchema",
-    "BroadPeakSchema",
     "CoordSchema",
-    "NarrowPeakSchema",
     "detect_schema",
     "from_pyr",
     "read",
@@ -47,6 +44,11 @@ def sort(bed: FrameT) -> FrameT:
     bed
         DataFrame with BED-format columns: "chrom", "chromStart", "chromEnd".
         Accepts polars or pandas DataFrames.
+
+    Returns
+    -------
+    FrameT
+        Sorted DataFrame of the same type as the input.
     """
     order = natsorted(bed["chrom"].unique().to_list())
     return (
@@ -68,6 +70,11 @@ def with_len(bed: FrameT, length: int) -> FrameT:
         BED-like DataFrame with at least the columns "chromStart" and "chromEnd".
     length
         Desired length of the windows. Must be non-negative.
+
+    Returns
+    -------
+    FrameT
+        DataFrame of the same type as the input with updated "chromStart" and "chromEnd" columns.
     """
     if length < 0:
         raise ValueError("Length must be non-negative.")
@@ -90,10 +97,10 @@ def with_len(bed: FrameT, length: int) -> FrameT:
 def to_pyr(bedlike) -> pr.PyRanges:
     """Convert a BED-like DataFrame to a PyRanges object.
 
-    .. important::
+    !!! warning
         PyRanges automatically sorts the DataFrame by chromosome and start position, so the order of
         the regions may change after conversion. You can keep track of the original
-        order by `adding an index column <https://docs.pola.rs/api/python/stable/reference/dataframe/api/polars.DataFrame.with_row_index.html>`_
+        order by [adding an index column](https://docs.pola.rs/api/python/stable/reference/dataframe/api/polars.DataFrame.with_row_index.html)
         before converting to a PyRanges object. After converting back to a DataFrame, you can sort the DataFrame by the index to
         get the original order.
 
@@ -101,6 +108,11 @@ def to_pyr(bedlike) -> pr.PyRanges:
     ----------
     bedlike
         BED-like DataFrame (polars or pandas) with at least the columns "chrom", "chromStart", and "chromEnd".
+
+    Returns
+    -------
+    pr.PyRanges
+        PyRanges object with columns renamed to "Chromosome", "Start", and "End".
     """
     pdf = nw.from_native(bedlike, eager_only=True).to_pandas()
     return pr.PyRanges(
@@ -122,6 +134,11 @@ def from_pyr(pyr: pr.PyRanges) -> pl.DataFrame:
     ----------
     pyr
         PyRanges object with at least the columns "Chromosome", "Start", and "End".
+
+    Returns
+    -------
+    pl.DataFrame
+        BED-like DataFrame with columns renamed to "chrom", "chromStart", and "chromEnd".
     """
     return (
         pl.from_pandas(pyr.df)
@@ -152,7 +169,7 @@ def read(path: PathLike) -> pl.DataFrame:
 
     Returns
     -------
-    polars.DataFrame
+    result
     """
     path = Path(path)
     if ".bed" in path.suffixes:
@@ -166,7 +183,7 @@ def read(path: PathLike) -> pl.DataFrame:
             f"""Unrecognized file extension: {"".join(path.suffixes)}. Expected one of
             .bed, .narrowPeak, or .broadPeak (potentially gzipped)."""
         )
-    result.config_meta.set(coordinate_system_zero_based=True)
+    result.config_meta.set(coordinate_system_zero_based=True)  # type: ignore[attr-defined]
     return result
 
 

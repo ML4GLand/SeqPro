@@ -8,15 +8,15 @@ class TMM:
 
     Parameters
     ----------
-    expression_cutoff : float, default -1e10
+    expression_cutoff
         Cutoff for expression values.
-    log_ratio_trim : float, default 0.3
+    log_ratio_trim
         Trim fraction for log ratios.
-    expression_trim : float, default 0.05
+    expression_trim
         Trim fraction for absolute expression values.
-    apply_weighting : bool, default True
+    apply_weighting
         Whether to weight the scaling factors.
-    quantile : float, default 0.75
+    quantile
         Quantile to use for reference sample selection.
     """
 
@@ -44,12 +44,12 @@ class TMM:
 
         Parameters
         ----------
-        counts : NDArray
+        counts
             The data to be normalized. Floating point data is ok.
 
         Returns
         -------
-        self : TMM
+        self
             Fitted TMM object.
         """
         # choose reference sample
@@ -72,13 +72,13 @@ class TMM:
 
         Parameters
         ----------
-        counts : NDArray
+        counts
             The raw count data to be normalized. Floating point data is ok.
-        library_size : float, optional
+        library_size
             The library size to normalize to. Default is 1e6 i.e. counts per million (CPM).
         Returns
         -------
-        normalized_counts : NDArray
+        normalized_counts
             The normalized count data.
         """
         if not self._is_fitted:
@@ -94,14 +94,14 @@ class TMM:
 
         Parameters
         ----------
-        counts : NDArray
+        counts
             The raw count data. Floating point data is ok.
 
         Returns
         -------
-        scaling_factors : NDArray
+        scaling_factors
             The computed scaling factors.
-        library_sizes : NDArray
+        library_sizes
             The library sizes.
         """
         if not self._is_fitted:
