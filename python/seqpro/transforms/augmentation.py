@@ -43,11 +43,11 @@ class ReverseComplement:
 
         Parameters
         ----------
-        types : str
+        types
             The type of input. "dna" for DNA sequences and "track" for tracks.
-        length_axis : int
+        length_axis
             The axis that represents the length of the sequence.
-        ohe_axis : int, optional
+        ohe_axis
             The axis that represents the one-hot encoding. Use None for input that is not one-hot encoded.
         """
         self.types = types

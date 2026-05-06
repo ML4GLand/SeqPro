@@ -47,13 +47,13 @@ def gufunc_ohe_char_idx(
 
     Parameters
     ----------
-    seq : ndarray[np.uint8]
+    seq
         A one-hot encoded array of sequence(s).
-    res : ndarray[np.intp], optional
+    res
 
     Returns
     -------
-    ndarray[np.intp]
+    result
     """
     res[0] = np.intp(-1)  # type: ignore
     for i in nb.prange(len(seq)):
@@ -121,13 +121,13 @@ def gufunc_translate(
 
     Parameters
     ----------
-    seq_kmers : NDArray[np.uint8]
+    seq_kmers
         A k-mer.
-    kmer_keys : NDArray[np.uint8]
+    kmer_keys
         All unique k-mers as an (n, k) array.
-    kmer_values : NDArray[np.uint8]
+    kmer_values
         Values corresponding to each k-mer, in corresponding order.
-    res : NDArray[np.uint8], optional
+    res
         Array to save the result in, by default None
     """
     for i in nb.prange(len(kmer_keys)):
@@ -170,18 +170,18 @@ def _nb_find_stop_ends(
 
     Parameters
     ----------
-    data : NDArray[np.uint8]
+    data
         Flat translated AA buffer viewed as uint8.
-    starts : NDArray[np.int64]
+    starts
         Start position of each sequence in data.
-    full_ends : NDArray[np.int64]
+    full_ends
         Full (non-truncated) end position of each sequence in data.
-    stop_char : np.uint8
+    stop_char
         uint8 value of the stop codon character (ord('*') = 42).
 
     Returns
     -------
-    NDArray[np.int64]
+    result
         Truncated end positions (exclusive), one per sequence.
     """
     n = len(starts)

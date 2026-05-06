@@ -27,7 +27,10 @@ features = [
 
 [project.plugins.mkdocstrings.handlers.python]
 paths = ["python"]
-inventories = ["https://docs.python.org/3/objects.inv"]
+inventories = [
+  "https://docs.python.org/3/objects.inv",
+  "https://numpy.org/doc/stable/objects.inv",
+]
 
 [project.plugins.mkdocstrings.handlers.python.options]
 docstring_style = "numpy"
@@ -36,3 +39,4 @@ show_source = true
 members_order = "alphabetical"
 show_root_heading = true
 show_root_full_path = false
+annotations_path = "brief"

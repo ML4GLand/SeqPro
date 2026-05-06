@@ -152,7 +152,7 @@ def read(path: PathLike) -> pl.DataFrame:
 
     Returns
     -------
-    polars.DataFrame
+    result
     """
     path = Path(path)
     if ".bed" in path.suffixes:

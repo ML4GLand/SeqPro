@@ -19,24 +19,24 @@ def pad_seqs(
 
     Parameters
     ----------
-    seqs : Iterable[str]
-    pad : Literal["left", "both", "right"]
+    seqs
+    pad
         How to pad. If padding on both sides and an odd amount of padding is needed, 1
         more pad value will be on the right side. Similarly for truncating, if an odd
         amount length needs to be truncated, 1 more character will be truncated from the
         right side.
-    pad_val : str, optional
+    pad_val
         Single character to pad sequences with. Needed for string input. Ignored for OHE
         sequences.
-    length : int, optional
+    length
         Needed for character or OHE array input. Length to pad or truncate sequences to.
         If not given, uses the length of longest sequence.
-    length_axis : Optional[int]
+    length_axis
         Needed for array input.
 
     Returns
     -------
-    Array of padded or truncated sequences.
+    result
     """
     check_axes(seqs, length_axis, False)
 
@@ -110,12 +110,12 @@ def ohe(
 
     Parameters
     ----------
-    seqs : str, list[str], ndarray[str, bytes]
-    alphabet : NucleotideAlphabet
+    seqs
+    alphabet
 
     Returns
     -------
-    NDArray[np.uint8]
+    result
         Ohe hot encoded nucleotide sequences.
     """
     return alphabet.ohe(seqs)
@@ -131,15 +131,15 @@ def decode_ohe(
 
     Parameters
     ----------
-    seqs : NDArray[np.uint8]
-    ohe_axis : int
-    alphabet : NucleotideAlphabet
-    unknown_char : str, optional
+    seqs
+    ohe_axis
+    alphabet
+    unknown_char
         Single character to use for unknown values, by default "N"
 
     Returns
     -------
-    NDArray[np.bytes_]
+    result
     """
     return alphabet.decode_ohe(seqs=seqs, ohe_axis=ohe_axis, unknown_char=unknown_char)
 
@@ -155,14 +155,18 @@ def tokenize(
 
     Parameters
     ----------
-    seqs : StrSeqType
-    alphabet : NucleotideAlphabet
-    tokens : Optional[StrSeqType], optional
-        List of tokens to use for each nucleotide, by default None
+    seqs
+        Sequences to tokenize.
+    token_map
+        Mapping of nucleotides to tokens.
+    unknown_token
+        Token to use for unknown values.
+    out
+        Output array to store the result in. If not provided, a new array is created.
 
     Returns
     -------
-    NDArray[int32]
+    result
         Sequences of tokens (integers)
     """
     seqs = cast_seqs(seqs)
@@ -183,17 +187,17 @@ def decode_tokens(
 
     Parameters
     ----------
-    ids : NDArray[np.int32]
-    alphabet : NucleotideAlphabet
-    tokens : Optional[NDArray[np.int32]], optional
+    ids
+    alphabet
+    tokens
         List of tokens to use for each nucleotide, by default None
-    unknown_char : str, optional
+    unknown_char
         Character to replace unknown tokens with, by default 'N'
 
 
     Returns
     -------
-    NDArray[bytes] aka S1
+    result
         Sequences of nucleotides
     """
     target = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)

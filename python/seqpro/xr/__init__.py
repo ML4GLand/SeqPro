@@ -21,14 +21,14 @@ def ohe(
 
     Parameters
     ----------
-    seqs : Union[xr.DataArray, xr.Dataset]
-    alphabet : NucleotideAlphabet
-    ohe_dim : Optional[str], optional
+    seqs
+    alphabet
+    ohe_dim
         Name to give the new one hot encoding dimension, by default "_ohe"
 
     Returns
     -------
-    xr.DataArray, xr.Dataset
+    result
         One hot encoded sequences.
     """
     alpha = xr.DataArray(alphabet.array, dims=ohe_dim)
@@ -59,20 +59,20 @@ def bin_coverage(
 
     Parameters
     ----------
-    coverage : Union[xr.DataArray, xr.Dataset]
+    coverage
         Array of coverage.
-    bin_width : int
+    bin_width
         Size of the bins (aka windows)
-    length_dim : str
+    length_dim
         Name of the length dimension.
-    binned_dim : str, optional
+    binned_dim
         Name of the binned dimension, by default '_bin'
-    normalize : bool, optional
+    normalize
         Whether to divide by bin width, by default False
 
     Returns
     -------
-    Union[xr.DataArray, xr.Dataset]
+    result
         DataArray or Dataset of binned coverage.
 
     Raises
@@ -111,10 +111,10 @@ def translate(
 
     Parameters
     ----------
-    seqs : Union[xr.DataArray, xr.Dataset]
-    alphabet : AminoAlphabet
-    length_dim : str
-    aa_length_dim : str, optional
+    seqs
+    alphabet
+    length_dim
+    aa_length_dim
         Amino acid length dimension, by default "_aa_length"
     """
     k = alphabet.codon_array.shape[-1]

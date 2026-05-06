@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TypeGuard, TypeVar, cast, overload
+from typing import TypeAlias, TypeGuard, TypeVar, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
 
-NestedStr = bytes | str | Sequence["NestedStr"]
-"""String or nested sequence of strings"""
+NestedStr: TypeAlias = bytes | str | Sequence["NestedStr"]
+"""A single string/bytes value or any nesting of sequences thereof."""
 
-StrSeqType = NestedStr | NDArray[np.str_ | np.object_ | np.bytes_]
-"""String sequence type (i.e. SeqType but not OHE)"""
+StrSeqType: TypeAlias = NestedStr | NDArray[np.str_ | np.object_ | np.bytes_]
+"""Any string sequence input: scalars, nested lists, or string/bytes arrays. Excludes OHE."""
 
-SeqType = NestedStr | NDArray[np.str_ | np.object_ | np.bytes_ | np.uint8]
-"""Sequence type (i.e. StrSeqType but can be OHE)"""
+SeqType: TypeAlias = StrSeqType | NDArray[np.uint8]
+"""Any sequence input accepted by SeqPro functions: strings, nested lists, string/bytes arrays, or OHE uint8 arrays."""
 
 DTYPE = TypeVar("DTYPE", bound=np.generic)
 
@@ -36,11 +36,11 @@ def cast_seqs(seqs: SeqType) -> NDArray[np.bytes_ | np.uint8]:
 
     Parameters
     ----------
-    seqs : str, (nested) list[str], ndarray[str, object (Python strings), bytes, uint8]
+    seqs
 
     Returns
     -------
-    ndarray with dtype |S1 or uint8
+    result
     """
     if isinstance(seqs, str):
         if len(seqs) == 0:

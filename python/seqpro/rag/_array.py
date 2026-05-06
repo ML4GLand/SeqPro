@@ -544,7 +544,7 @@ def unbox(
 
     Returns
     -------
-        Parts of the ragged array.
+        result
     """
     if as_contiguous:
         arr = ak.to_packed(arr)

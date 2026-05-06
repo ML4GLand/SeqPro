@@ -39,9 +39,9 @@ class NucleotideAlphabet:
 
         Parameters
         ----------
-        alphabet : str
+        alphabet
             For example, DNA could be 'ACGT'.
-        complement : str
+        complement
             Complement of the alphabet, to continue the example this would be 'TGCA'.
         """
         self._validate(alphabet, complement)
@@ -79,11 +79,11 @@ class NucleotideAlphabet:
 
         Parameters
         ----------
-        seqs : str, list[str], ndarray[str, bytes]
+        seqs
 
         Returns
         -------
-        NDArray[np.uint8]
+        result
             Ohe hot encoded nucleotide sequences. The last axis is the one hot encoding
             and the second to last axis is the length of the sequence.
         """
@@ -100,14 +100,14 @@ class NucleotideAlphabet:
 
         Parameters
         ----------
-        seqs : NDArray[np.uint8]
-        ohe_axis : int
-        unknown_char : str, optional
+        seqs
+        ohe_axis
+        unknown_char
             Single character to use for unknown values, by default "N"
 
         Returns
         -------
-        NDArray[np.bytes_]
+        result
         """
         idx = gufunc_ohe_char_idx(seqs, axis=ohe_axis)  # type: ignore
 
@@ -129,7 +129,7 @@ class NucleotideAlphabet:
 
         Parameters
         ----------
-        byte_arr : ndarray[bytes]
+        byte_arr
         """
         if out is None:
             _out = out
@@ -150,7 +150,7 @@ class NucleotideAlphabet:
 
         Parameters
         ----------
-        byte_arr : ndarray[bytes]
+        byte_arr
         """
         out = self.complement_bytes(byte_arr, out)
         return np.flip(out, length_axis)
@@ -198,15 +198,15 @@ class NucleotideAlphabet:
 
         Parameters
         ----------
-        seqs : str, list[str], ndarray[str, bytes, uint8]
-        length_axis : Optional[int], optional
+        seqs
+        length_axis
             Length axis, by default None
-        ohe_axis : Optional[int], optional
+        ohe_axis
             One hot encoding axis, by default None
 
         Returns
         -------
-        ndarray[bytes, uint8]
+        result
             Array of bytes (S1) or uint8 for string or OHE input, respectively.
         """
         check_axes(seqs, length_axis, ohe_axis)
@@ -241,9 +241,9 @@ class AminoAlphabet:
 
         Parameters
         ----------
-        codons : List[str]
+        codons
             List of codons.
-        amino_acids : List[str]
+        amino_acids
             List of amino acids, in the same order
 
         Raises
@@ -310,20 +310,20 @@ class AminoAlphabet:
 
         Parameters
         ----------
-        seqs : StrSeqType | Ragged[np.bytes_] | Ragged[np.uint8]
+        seqs
             Nucleotide sequences. Ragged inputs must have all lengths divisible by
             the codon size. For OHE Ragged (uint8), nuc_alphabet is required.
-        length_axis : Optional[int], optional
+        length_axis
             Only used for non-Ragged array input.
-        nuc_alphabet : NucleotideAlphabet, optional
+        nuc_alphabet
             Required when seqs is a Ragged OHE (uint8) array, to decode OHE → bytes.
-        truncate_stop : bool, optional
+        truncate_stop
             When True, each output sequence is truncated at the first stop codon
             (inclusive). Only valid for Ragged input. Default False.
 
         Returns
         -------
-        NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]
+        result
         """
 
         if not isinstance(seqs, Ragged):
@@ -418,11 +418,11 @@ class AminoAlphabet:
 
         Parameters
         ----------
-        seqs : str, list[str], ndarray[str, bytes]
+        seqs
 
         Returns
         -------
-        NDArray[np.uint8]
+        result
             Ohe hot encoded amino acid sequences. The last axis is the one hot encoding
             and the second to last axis is the length of the sequence.
         """
@@ -439,14 +439,14 @@ class AminoAlphabet:
 
         Parameters
         ----------
-        seqs : NDArray[np.uint8]
-        ohe_axis : int
-        unknown_char : str, optional
+        seqs
+        ohe_axis
+        unknown_char
             Single character to use for unknown values, by default "X"
 
         Returns
         -------
-        NDArray[np.bytes_]
+        result
         """
         idx = gufunc_ohe_char_idx(seqs, axis=ohe_axis)  # type: ignore
 

@@ -12,12 +12,12 @@ def length(seqs: str | list[str]) -> NDArray[np.integer]:
 
     Parameters
     ----------
-    seqs : str, list[str]
+    seqs
         List of sequences.
 
     Returns
     -------
-    np.array
+    result
         Array containing the length of each sequence.
     """
     _seqs = cast_seqs(seqs)
@@ -35,20 +35,20 @@ def gc_content(
 
     Parameters
     ----------
-    seqs : str, list[str], ndarray[str, bytes, uint8]
-    normalize : bool, default True
+    seqs
+    normalize
         True => return proportions
         False => return counts
-    length_axis : Optional[int]
+    length_axis
         Needed if seqs is an array.
-    alphabet : Optional[NucleotideAlphabet]
+    alphabet
         Needed if seqs is OHE.
-    ohe_axis : Optional[int]
+    ohe_axis
         Needed if seqs is OHE.
 
     Returns
     -------
-    NDArray[int, float]
+    result
         Returns integers if unnormalized, otherwise floats.
     """
     check_axes(seqs, length_axis, ohe_axis)
@@ -91,16 +91,16 @@ def nucleotide_content(
 
     Parameters
     ----------
-    seqs : str, list[str], ndarray[str, bytes, uint8]
-    normalize : bool, default True
+    seqs
+    normalize
         True => return proportions
         False => return counts
-    length_axis : Optional[int]
+    length_axis
         Needed if seqs is an array.
 
     Returns
     -------
-    NDArray[int, float]
+    result
         Returns integers if unnormalized, otherwise floats.
     """
     check_axes(seqs, length_axis, False)
@@ -136,14 +136,14 @@ def count_kmers_seq(seq: str, k: int) -> dict:
 
     Parameters
     ----------
-    seq : str
+    seq
         Nucleotide seq expressed as a string.
-    k : int
+    k
         k value for k-mers (e.g. k=3 generates 3-mers).
 
     Returns
     -------
-    kmers : dict
+    kmers
         k-mers and their counts expressed in a dictionary.
     """
     if len(seq) < k:
@@ -169,16 +169,16 @@ def _count_kmers(
 
     Parameters
     ----------
-    seqs : str, list[str], ndarray[str, bytes, uint8]
-    k : int
+    seqs
+    k
         k value for k-mers (e.g. k=3 generates 3-mers).
-    alphabet : SequenceAlphabet
+    alphabet
 
     Returns
     -------
-    kmers : ndarray[bytes]
+    kmers
         Array of all possible unique k-mers.
-    counts : ndarray[int]
+    counts
         Counts of all possible k-mers for each input sequence.
     """
     raise NotImplementedError
