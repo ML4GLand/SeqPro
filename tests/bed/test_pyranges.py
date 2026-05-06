@@ -1,8 +1,9 @@
+import pandas as pd
 import polars as pl
 import polars.testing.parametric as plst
 import pytest
 import seqpro as sp
-from hypothesis import given, settings  # noqa: F401
+from hypothesis import given, settings
 from polars.testing import assert_frame_equal
 from pytest_cases import parametrize_with_cases
 
@@ -86,3 +87,18 @@ def test_roundtrip_bedlike(bed: pl.DataFrame):
             assert_frame_equal(bed.drop("other"), new_bed.drop("other"))
         else:
             assert_frame_equal(bed, new_bed)
+
+
+def test_to_pyr_accepts_pandas():
+    bed = pd.DataFrame(
+        {
+            "chrom": ["chr1", "chr2"],
+            "chromStart": [0, 10],
+            "chromEnd": [100, 200],
+            "strand": ["+", "-"],
+        }
+    )
+    pyr = sp.bed.to_pyr(bed)
+    assert hasattr(pyr, "df")
+    assert "Chromosome" in pyr.df.columns
+    assert "Start" in pyr.df.columns

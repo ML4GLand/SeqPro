@@ -3,11 +3,15 @@ import warnings
 from functools import partial
 from pathlib import Path
 
+import narwhals as nw
 import pandera.dtypes as pat
 import pandera.polars as pa
 import polars as pl
+import polars_config_meta  # noqa: F401
+from narwhals.typing import FrameT
 from natsort import natsorted
 
+from ._coords import CoordSchema, detect_schema, set_schema
 from ._types import PathLike
 
 with warnings.catch_warnings():
@@ -19,31 +23,41 @@ with warnings.catch_warnings():
     import pyranges as pr
 
 __all__ = [
-    "sort",
-    "with_len",
-    "to_pyr",
+    "BEDSchema",
+    "BroadPeakSchema",
+    "CoordSchema",
+    "NarrowPeakSchema",
+    "detect_schema",
     "from_pyr",
     "read",
-    "BEDSchema",
-    "NarrowPeakSchema",
-    "BroadPeakSchema",
+    "set_schema",
+    "sort",
+    "to_pyr",
+    "with_len",
 ]
 
 
-def sort(bed: pl.DataFrame):
+@nw.narwhalify
+def sort(bed: FrameT) -> FrameT:
     """Sort a BED-like DataFrame by chromosome, start, and end position, using the natural
-    order of chromosome names e.g. 1, 2, ..., 10, ..."""
-    order = natsorted(bed["chrom"].unique())
-    bed = bed.sort(
-        pl.col("chrom").cast(pl.Enum(order)),
-        "chromStart",
-        "chromEnd",
-        maintain_order=True,
+    order of chromosome names e.g. 1, 2, ..., 10, ...
+
+    Parameters
+    ----------
+    bed
+        DataFrame with BED-format columns: "chrom", "chromStart", "chromEnd".
+        Accepts polars or pandas DataFrames.
+    """
+    order = natsorted(bed["chrom"].unique().to_list())
+    return (
+        bed.with_columns(_seqpro_chrom_sort_key_=nw.col("chrom").cast(nw.Enum(order)))
+        .sort("_seqpro_chrom_sort_key_", "chromStart", "chromEnd")
+        .drop("_seqpro_chrom_sort_key_")
     )
-    return bed
 
 
-def with_len(bed: pl.DataFrame, length: int) -> pl.DataFrame:
+@nw.narwhalify
+def with_len(bed: FrameT, length: int) -> FrameT:
     """Set the length of regions in a BED-like DataFrame to a fixed length by expanding or shrinking
     relative to the center (or peak) of the window. If the original region size + length is odd, the
     center will be 1 position closer the right end.
@@ -58,15 +72,14 @@ def with_len(bed: pl.DataFrame, length: int) -> pl.DataFrame:
     if length < 0:
         raise ValueError("Length must be non-negative.")
 
-    # * Avoid any floating point math for consistent results
-    if "peak" in bed:
+    if "peak" in bed.columns:
         double_center = (
-            pl.when(pl.col("peak").is_null())
-            .then(pl.col("chromStart") + pl.col("chromEnd"))
-            .otherwise(2 * (pl.col("chromStart") + pl.col("peak")))
+            nw.when(nw.col("peak").is_null())
+            .then(nw.col("chromStart") + nw.col("chromEnd"))
+            .otherwise(2 * (nw.col("chromStart") + nw.col("peak")))
         )
     else:
-        double_center = pl.col("chromStart") + pl.col("chromEnd")
+        double_center = nw.col("chromStart") + nw.col("chromEnd")
 
     return bed.with_columns(
         chromStart=(double_center - length) // 2,
@@ -74,7 +87,7 @@ def with_len(bed: pl.DataFrame, length: int) -> pl.DataFrame:
     )
 
 
-def to_pyr(bedlike: pl.DataFrame) -> pr.PyRanges:
+def to_pyr(bedlike) -> pr.PyRanges:
     """Convert a BED-like DataFrame to a PyRanges object.
 
     .. important::
@@ -87,18 +100,18 @@ def to_pyr(bedlike: pl.DataFrame) -> pr.PyRanges:
     Parameters
     ----------
     bedlike
-        BED-like DataFrame with at least the columns "chrom", "chromStart", and "chromEnd".
+        BED-like DataFrame (polars or pandas) with at least the columns "chrom", "chromStart", and "chromEnd".
     """
+    pdf = nw.from_native(bedlike, eager_only=True).to_pandas()
     return pr.PyRanges(
-        bedlike.rename(
-            {
+        pdf.rename(
+            columns={
                 "chrom": "Chromosome",
                 "chromStart": "Start",
                 "chromEnd": "End",
                 "strand": "Strand",
-            },
-            strict=False,
-        ).to_pandas()
+            }
+        )
     )
 
 
@@ -143,16 +156,18 @@ def read(path: PathLike) -> pl.DataFrame:
     """
     path = Path(path)
     if ".bed" in path.suffixes:
-        return _read_bed(path)
+        result = _read_bed(path)
     elif ".narrowPeak" in path.suffixes:
-        return _read_narrowpeak(path)
+        result = _read_narrowpeak(path)
     elif ".broadPeak" in path.suffixes:
-        return _read_broadpeak(path)
+        result = _read_broadpeak(path)
     else:
         raise ValueError(
-            f"""Unrecognized file extension: {"".join(path.suffixes)}. Expected one of 
+            f"""Unrecognized file extension: {"".join(path.suffixes)}. Expected one of
             .bed, .narrowPeak, or .broadPeak (potentially gzipped)."""
         )
+    result.config_meta.set(coordinate_system_zero_based=True)
+    return result
 
 
 BEDSchema = pa.DataFrameSchema(

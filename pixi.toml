@@ -5,9 +5,8 @@ name = "SeqPro"
 platforms = ["linux-64", "osx-arm64"]
 
 [environments]
-dev = { features = ["dev", "py39"] }
+dev = { features = ["dev", "py310"] }
 doc = { features = ["doc", "py312"] }
-py39 = { features = ["py39"] }
 py310 = { features = ["py310"] }
 py311 = { features = ["py311"] }
 py312 = { features = ["py312"] }
@@ -16,6 +15,7 @@ bench = { features = ["bench", "py313"] }
 
 [tasks]
 test = "pytest tests"
+lint = "prek run --all-files --stage pre-commit"
 prek-install = "prek install -t commit-msg -t pre-commit -t pre-push"
 
 [dependencies]
@@ -34,11 +34,12 @@ seqpro = { path = ".", editable = true }
 [feature.dev.dependencies]
 numba = "==0.58.1"
 numpy = "==1.26.0"
-polars = "==1.10.0"
+polars = ">=1.21.0"
 pandera = "==0.22.1"
 awkward = "==2.5.0"
 pandas = "*"
 natsort = "*"
+narwhals = ">=1.0"
 pyarrow = "*"
 ipykernel = "*"
 prek = "*"
@@ -60,9 +61,6 @@ myst-parser = "*"
 
 [feature.doc.tasks]
 doc = { cmd = "make clean && make html", cwd = "docs" }
-
-[feature.py39.dependencies]
-python = "3.9.*"
 
 [feature.py310.dependencies]
 python = "3.10.*"

@@ -1,6 +1,3 @@
-import numpy as np
-
-
 # helper
 def _find_distance(seq1, seq2) -> int:
     edits = 0

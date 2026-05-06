@@ -2,6 +2,7 @@ import math
 from fractions import Fraction
 
 import hypothesis.strategies as st
+import pandas as pd
 import polars as pl
 import pytest
 import seqpro as sp
@@ -112,3 +113,11 @@ def test_bed(bed: pl.DataFrame, length: int):
 
     assert adj_end - adj_start == length
     assert adj_start == desired_start
+
+
+def test_with_len_pandas_in_pandas_out():
+    bed = pd.DataFrame({"chrom": ["chr1"], "chromStart": [0], "chromEnd": [10]})
+    result = sp.bed.with_len(bed, 4)
+    assert isinstance(result, pd.DataFrame)
+    assert result["chromStart"].iloc[0] == 3
+    assert result["chromEnd"].iloc[0] == 7
