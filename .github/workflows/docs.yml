@@ -9,6 +9,10 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
   deploy:
     environment:
@@ -39,10 +43,10 @@ jobs:
           maturin build --release
 
       - name: Install seqpro wheel
-        run: uv pip install --system target/wheels/*.whl
+        run: uv pip install --system --find-links target/wheels seqpro
 
       - name: Install remaining seqpro Python dependencies
-        run: uv pip install --system numba numpy polars pyranges pandera pandas pyarrow natsort narwhals awkward polars-config-meta
+        run: uv pip install --system "polars-config-meta[polars]>=0.3.2" numba numpy polars pyranges pandera pandas pyarrow natsort narwhals awkward "setuptools>=70"
 
       - name: Build documentation
         run: zensical build --clean

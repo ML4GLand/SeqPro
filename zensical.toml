@@ -1,6 +1,6 @@
 [project]
 site_name = "SeqPro"
-site_url = "https://ml4gland.github.io/SeqPro"
+site_url = "https://ML4GLand.github.io/SeqPro"
 site_description = "Fast biological sequence processing for Python"
 site_author = "David Laub, Adam Klie"
 repo_url = "https://github.com/ML4GLand/SeqPro"
