@@ -8,7 +8,6 @@ name: Publish wheels
 on:
   workflow_run:
     workflows: ["Create release"]
-    branches: [main]
     types: [completed]
   workflow_dispatch:
 
