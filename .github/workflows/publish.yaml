@@ -193,6 +193,7 @@ jobs:
           path: dist
 
   release:
+    environment: pypi
     name: Release
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
@@ -214,5 +215,3 @@ jobs:
         uses: astral-sh/setup-uv@v7
       - name: Publish to PyPI
         run: uv publish 'wheels-*/*'
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
