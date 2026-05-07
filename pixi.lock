@@ -9886,8 +9886,8 @@ packages:
   requires_python: '>=3.11'
 - pypi: ./
   name: seqpro
-  version: 0.10.0
-  sha256: 05ae03cfeec6436c470392dbe40bdd5acef9f400cc4a9f51d2abbffa553b90b0
+  version: 0.11.0
+  sha256: a581fa87d980c40941583e6e0e6d2df0f18009e77a39f544b7ab04884cce259d
   requires_dist:
   - numba>=0.58.1
   - numpy>=1.26.0
