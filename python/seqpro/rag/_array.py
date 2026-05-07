@@ -31,8 +31,8 @@ from typing_extensions import ParamSpec, Self
 from ._types import ak_dtypes
 from ._utils import OFFSET_TYPE, lengths_to_offsets
 
-DTYPE_co = TypeVar("DTYPE_co", bound=ak_dtypes, covariant=True)
-RDTYPE_co = TypeVar("RDTYPE_co", bound=ak_dtypes, covariant=True)
+DTYPE_co = TypeVar("DTYPE_co", bound=ak_dtypes | np.void, covariant=True)
+RDTYPE_co = TypeVar("RDTYPE_co", bound=ak_dtypes | np.void, covariant=True)
 P = ParamSpec("P")
 
 
@@ -55,8 +55,11 @@ def is_rag_dtype(
     """
     if not isinstance(rag, Ragged):
         return False
-    if isinstance(rag.dtype, dict):
-        return False
+    if rag.dtype.type is np.void:  # structured dtype → record layout
+        query = np.dtype(dtype)
+        if query.type is not np.void:
+            return False  # can't match structured Ragged with primitive dtype
+        return rag.dtype == query
     return np.issubdtype(rag.dtype, dtype)
 
 
@@ -272,17 +275,31 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         return self._parts.shape
 
     @property
-    def dtype(self) -> np.dtype[RDTYPE_co] | dict[str, np.dtype]:
-        """The dtype of the Ragged array. For record layouts, a dict of
-        field name -> dtype, in awkward field order.
+    def dtype(self) -> np.dtype[RDTYPE_co]:
+        """The dtype of the Ragged array.
+
+        For non-record layouts, returns the numpy dtype of the flat data buffer
+        (e.g. ``np.dtype('int32')``).
+
+        For record layouts, returns a numpy *structured* dtype whose field names
+        and per-field dtypes match the Ragged record fields — for example::
+
+            np.dtype([("seq", "S1"), ("score", "f4")])
+
+        .. note::
+            **Memory layout is SoA, not AoS.**  A numpy structured dtype normally
+            implies Array-of-Structs packing, but here each field lives in its own
+            contiguous buffer (Structure of Arrays).  The structured dtype is used
+            purely as a convenient, numpy-compatible descriptor: it carries all
+            field/dtype information in a single object without inventing a new type.
 
         Returns
         -------
-        np.dtype[RDTYPE_co] | dict[str, np.dtype]
+        np.dtype[RDTYPE_co]
         """
         self._ensure_parts()
         if self._parts is None:
-            return {f: self[f].dtype for f in ak.fields(self)}  # type: ignore[reportUnknownReturnType]
+            return np.dtype([(f, self[f].dtype) for f in ak.fields(self)])  # type: ignore[return-value]
         return self._parts.data.dtype
 
     @property
@@ -672,7 +689,8 @@ def unbox(
 
     Returns
     -------
-        result
+    RagParts[DTYPE_co]
+        Data, shape, and offsets extracted from the awkward array.
     """
     if as_contiguous:
         arr = ak.to_packed(arr)
