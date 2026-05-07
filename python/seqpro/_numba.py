@@ -53,7 +53,8 @@ def gufunc_ohe_char_idx(
 
     Returns
     -------
-    result
+    NDArray[np.intp]
+        Index of the set bit in each OHE vector, or -1 for unknown characters.
     """
     res[0] = np.intp(-1)  # type: ignore
     for i in nb.prange(len(seq)):
@@ -181,7 +182,7 @@ def _nb_find_stop_ends(
 
     Returns
     -------
-    result
+    NDArray[np.int64]
         Truncated end positions (exclusive), one per sequence.
     """
     n = len(starts)

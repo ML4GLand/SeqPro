@@ -24,8 +24,8 @@ def edit_distance(seq1: str, seq2: str, dual: bool = False) -> int:
 
     Returns
     -------
-    edits
-        Amount of edits between sequences.
+    int
+        Number of positions that differ between the two sequences.
     """
     assert len(seq1) == len(seq2), "Both sequences must be of same length."
     f_edits = _find_distance(seq1, seq2)

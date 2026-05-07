@@ -36,7 +36,8 @@ def pad_seqs(
 
     Returns
     -------
-    result
+    NDArray[np.bytes_ | np.uint8]
+        Padded (or truncated) sequences as S1 bytes or uint8 for OHE input.
     """
     check_axes(seqs, length_axis, False)
 
@@ -115,8 +116,8 @@ def ohe(
 
     Returns
     -------
-    result
-        Ohe hot encoded nucleotide sequences.
+    NDArray[np.uint8]
+        One-hot encoded sequences with shape (..., length, alphabet_size).
     """
     return alphabet.ohe(seqs)
 
@@ -139,7 +140,8 @@ def decode_ohe(
 
     Returns
     -------
-    result
+    NDArray[np.bytes_]
+        S1 byte array of decoded characters.
     """
     return alphabet.decode_ohe(seqs=seqs, ohe_axis=ohe_axis, unknown_char=unknown_char)
 
@@ -166,8 +168,8 @@ def tokenize(
 
     Returns
     -------
-    result
-        Sequences of tokens (integers)
+    NDArray[np.int32]
+        Integer token IDs with the same shape as the input sequences.
     """
     seqs = cast_seqs(seqs)
     source = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
@@ -197,8 +199,8 @@ def decode_tokens(
 
     Returns
     -------
-    result
-        Sequences of nucleotides
+    NDArray[np.bytes_]
+        S1 byte array of decoded characters with the same shape as the input.
     """
     target = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
     source = np.array(list(token_map.values()), dtype=np.int32)

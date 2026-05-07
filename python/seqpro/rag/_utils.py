@@ -22,8 +22,8 @@ def lengths_to_offsets(
 
     Returns
     -------
-    result
-        Offsets of the segments.
+    NDArray[DTYPE]
+        Offsets of the segments; length is len(lengths) + 1, starting with 0.
     """
     offsets = np.empty(lengths.size + 1, dtype=dtype)
     offsets[0] = 0

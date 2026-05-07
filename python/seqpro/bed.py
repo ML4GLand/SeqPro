@@ -169,7 +169,8 @@ def read(path: PathLike) -> pl.DataFrame:
 
     Returns
     -------
-    result
+    pl.DataFrame
+        BED-like DataFrame with typed columns and zero-based coordinate metadata.
     """
     path = Path(path)
     if ".bed" in path.suffixes:

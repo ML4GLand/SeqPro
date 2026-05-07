@@ -6,7 +6,6 @@ from typing import cast, overload
 import awkward as ak
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import assert_never
 
 from .._numba import (
     _nb_find_stop_ends,
@@ -17,7 +16,7 @@ from .._numba import (
     ufunc_comp_dna,
 )
 from .._utils import SeqType, StrSeqType, cast_seqs, check_axes, is_dtype
-from ..rag import Ragged
+from ..rag import Ragged, is_rag_dtype
 
 
 class NucleotideAlphabet:
@@ -70,8 +69,8 @@ class NucleotideAlphabet:
         if len(set(complement)) != len(complement):
             raise ValueError("Complement has repeated characters.")
 
-        for maybe_complement, complement in zip(alphabet[::-1], complement):
-            if maybe_complement != complement:
+        for maybe_comp, comp in zip(alphabet[::-1], complement):
+            if maybe_comp != comp:
                 raise ValueError("Reverse of alphabet does not yield the complement.")
 
     def ohe(self, seqs: StrSeqType) -> NDArray[np.uint8]:
@@ -83,9 +82,9 @@ class NucleotideAlphabet:
 
         Returns
         -------
-        result
-            Ohe hot encoded nucleotide sequences. The last axis is the one hot encoding
-            and the second to last axis is the length of the sequence.
+        NDArray[np.uint8]
+            One-hot encoded sequences; last axis is alphabet size, second-to-last is
+            sequence length.
         """
         _seqs = cast_seqs(seqs)
         return gufunc_ohe(_seqs.view(np.uint8), self.array.view(np.uint8))
@@ -107,7 +106,8 @@ class NucleotideAlphabet:
 
         Returns
         -------
-        result
+        NDArray[np.bytes_]
+            S1 byte array of decoded characters; ohe_axis is removed from the shape.
         """
         idx = gufunc_ohe_char_idx(seqs, axis=ohe_axis)  # type: ignore
 
@@ -122,15 +122,9 @@ class NucleotideAlphabet:
 
         return _alphabet[idx].reshape(shape)
 
-    def complement_bytes(
+    def _complement_bytes(
         self, byte_arr: NDArray[np.bytes_], out: NDArray[np.bytes_] | None = None
     ) -> NDArray[np.bytes_]:
-        """Get reverse complement of byte (S1) array.
-
-        Parameters
-        ----------
-        byte_arr
-        """
         if out is None:
             _out = out
         else:
@@ -140,28 +134,14 @@ class NucleotideAlphabet:
         )
         return _out.view("S1")
 
-    def rev_comp_byte(
+    def _rev_comp_byte(
         self,
         byte_arr: NDArray[np.bytes_],
         length_axis: int,
         out: NDArray[np.bytes_] | None = None,
     ) -> NDArray[np.bytes_]:
-        """Get reverse complement of byte (S1) array.
-
-        Parameters
-        ----------
-        byte_arr
-        """
-        out = self.complement_bytes(byte_arr, out)
+        out = self._complement_bytes(byte_arr, out)
         return np.flip(out, length_axis)
-
-    def rev_comp_string(self, string: str):
-        comp = string.translate(self.str_comp_table)
-        return comp[::-1]
-
-    def rev_comp_bstring(self, bstring: bytes):
-        comp = bstring.translate(self.bytes_comp_table)
-        return comp[::-1]
 
     @overload
     def reverse_complement(
@@ -177,7 +157,7 @@ class NucleotideAlphabet:
         seqs: NDArray[np.uint8],
         length_axis: int | None = None,
         ohe_axis: int | None = None,
-        out: NDArray[np.bytes_] | None = None,
+        out: NDArray[np.uint8] | None = None,
     ) -> NDArray[np.uint8]: ...
     @overload
     def reverse_complement(
@@ -185,14 +165,14 @@ class NucleotideAlphabet:
         seqs: SeqType,
         length_axis: int | None = None,
         ohe_axis: int | None = None,
-        out: NDArray[np.bytes_] | None = None,
+        out: NDArray[np.bytes_ | np.uint8] | None = None,
     ) -> NDArray[np.bytes_ | np.uint8]: ...
     def reverse_complement(
         self,
         seqs: SeqType,
         length_axis: int | None = None,
         ohe_axis: int | None = None,
-        out: NDArray[np.bytes_] | None = None,
+        out: NDArray[np.bytes_ | np.uint8] | None = None,
     ) -> NDArray[np.bytes_ | np.uint8]:
         """Reverse complement a sequence.
 
@@ -206,27 +186,29 @@ class NucleotideAlphabet:
 
         Returns
         -------
-        result
-            Array of bytes (S1) or uint8 for string or OHE input, respectively.
+        NDArray[np.bytes_ | np.uint8]
+            Reverse-complemented sequences as S1 bytes or uint8 for OHE input.
         """
         check_axes(seqs, length_axis, ohe_axis)
 
-        seqs = cast_seqs(seqs)
+        seqs_ = cast_seqs(seqs)
 
-        if is_dtype(seqs, np.bytes_):
+        if is_dtype(seqs_, np.bytes_):
+            assert out is None or is_dtype(out, np.bytes_)
             if length_axis is None:
                 length_axis = -1
-            return self.rev_comp_byte(seqs, length_axis, out)
-        elif is_dtype(seqs, np.uint8):  # OHE
+            return self._rev_comp_byte(seqs_, length_axis, out)
+        elif is_dtype(seqs_, np.uint8):  # OHE
             assert length_axis is not None
             assert ohe_axis is not None
-            _out = np.flip(seqs, axis=(length_axis, ohe_axis))
+            assert out is None or is_dtype(out, np.uint8)
+            out_ = np.flip(seqs_, axis=(length_axis, ohe_axis))
             if out is not None:
-                out[:] = _out
-                _out = out
-            return _out
+                out[:] = out_
+                out_ = out
+            return out_
         else:
-            assert_never(seqs)  # type: ignore
+            raise ValueError("Invalid sequence type.")
 
 
 class AminoAlphabet:
@@ -254,9 +236,9 @@ class AminoAlphabet:
             _description_
         """
         k = len(codons[0])
-        if any([len(c) != k for c in codons]):
+        if any(len(c) != k for c in codons):
             raise ValueError("Got codons with varying lengths.")
-        if any([len(a) != 1 for a in amino_acids]):
+        if any(len(a) != 1 for a in amino_acids):
             raise ValueError("Got amino acid symbols that are multiple characters.")
         if len(codons) != len(amino_acids):
             raise ValueError(
@@ -323,7 +305,8 @@ class AminoAlphabet:
 
         Returns
         -------
-        result
+        NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]
+            Translated amino acid sequences in the same container type as the input.
         """
 
         if not isinstance(seqs, Ragged):
@@ -353,9 +336,7 @@ class AminoAlphabet:
         # Pack to ListOffsetArray so .data and .offsets are contiguous and valid.
         seqs = Ragged(ak.to_packed(seqs))
 
-        is_ohe = np.issubdtype(seqs.dtype, np.uint8)
-        if is_ohe and nuc_alphabet is None:
-            raise ValueError("nuc_alphabet is required for OHE Ragged input.")
+        is_ohe = is_rag_dtype(seqs, np.uint8)
 
         codon_size = self.codon_array.shape[-1]
         lengths = seqs.lengths.ravel()
@@ -370,6 +351,8 @@ class AminoAlphabet:
 
         # Decode OHE → bytes if needed. seqs.data is (total, n_nuc) for OHE or (total,) for bytes.
         if is_ohe:
+            if nuc_alphabet is None:
+                raise ValueError("nuc_alphabet is required for OHE Ragged input.")
             nuc_bytes_flat: NDArray[np.bytes_] = nuc_alphabet.decode_ohe(  # type: ignore[union-attr]
                 seqs.data, ohe_axis=-1
             )
@@ -422,9 +405,9 @@ class AminoAlphabet:
 
         Returns
         -------
-        result
-            Ohe hot encoded amino acid sequences. The last axis is the one hot encoding
-            and the second to last axis is the length of the sequence.
+        NDArray[np.uint8]
+            One-hot encoded sequences; last axis is alphabet size, second-to-last is
+            sequence length.
         """
         _seqs = cast_seqs(seqs)
         return gufunc_ohe(_seqs.view(np.uint8), self.aa_array.view(np.uint8))
@@ -446,7 +429,8 @@ class AminoAlphabet:
 
         Returns
         -------
-        result
+        NDArray[np.bytes_]
+            S1 byte array of decoded characters; ohe_axis is removed from the shape.
         """
         idx = gufunc_ohe_char_idx(seqs, axis=ohe_axis)  # type: ignore
 
@@ -481,4 +465,4 @@ def complement_bytes(
     return _out.view("S1")
 
 
-DNA.complement_bytes = MethodType(complement_bytes, DNA)
+DNA._complement_bytes = MethodType(complement_bytes, DNA)

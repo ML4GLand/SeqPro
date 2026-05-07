@@ -78,8 +78,8 @@ class TMM:
             The library size to normalize to. Default is 1e6 i.e. counts per million (CPM).
         Returns
         -------
-        normalized_counts
-            The normalized count data.
+        NDArray
+            TMM-normalized count data scaled to `library_size`.
         """
         if not self._is_fitted:
             raise ValueError("Must fit before transforming.")
@@ -99,10 +99,10 @@ class TMM:
 
         Returns
         -------
-        scaling_factors
-            The computed scaling factors.
-        library_sizes
-            The library sizes.
+        NDArray[np.float64]
+            Per-sample TMM scaling factors.
+        NDArray[np.float64]
+            Per-sample library sizes (total counts).
         """
         if not self._is_fitted:
             raise ValueError("Must fit before computing scaling factors.")

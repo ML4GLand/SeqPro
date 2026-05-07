@@ -6,7 +6,7 @@ from typing import (
     Any,
     Generic,
     Literal,
-    TypeGuard,
+    TypeIs,
     TypeVar,
     cast,
     overload,
@@ -38,7 +38,7 @@ P = ParamSpec("P")
 
 def is_rag_dtype(
     rag: Any, dtype: DTYPE_co | type[DTYPE_co]
-) -> TypeGuard[Ragged[DTYPE_co]]:
+) -> TypeIs[Ragged[DTYPE_co]]:
     """Check if an object is a `Ragged` array with the given dtype (fails for record-layout Ragged arrays).
 
     Parameters
@@ -50,16 +50,15 @@ def is_rag_dtype(
 
     Returns
     -------
-    TypeGuard[Ragged[DTYPE_co]]
+    TypeIs[Ragged[DTYPE_co]]
         True if `rag` is a `Ragged` array whose dtype is a subtype of `dtype`.
     """
     if not isinstance(rag, Ragged):
         return False
-    if rag.dtype.type is np.void:  # structured dtype → record layout
-        query = np.dtype(dtype)
-        if query.type is not np.void:
+    if np.issubdtype(rag.dtype, np.void):  # structured dtype → record layout
+        if not np.issubdtype(dtype, np.void):
             return False  # can't match structured Ragged with primitive dtype
-        return rag.dtype == query
+        return rag.dtype == np.dtype(dtype)
     return np.issubdtype(rag.dtype, dtype)
 
 
@@ -89,7 +88,7 @@ def _extract_list_offsets(layout: Content) -> NDArray[OFFSET_TYPE]:
     node = layout
     while True:
         if isinstance(node, ListOffsetArray):
-            return cast(NDArray, node.offsets.data)
+            return np.asarray(node.offsets.data)
         if isinstance(node, ListArray):
             return np.stack([node.starts.data, node.stops.data], 0)  # type: ignore
         if isinstance(node, RegularArray):
@@ -100,6 +99,40 @@ def _extract_list_offsets(layout: Content) -> NDArray[OFFSET_TYPE]:
             raise ValueError(  # noqa: TRY004
                 f"No list layer found while extracting offsets from layout:\n{layout.form}"
             )
+
+
+class _PartsDescriptor:
+    """Descriptor for `Ragged.parts` with self-typed overloads."""
+
+    @overload
+    def __get__(self, obj: Ragged[np.void], objtype: Any) -> dict[str, RagParts]: ...
+    @overload
+    def __get__(self, obj: Ragged[RDTYPE_co], objtype: Any) -> RagParts[RDTYPE_co]: ...
+    @overload
+    def __get__(self, obj: None, objtype: Any) -> Self: ...
+    def __get__(self, obj: Ragged | None, objtype: Any = None):
+        if obj is None:
+            return self
+        obj._ensure_parts()
+        return obj._parts
+
+
+class _DataDescriptor:
+    """Descriptor for `Ragged.data` with self-typed overloads."""
+
+    @overload
+    def __get__(self, obj: Ragged[np.void], objtype: Any) -> dict[str, NDArray]: ...
+    @overload
+    def __get__(self, obj: Ragged[RDTYPE_co], objtype: Any) -> NDArray[RDTYPE_co]: ...
+    @overload
+    def __get__(self, obj: None, objtype: Any) -> Self: ...
+    def __get__(self, obj: Ragged | None, objtype: Any = None):
+        if obj is None:
+            return self
+        obj._ensure_parts()
+        if isinstance(obj._parts, dict):
+            return {f: p.data for f, p in obj._parts.items()}
+        return obj._parts.data
 
 
 class Ragged(ak.Array, Generic[RDTYPE_co]):
@@ -117,7 +150,7 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
 
     """
 
-    _parts: RagParts[RDTYPE_co] | None
+    _parts: RagParts[RDTYPE_co] | dict[str, RagParts]
 
     def __init__(
         self,
@@ -131,9 +164,16 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         if isinstance(content, RecordArray) or _is_record_layout(content):
             # ak._update_class() demotes RecordArray layouts to plain ak.Array
             # because there is no "__list__" parameter at the record level.
-            # Restore the Ragged subclass and leave _parts unset for records.
+            # Restore the Ragged subclass and cache per-field RagParts.
             self.__class__ = Ragged  # type: ignore[assignment]
-            self._parts = None
+            # Set sentinel first: self[f] -> __getitem__ -> _ensure_parts checks hasattr
+            object.__setattr__(self, "_parts", {})
+            shared_offsets = _extract_list_offsets(cast(Content, ak.to_layout(self)))
+            self._parts = {
+                f: RagParts(p.data, p.shape, shared_offsets)
+                for f in ak.fields(self)
+                for p in (unbox(self[f]),)
+            }
         else:
             self._parts = unbox(self)
 
@@ -144,7 +184,18 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
             return
         layout = cast(Content, ak.to_layout(self))
         if isinstance(layout, RecordArray) or _is_record_layout(layout):
-            object.__setattr__(self, "_parts", None)
+            # Set sentinel first to break the self[f] -> _ensure_parts cycle.
+            object.__setattr__(self, "_parts", {})
+            shared_offsets = _extract_list_offsets(layout)
+            object.__setattr__(
+                self,
+                "_parts",
+                {
+                    f: RagParts(p.data, p.shape, shared_offsets)
+                    for f in ak.fields(self)
+                    for p in (unbox(self[f]),)
+                },
+            )
         else:
             object.__setattr__(self, "_parts", unbox(self))
 
@@ -213,33 +264,13 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         parts = RagParts[DTYPE_co].from_lengths(data, lengths)
         return Ragged(parts)
 
-    @property
-    def parts(self) -> RagParts[RDTYPE_co] | dict[str, RagParts]:
-        """The parts of the Ragged array. For record layouts, a dict of
-        field name -> RagParts; all share the same offsets ndarray.
+    parts = _PartsDescriptor()
+    """The parts of the Ragged array. For record layouts, a dict of
+    field name -> RagParts; all share the same offsets ndarray."""
 
-        Returns
-        -------
-        RagParts[RDTYPE_co] | dict[str, RagParts]
-        """
-        self._ensure_parts()
-        if self._parts is None:
-            return {f: self[f].parts for f in ak.fields(self)}  # type: ignore[reportUnknownReturnType]
-        return self._parts
-
-    @property
-    def data(self) -> NDArray[RDTYPE_co] | dict[str, NDArray]:
-        """The data of the Ragged array. For record layouts, a dict of
-        field name -> zero-copy ndarray view, in awkward field order.
-
-        Returns
-        -------
-        NDArray[RDTYPE_co] | dict[str, NDArray]
-        """
-        self._ensure_parts()
-        if self._parts is None:
-            return {f: self[f].data for f in ak.fields(self)}  # type: ignore[reportUnknownReturnType]
-        return self._parts.data
+    data = _DataDescriptor()
+    """The data of the Ragged array. For record layouts, a dict of
+    field name -> zero-copy ndarray view, in awkward field order."""
 
     @property
     def offsets(self) -> NDArray[OFFSET_TYPE]:
@@ -250,14 +281,8 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         NDArray[np.int64]
         """
         self._ensure_parts()
-        if self._parts is None:
-            # Record layout — extract offsets via the unified helper, cache for sharing.
-            # object.__setattr__ used in case ak.Array intercepts __setattr__.
-            if not hasattr(self, "_offsets_cache"):
-                layout = cast(Content, ak.to_layout(self))
-                offsets = _extract_list_offsets(layout)
-                object.__setattr__(self, "_offsets_cache", offsets)
-            return self._offsets_cache  # type: ignore[return-value]
+        if isinstance(self._parts, dict):
+            return next(iter(self._parts.values())).offsets
         return self._parts.offsets
 
     @property
@@ -269,9 +294,8 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         tuple[int | None, ...]
         """
         self._ensure_parts()
-        if self._parts is None:
-            # All fields share the ragged structure; derive from any.
-            return self[ak.fields(self)[0]].shape
+        if isinstance(self._parts, dict):
+            return next(iter(self._parts.values())).shape
         return self._parts.shape
 
     @property
@@ -298,8 +322,8 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         np.dtype[RDTYPE_co]
         """
         self._ensure_parts()
-        if self._parts is None:
-            return np.dtype([(f, self[f].dtype) for f in ak.fields(self)])  # type: ignore[return-value]
+        if isinstance(self._parts, dict):
+            return np.dtype([(f, p.data.dtype) for f, p in self._parts.items()])  # type: ignore[return-value]
         return self._parts.data.dtype
 
     @property
@@ -341,7 +365,7 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
             Zero-copy view with reinterpreted dtype.
         """
         self._ensure_parts()
-        if self._parts is None:
+        if isinstance(self._parts, dict):
             raise NotImplementedError(
                 "view is not defined on record-layout Ragged arrays; "
                 "update fields individually, e.g. rag['f'] = rag['f'].view(dtype)."
@@ -408,10 +432,11 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         bool
         """
         contiguous_offsets = self.offsets.ndim == 1
-        if isinstance(self.data, dict):
-            contiguous_data = all(d.flags.contiguous for d in self.data.values())
+        self._ensure_parts()
+        if isinstance(self._parts, dict):
+            contiguous_data = all(p.data.flags.contiguous for p in self._parts.values())
         else:
-            contiguous_data = self.data.flags.contiguous
+            contiguous_data = self._parts.data.flags.contiguous
         return contiguous_offsets and contiguous_data
 
     @property
@@ -422,12 +447,14 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         -------
         bool
         """
-        if isinstance(self.data, dict):
-            base_data = all(d.base is None for d in self.data.values())
-            data_size = next(iter(self.data.values())).size
+        self._ensure_parts()
+        if isinstance(self._parts, dict):
+            parts_list = list(self._parts.values())
+            base_data = all(p.data.base is None for p in parts_list)
+            data_size = parts_list[0].data.size
         else:
-            base_data = self.data.base is None
-            data_size = self.data.size
+            base_data = self._parts.data.base is None
+            data_size = self._parts.data.size
         return (
             base_data
             and self.is_contiguous
@@ -448,7 +475,7 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         NDArray[RDTYPE_co]
         """
         self._ensure_parts()
-        if self._parts is None:
+        if isinstance(self._parts, dict):
             raise NotImplementedError(
                 "to_numpy is not defined on record-layout Ragged arrays; "
                 "convert fields individually."
@@ -465,11 +492,17 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
                 result = type(self)(arr)
                 # For record field access, share the parent's offsets object (zero-copy).
                 self._ensure_parts()
-                if isinstance(where, str) and self._parts is None:
+                if (
+                    isinstance(where, str)
+                    and isinstance(self._parts, dict)
+                    and where in self._parts
+                ):
+                    result._ensure_parts()
+                    assert isinstance(result._parts, RagParts)
                     result._parts = RagParts(
-                        result._parts.data,  # type: ignore[reportUnknownAttribute]
-                        result._parts.shape,  # type: ignore[reportUnknownAttribute]
-                        self.offsets,
+                        result._parts.data,
+                        result._parts.shape,
+                        self._parts[where].offsets,
                     )
                 return result
             else:
@@ -495,8 +528,8 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         Self | NDArray[RDTYPE_co] | dict[str, NDArray[RDTYPE_co]]
         """
         self._ensure_parts()
-        if self._parts is None:
-            squeezed = {f: self[f].squeeze(axis) for f in ak.fields(self)}
+        if isinstance(self._parts, dict):
+            squeezed = {f: self[f].squeeze(axis) for f in self._parts}
             first = next(iter(squeezed.values()))
             if isinstance(first, np.ndarray):
                 return squeezed  # type: ignore[reportUnknownReturnType]
@@ -539,8 +572,8 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         Self
         """
         self._ensure_parts()
-        if self._parts is None:
-            reshaped = {f: self[f].reshape(*shape) for f in ak.fields(self)}
+        if isinstance(self._parts, dict):
+            reshaped = {f: self[f].reshape(*shape) for f in self._parts}
             return type(self)(ak.zip(reshaped, depth_limit=1))
         # this is correct because all reshaping operations preserve the layout i.e. raveled ordered
         if isinstance(shape[0], tuple):
