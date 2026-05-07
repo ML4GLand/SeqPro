@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from pytest_cases import parametrize_with_cases
 from seqpro.rag import OFFSET_TYPE, Ragged, lengths_to_offsets
-from seqpro.rag._array import RagParts
+from seqpro.rag._array import RagParts, is_rag_dtype
 
 
 def case_int32():
@@ -136,18 +136,18 @@ class TestRecordRagged:
         assert isinstance(rag["field0"], Ragged)
         assert isinstance(rag["field1"], Ragged)
 
-    def test_dtype_dict(self, rag: Ragged):
+    def test_dtype_structured(self, rag: Ragged):
         dt = rag.dtype
-        assert isinstance(dt, dict)
-        assert list(dt.keys()) == ["field0", "field1"]
-        assert dt["field0"] == np.int64
-        assert dt["field1"] == np.float64
+        assert isinstance(dt, np.dtype)
+        assert dt.names == ("field0", "field1")
+        assert dt["field0"] == np.dtype(np.int64)
+        assert dt["field1"] == np.dtype(np.float64)
 
     def test_dtype_field_order_preserved(self):
         r1 = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
         r2 = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))
         rag = Ragged(ak.zip({"zeta": r1, "alpha": r2}))
-        assert list(rag.dtype.keys()) == ["zeta", "alpha"]
+        assert list(rag.dtype.names) == ["zeta", "alpha"]
 
     def test_view_raises_on_record(self, rag: Ragged):
         with pytest.raises(NotImplementedError, match="record"):
@@ -216,13 +216,13 @@ class TestZip:
     def test_zip_three_fields(self):
         r1, r2, r3 = self._mk(np.int64), self._mk(np.float64), self._mk(np.int32)
         z = ak.zip({"a": r1, "b": r2, "c": r3})
-        assert list(z.dtype.keys()) == ["a", "b", "c"]
+        assert list(z.dtype.names) == ["a", "b", "c"]
         np.testing.assert_array_equal(z["c"].data, np.arange(6, dtype=np.int32))
 
     def test_zip_field_order_preserved(self):
         r1, r2 = self._mk(np.int64), self._mk(np.float64)
         z = ak.zip({"zeta": r1, "alpha": r2})
-        assert list(z.dtype.keys()) == ["zeta", "alpha"]
+        assert list(z.dtype.names) == ["zeta", "alpha"]
 
     def test_zip_offsets_shared_across_fields(self):
         r1, r2 = self._mk(np.int64), self._mk(np.float64)
@@ -240,3 +240,48 @@ class TestZip:
         z = Ragged(ak.zip({"a": r1, "b": r2}, depth_limit=1))
         assert isinstance(z, Ragged)
         np.testing.assert_array_equal(z["a"].data, data_a)
+
+
+@pytest.fixture
+def rag_record():
+    return Ragged(
+        ak.Array(
+            {
+                "field0": [[1, 2], [3], [4, 5, 6]],
+                "field1": [[1.0, 2.0], [3.0], [4.0, 5.0, 6.0]],
+            }
+        )
+    )
+
+
+def test_is_rag_dtype_record_primitive_query_returns_false(rag_record):
+    assert not is_rag_dtype(rag_record, np.int64)
+    assert not is_rag_dtype(rag_record, np.float64)
+
+
+def test_is_rag_dtype_record_matching_struct_returns_true(rag_record):
+    dt = np.dtype([("field0", np.int64), ("field1", np.float64)])
+    assert is_rag_dtype(rag_record, dt)
+
+
+def test_is_rag_dtype_record_wrong_struct_returns_false(rag_record):
+    dt_wrong_types = np.dtype([("field0", np.float32), ("field1", np.float64)])
+    dt_wrong_names = np.dtype([("x", np.int64), ("y", np.float64)])
+    assert not is_rag_dtype(rag_record, dt_wrong_types)
+    assert not is_rag_dtype(rag_record, dt_wrong_names)
+
+
+def test_typestr_scalar_dtype():
+    r = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
+    assert str(ak.type(r)) == "3 * var * Ragged[int64]"
+
+
+def test_typestr_multidim_inner():
+    data = np.zeros((6, 4), dtype=np.int32)
+    r = Ragged.from_offsets(data, (2, None, 4), np.array([0, 2, 6]))
+    assert str(ak.type(r)) == "2 * var * 4 * Ragged[int32]"
+
+
+def test_typestr_float():
+    r = Ragged.from_lengths(np.ones(6, dtype=np.float32), np.array([2, 1, 3]))
+    assert str(ak.type(r)) == "3 * var * Ragged[float32]"

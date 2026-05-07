@@ -62,7 +62,6 @@ The result is always a new [`Ragged`][seqpro.rag.Ragged] with the same offsets â
 ## Sequence data
 
 `Ragged[np.bytes_]` is SeqPro's representation of a collection of variable-length sequences.
-No padding character is needed, and SeqPro's alphabet methods work directly on ragged inputs.
 
 ### Building a sequence Ragged
 

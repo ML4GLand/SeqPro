@@ -28,8 +28,8 @@ def ohe(
 
     Returns
     -------
-    result
-        One hot encoded sequences.
+    xr.DataArray | xr.Dataset
+        One-hot encoded sequences with a new `ohe_dim` dimension of size alphabet_size.
     """
     alpha = xr.DataArray(alphabet.array, dims=ohe_dim)
 
@@ -72,8 +72,8 @@ def bin_coverage(
 
     Returns
     -------
-    result
-        DataArray or Dataset of binned coverage.
+    xr.DataArray | xr.Dataset
+        Binned coverage with `length_dim` replaced by `binned_dim`.
 
     Raises
     ------

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TypeAlias, TypeGuard, TypeVar, cast, overload
+from typing import TypeAlias, TypeVar, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import TypeIs
 
 NestedStr: TypeAlias = bytes | str | Sequence["NestedStr"]
 """A single string/bytes value or any nesting of sequences thereof."""
@@ -20,7 +21,7 @@ DTYPE = TypeVar("DTYPE", bound=np.generic)
 
 def is_dtype(
     obj: object, dtype: DTYPE | np.dtype[DTYPE] | type[DTYPE]
-) -> TypeGuard[NDArray[DTYPE]]:
+) -> TypeIs[NDArray[DTYPE]]:
     """Check if an object is a NumPy array with a dtype that is a subtype of the given dtype.
 
     Parameters
@@ -32,7 +33,7 @@ def is_dtype(
 
     Returns
     -------
-    TypeGuard[NDArray[DTYPE]]
+    TypeIs[NDArray[DTYPE]]
         True if `obj` is an ndarray whose dtype is a subtype of `dtype`.
     """
     return isinstance(obj, np.ndarray) and np.issubdtype(obj.dtype, dtype)
@@ -54,7 +55,8 @@ def cast_seqs(seqs: SeqType) -> NDArray[np.bytes_ | np.uint8]:
 
     Returns
     -------
-    result
+    NDArray[np.bytes_ | np.uint8]
+        S1 byte array, or unchanged uint8 array if input is OHE.
     """
     if isinstance(seqs, str):
         if len(seqs) == 0:

@@ -13,8 +13,8 @@ def remove_N_seqs(seqs):
 
     Returns
     -------
-    result
-        List of sequences without 'N'.
+    list[str]
+        Sequences with no 'N' characters.
     """
     return [seq for seq in seqs if "N" not in seq]
 
@@ -29,8 +29,8 @@ def remove_only_N_seqs(seqs):
 
     Returns
     -------
-    result
-        List of sequences without only 'N'.
+    list[str]
+        Sequences that are not composed entirely of 'N' characters.
     """
     return [seq for seq in seqs if not all(x == "N" for x in seq)]
 
@@ -49,8 +49,8 @@ def sanitize(seqs: StrSeqType, length_axis: int | None = None):
 
     Returns
     -------
-    result
-        Array of sanitized sequences.
+    NDArray[np.bytes_]
+        S1 byte array of sanitized sequences.
     """
     check_axes(seqs, length_axis, False)
 

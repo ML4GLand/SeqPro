@@ -17,7 +17,7 @@ def length(seqs: str | list[str]) -> NDArray[np.integer]:
 
     Returns
     -------
-    result
+    NDArray[np.integer]
         Array containing the length of each sequence.
     """
     _seqs = cast_seqs(seqs)
@@ -48,8 +48,8 @@ def gc_content(
 
     Returns
     -------
-    result
-        Returns integers if unnormalized, otherwise floats.
+    NDArray[np.integer | np.float64]
+        Integers if unnormalized, otherwise floats.
     """
     check_axes(seqs, length_axis, ohe_axis)
 
@@ -100,8 +100,8 @@ def nucleotide_content(
 
     Returns
     -------
-    result
-        Returns integers if unnormalized, otherwise floats.
+    NDArray[np.integer | np.floating]
+        Integers if unnormalized, otherwise floats.
     """
     check_axes(seqs, length_axis, False)
 
@@ -143,8 +143,8 @@ def count_kmers_seq(seq: str, k: int) -> dict:
 
     Returns
     -------
-    kmers
-        k-mers and their counts expressed in a dictionary.
+    dict
+        k-mers (str) mapped to their counts (int).
     """
     if len(seq) < k:
         raise ValueError("Length of seq must be >= k.")
@@ -176,9 +176,7 @@ def _count_kmers(
 
     Returns
     -------
-    kmers
-        Array of all possible unique k-mers.
-    counts
+    NDArray[np.unsignedinteger]
         Counts of all possible k-mers for each input sequence.
     """
     raise NotImplementedError

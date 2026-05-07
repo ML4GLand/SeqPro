@@ -30,8 +30,8 @@ def reverse_complement(
 
     Returns
     -------
-    result
-        Array of bytes (S1) or uint8 for string or OHE input, respectively.
+    NDArray[np.bytes_ | np.uint8]
+        Reverse-complemented sequences as S1 bytes or uint8 for OHE input.
     """
     return alphabet.reverse_complement(seqs, length_axis, ohe_axis)
 
@@ -122,7 +122,8 @@ def bin_coverage(
 
     Returns
     -------
-    binned_coverage
+    NDArray[np.number]
+        Coverage summed into bins of width `bin_width` along `length_axis`.
     """
     length = coverage.shape[length_axis]
     if length % bin_width != 0:
@@ -162,7 +163,7 @@ def jitter(
 
     Returns
     -------
-    result
+    tuple[NDArray, ...]
         Jittered arrays. Each will have a new length equal to length - 2*max_jitter.
 
     Raises
@@ -213,10 +214,10 @@ def _align_axes(*arrays: NDArray, axes: int | tuple[int, ...]):
 
     Returns
     -------
-    result
-        Aligned arrays.
-    result
-        Destination axes.
+    tuple[NDArray, ...]
+        Arrays with the specified axes moved to the back.
+    tuple[int, ...]
+        Destination axis indices corresponding to the moved axes.
 
     Raises
     ------
@@ -253,8 +254,8 @@ def _slice_kmers(array: NDArray, starts: NDArray, k: int):
 
     Returns
     -------
-    result
-        Sliced array.
+    NDArray
+        View of the array with each position sliced to a window of length k.
     """
     n_axes_sliced = starts.ndim
     n_axes_not_sliced = array.ndim - n_axes_sliced - 1  # - 1 for length axis
@@ -288,8 +289,8 @@ def random_seqs(
 
     Returns
     -------
-    result
-        Randomly generated sequences.
+    NDArray[np.bytes_]
+        Randomly generated sequences of shape `shape` with S1 dtype.
     """
     if isinstance(seed, int) or seed is None:
         seed = np.random.default_rng(seed)
@@ -325,8 +326,8 @@ def normalize_coverage(
 
     Returns
     -------
-    result
-        Array of normalized coverage.
+    NDArray
+        Array of normalized coverage values.
     """
     length = coverage.shape[length_axis]
 
