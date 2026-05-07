@@ -19,7 +19,9 @@ jobs:
         id: detect
         run: |
           PROJECT_VERSION=$(cz version --project)
-          LATEST_TAG=$(git tag --sort=-version:refname | head -1)
+          # Only match tags in the current format (no 'v' prefix) to avoid false
+          # positives from legacy v-prefixed tags.
+          LATEST_TAG=$(git tag --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
           if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$PROJECT_VERSION" ]; then
             echo "partial=true" >> $GITHUB_OUTPUT
             echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
@@ -38,8 +40,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -d "${{ steps.detect.outputs.tag }}"
+          NEW_VERSION="${{ steps.detect.outputs.tag }}"
           cz bump --files-only --yes
+          BUMPED_VERSION=$(cz version --project)
           git add pyproject.toml CHANGELOG.md
-          git commit -m "bump: version → ${{ steps.detect.outputs.tag }}"
+          git commit -m "bump: version $NEW_VERSION"
           git push origin main
+          git push origin "$BUMPED_VERSION"
