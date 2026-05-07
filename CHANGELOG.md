@@ -1,3 +1,41 @@
+## 0.11.0 (2026-05-07)
+
+### Feat
+
+- Ragged type string shows as `var * Ragged[dtype]`
+- remove Ragged.apply method
+- add polars-config-meta, set coordinate_system_zero_based in set_schema and bed.read()
+- add config_meta to bed.read(), export detect_schema and set_schema from bed
+- bed.to_pyr() accepts any narwhals-supported frame
+- narwhalify bed.with_len()
+- narwhalify bed.sort()
+- add set_schema
+- add detect_schema
+- add CoordSchema, _SCHEMAS, and _resolve_schema
+- add narwhals as hard dependency
+- Ragged.reshape supports record layouts
+- Ragged.squeeze supports record layouts
+- clear NotImplementedError for view/apply/to_numpy on record Ragged
+- Ragged.parts returns offsets-sharing field dict for records
+- Ragged.data returns zero-copy field dict for record layouts
+- Ragged.dtype returns field dict for record layouts
+- Ragged[np.void] record array support with zero-copy field offsets
+- support Ragged[np.void] record layout — offsets and data
+- Ragged.__init__ skips unbox() for record layouts
+
+### Fix
+
+- import TypeIs from extensions
+- Ragged dtype and typing behavior
+- detect_schema call order in set_schema, sort docstring and unique pattern
+- bed.sort() temp column name collision and null chrom handling
+- type var rename, is_rag_dtype record support, is_contiguous/is_base record fixes
+- lazy _parts init for Ragged created via ak behavior dispatch
+
+### Refactor
+
+- Ragged record dtype uses np.dtype structured dtype instead of dict
+
 ## 0.10.0 (2026-05-04)
 
 ### Feat
