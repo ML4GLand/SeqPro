@@ -26,7 +26,6 @@ from awkward.contents import (
 )
 from awkward.index import Index
 from awkward.types.listtype import ListType as _ListType
-from awkward.types.numpytype import NumpyType as _NumpyType
 from awkward.types.regulartype import RegularType as _RegularType
 from numpy.typing import NDArray
 from typing_extensions import ParamSpec, Self
@@ -86,7 +85,7 @@ def _is_record_layout(layout: Content) -> bool:
     while isinstance(node, (ListOffsetArray, ListArray, RegularArray)):
         if isinstance(node, (ListOffsetArray, ListArray)):
             has_list = True
-        node = node.content  # type: ignore[reportAttributeAccessIssue]
+        node = node.content
     return has_list and isinstance(node, RecordArray)
 
 
