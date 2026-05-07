@@ -17,11 +17,11 @@ dependencies = [
     "numpy>=1.26.0",
     "polars>=1.21.0,<2",
     "pyranges>=0.1.3,<0.2",
-    "pandera>=0.22.1",
+    "pandera>=0.31.1",
     "pandas",
     "pyarrow",
     "natsort",
-    "narwhals>=1.0",
+    "narwhals>=2.20.0",
     "setuptools>=70",                    # uv + pyranges seems to miss this
     "awkward>=2.5.0",
     "polars-config-meta[polars]>=0.3.2",

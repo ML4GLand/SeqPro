@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Union
-
 import narwhals as nw
+import polars as pl
 import polars_config_meta  # noqa: F401
 from attrs import define
+from narwhals.typing import Frame, FrameT
 
 
 @define(frozen=True)
@@ -26,29 +26,30 @@ _SCHEMAS: dict[str, CoordSchema] = {
     "gff": CoordSchema("seqname", "start", "end", zero_based=False, strand="strand"),
 }
 
-SchemaLike = Union[str, tuple, "CoordSchema"]
+SchemaLike = str | tuple[str, str, str] | tuple[str, str, str, str] | CoordSchema
 
 
 def _resolve_schema(s: SchemaLike) -> CoordSchema:
     if isinstance(s, CoordSchema):
         return s
-    if isinstance(s, str):
+    elif isinstance(s, str):
         if s not in _SCHEMAS:
             raise ValueError(
                 f"Unknown schema shorthand {s!r}. Valid shorthands: {list(_SCHEMAS)}."
             )
         return _SCHEMAS[s]
-    if isinstance(s, tuple):
-        if len(s) == 3:
-            chrom, start, end = s
-            return CoordSchema(chrom, start, end, zero_based=False)
-        if len(s) == 4:
-            chrom, start, end, strand = s
-            return CoordSchema(chrom, start, end, zero_based=False, strand=strand)
+    elif len(s) == 3:
+        chrom, start, end = s
+        return CoordSchema(chrom, start, end, zero_based=False)
+    elif len(s) == 4:
+        chrom, start, end, strand = s
+        return CoordSchema(chrom, start, end, zero_based=False, strand=strand)
+    elif isinstance(s, tuple) and len(s) not in {3, 4}:
         raise ValueError(
             f"Schema tuple must have 3 or 4 elements (chrom, start, end[, strand]), got {len(s)}."
         )
-    raise TypeError(f"Cannot resolve schema from {type(s).__name__!r}.")
+    else:
+        raise ValueError(f"Invalid schema: {s!r}")
 
 
 _HINT_MSG = (
@@ -57,8 +58,10 @@ _HINT_MSG = (
 )
 
 
-def detect_schema(df, hint: SchemaLike | None = None) -> CoordSchema:
-    cols = set(nw.from_native(df).columns)
+def detect_schema(bed: Frame, hint: SchemaLike | None = None) -> CoordSchema:
+    bed = nw.from_native(bed)
+
+    cols = set(bed.columns)
 
     if hint is not None:
         schema = _resolve_schema(hint)
@@ -94,7 +97,7 @@ def detect_schema(df, hint: SchemaLike | None = None) -> CoordSchema:
     )
 
 
-def set_schema(df, to: SchemaLike, from_: SchemaLike | None = None):
+def set_schema(bed: FrameT, to: SchemaLike, from_: SchemaLike | None = None) -> FrameT:
     """Rename coordinate columns to match a target schema.
 
     Parameters
@@ -107,13 +110,12 @@ def set_schema(df, to: SchemaLike, from_: SchemaLike | None = None):
     from_
         Source schema hint. Auto-detected if not provided.
     """
-    import polars as pl
+    bed = nw.from_native(bed)
 
-    src = detect_schema(df, hint=from_)
-    nw_df = nw.from_native(df, eager_only=True)
+    src = detect_schema(bed, hint=from_)
     tgt = _resolve_schema(to)
 
-    cols = nw_df.columns
+    cols = bed.columns
     rename_map: dict[str, str] = {}
     for src_col, tgt_col in [
         (src.chrom, tgt.chrom),
@@ -131,9 +133,9 @@ def set_schema(df, to: SchemaLike, from_: SchemaLike | None = None):
     ):
         rename_map[src.strand] = tgt.strand
 
-    result = nw.to_native(nw_df.rename(rename_map))
+    result = nw.to_native(bed.rename(rename_map))
 
     if isinstance(result, pl.DataFrame):
-        result.config_meta.set(coordinate_system_zero_based=tgt.zero_based)
+        result.config_meta.set(coordinate_system_zero_based=tgt.zero_based)  # type: ignore[attr-defined]
 
     return result

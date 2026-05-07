@@ -6,7 +6,7 @@ from typing import Literal, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from ._utils import SeqType, cast_seqs, check_axes
+from ._utils import DTYPE, SeqType, cast_seqs, check_axes
 from .alphabets._alphabets import NucleotideAlphabet
 from .seqpro import _k_shuffle
 
@@ -137,12 +137,12 @@ def bin_coverage(
 
 
 def jitter(
-    *arrays: NDArray,
+    *arrays: NDArray[DTYPE],
     max_jitter: int,
     length_axis: int,
     jitter_axes: int | tuple[int, ...],
     seed: int | np.random.Generator | None = None,
-) -> tuple[NDArray, ...]:
+) -> tuple[NDArray[DTYPE], ...]:
     """Randomly jitter data from arrays, using the same jitter across arrays.
 
     Parameters
@@ -163,7 +163,7 @@ def jitter(
 
     Returns
     -------
-    tuple[NDArray, ...]
+    tuple[NDArray[DTYPE], ...]
         Jittered arrays. Each will have a new length equal to length - 2*max_jitter.
 
     Raises

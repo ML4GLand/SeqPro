@@ -34,7 +34,6 @@ __all__ = [
 ]
 
 
-@nw.narwhalify
 def sort(bed: FrameT) -> FrameT:
     """Sort a BED-like DataFrame by chromosome, start, and end position, using the natural
     order of chromosome names e.g. 1, 2, ..., 10, ...
@@ -50,15 +49,16 @@ def sort(bed: FrameT) -> FrameT:
     FrameT
         Sorted DataFrame of the same type as the input.
     """
+    bed = nw.from_native(bed)
     order = natsorted(bed["chrom"].unique().to_list())
-    return (
+    bed = (
         bed.with_columns(_seqpro_chrom_sort_key_=nw.col("chrom").cast(nw.Enum(order)))
         .sort("_seqpro_chrom_sort_key_", "chromStart", "chromEnd")
         .drop("_seqpro_chrom_sort_key_")
     )
+    return nw.to_native(bed)
 
 
-@nw.narwhalify
 def with_len(bed: FrameT, length: int) -> FrameT:
     """Set the length of regions in a BED-like DataFrame to a fixed length by expanding or shrinking
     relative to the center (or peak) of the window. If the original region size + length is odd, the
@@ -76,6 +76,8 @@ def with_len(bed: FrameT, length: int) -> FrameT:
     FrameT
         DataFrame of the same type as the input with updated "chromStart" and "chromEnd" columns.
     """
+    bed = nw.from_native(bed)
+
     if length < 0:
         raise ValueError("Length must be non-negative.")
 
@@ -88,10 +90,11 @@ def with_len(bed: FrameT, length: int) -> FrameT:
     else:
         double_center = nw.col("chromStart") + nw.col("chromEnd")
 
-    return bed.with_columns(
+    bed = bed.with_columns(
         chromStart=(double_center - length) // 2,
         chromEnd=(double_center + length) // 2,
     )
+    return nw.to_native(bed)
 
 
 def to_pyr(bedlike) -> pr.PyRanges:
