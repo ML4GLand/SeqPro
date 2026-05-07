@@ -17,6 +17,7 @@ bench = { features = ["bench", "py313"] }
 test = "pytest tests"
 lint = "prek run --all-files --stage pre-commit"
 prek-install = "prek install -t commit-msg -t pre-commit -t pre-push"
+generate-publish = "maturin generate-ci -o .github/workflows/publish.yaml github"
 
 [dependencies]
 python = "<3.14"

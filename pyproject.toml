@@ -43,6 +43,11 @@ build-backend = "maturin"
 python-source = "python"
 features = ["pyo3/extension-module"]
 
+[tool.maturin.generate-ci.github]
+platform = ["manylinux", "musllinux", "windows", "macos"]
+pytest = true
+
+
 [tool.basedpyright]
 include = ['python/seqpro', 'tests']
 enableTypeIgnoreComments = true

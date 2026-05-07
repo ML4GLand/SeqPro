@@ -20,15 +20,22 @@ The two primary constructors are [`Ragged.from_lengths`][seqpro.rag.Ragged.from_
 ```python
 # per-position coverage for three intervals of different widths
 data = np.array([
-    0.1, 0.5, 0.3,            # interval 0 — length 3
-    0.8, 0.2,                 # interval 1 — length 2
-    0.4, 0.6, 0.9, 0.1, 0.7, # interval 2 — length 5
+    0.1,
+    0.5,
+    0.3,  # interval 0 — length 3
+    0.8,
+    0.2,  # interval 1 — length 2
+    0.4,
+    0.6,
+    0.9,
+    0.1,
+    0.7,  # interval 2 — length 5
 ])
 lengths = np.array([3, 2, 5])
 rag = Ragged.from_lengths(data, lengths)
 
-rag.shape    # (3, None) (1)
-rag.dtype    # dtype('float64')
+rag.shape  # (3, None) (1)
+rag.dtype  # dtype('float64')
 rag.lengths  # array([3, 2, 5])
 ```
 
@@ -47,11 +54,11 @@ rag[1]  # [0.8, 0.2]
 NumPy ufuncs and arithmetic operators are dispatched element-wise across the flat data:
 
 ```python
-scaled  = rag * 2.0
+scaled = rag * 2.0
 shifted = rag + 1.0
-normed  = rag / rag.data.max()
+normed = rag / rag.data.max()
 
-log1p  = np.log1p(rag)
+log1p = np.log1p(rag)
 rooted = np.sqrt(rag)
 ```
 
@@ -68,9 +75,9 @@ The result is always a new [`Ragged`][seqpro.rag.Ragged] with the same offsets �
 ```python
 cds_seqs = ["ATGAAATAA", "ATGGGG", "ATCGAT"]
 
-data    = np.array(list("".join(cds_seqs)), dtype="S1")
+data = np.array(list("".join(cds_seqs)), dtype="S1")
 lengths = np.array([len(s) for s in cds_seqs])
-cds     = Ragged.from_lengths(data, lengths)
+cds = Ragged.from_lengths(data, lengths)
 
 cds.shape  # (3, None)
 cds.dtype  # dtype('S1')
@@ -85,16 +92,17 @@ after translation with no extra bookkeeping:
 ```python
 aa = sp.AA.translate(cds)
 
-aa.shape    # (3, None)
+aa.shape  # (3, None)
 aa.lengths  # array([3, 2, 2])
 ```
 
-Pass `truncate_stop=True` to strip the trailing stop codon (and any codons after it):
+Pass `truncate_stop=True` to strip any codons after the first stop codon:
 
 ```python
-# ATGAAATAA → M K *  (stop retained but truncated inclusive)
-# ATGGGG    → M G    (no stop present — sequence returned in full)
-# ATCGAT    → I D
+# truncate_stop=False
+# ATGTAAAAA → M * K
+# truncate_stop=True
+# ATGTAAAAA → M * (stop retained but truncated inclusive)
 aa_trunc = sp.AA.translate(cds, truncate_stop=True)
 ```
 
@@ -108,7 +116,7 @@ ohe_data = np.concatenate([sp.DNA.ohe(sp.cast_seqs(s)) for s in cds_seqs])
 # ohe_data has shape (total_nucleotides, 4)
 
 cds_ohe = Ragged.from_lengths(ohe_data, lengths)
-aa_ohe  = sp.AA.translate(cds_ohe, nuc_alphabet=sp.DNA)
+aa_ohe = sp.AA.translate(cds_ohe, nuc_alphabet=sp.DNA)
 
 aa_ohe.dtype  # dtype('uint8')  — output is OHE amino acids
 ```
@@ -127,12 +135,12 @@ Use `ak.zip` on two or more [`Ragged`][seqpro.rag.Ragged] arrays of the same len
 ```python
 import awkward as ak
 
-scores = np.array([0.1, 0.5, 0.3,  0.8, 0.2,  0.4, 0.6, 0.9])
-flags  = np.array([1,   0,   1,    1,   0,    0,   1,   1  ], dtype=np.int8)
+scores = np.array([0.1, 0.5, 0.3, 0.8, 0.2, 0.4, 0.6, 0.9])
+flags = np.array([1, 0, 1, 1, 0, 0, 1, 1], dtype=np.int8)
 lengths = np.array([3, 2, 3])
 
 r_scores = Ragged.from_lengths(scores, lengths)
-r_flags  = Ragged.from_lengths(flags,  lengths)
+r_flags = Ragged.from_lengths(flags, lengths)
 
 rec = ak.zip({"score": r_scores, "flag": r_flags})
 # ak.zip returns a Ragged automatically when inputs are Ragged
@@ -141,7 +149,7 @@ rec = ak.zip({"score": r_scores, "flag": r_flags})
 ### Inspecting fields
 
 ```python
-rec.shape    # (3, None)
+rec.shape  # (3, None)
 rec.lengths  # array([3, 2, 3])
 
 rec.dtype
@@ -154,8 +162,8 @@ Fields are accessed by key or attribute. Both paths are zero-copy — the return
 shares the parent's [`offsets`][seqpro.rag.Ragged.offsets] array:
 
 ```python
-rec["score"]   # Ragged[float64]  — key access
-rec.score      # same, attribute-style
+rec["score"]  # Ragged[float64]  — key access
+rec.score  # same, attribute-style
 
 # all fields share exactly the same offsets object
 assert rec["score"].offsets is rec["flag"].offsets
@@ -168,7 +176,7 @@ assert rec["score"].offsets is rec["flag"].offsets
 ```python
 d = rec.data
 d["score"]  # array([0.1, 0.5, 0.3, 0.8, 0.2, 0.4, 0.6, 0.9])
-d["flag"]   # array([1, 0, 1, 1, 0, 0, 1, 1], dtype=int8)
+d["flag"]  # array([1, 0, 1, 1, 0, 0, 1, 1], dtype=int8)
 ```
 
 For per-field operations, access the field first, then use ufuncs:
