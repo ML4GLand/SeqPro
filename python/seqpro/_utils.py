@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TypeAlias, TypeIs, TypeVar, cast, overload
+from typing import TypeAlias, TypeVar, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import TypeIs
 
 NestedStr: TypeAlias = bytes | str | Sequence["NestedStr"]
 """A single string/bytes value or any nesting of sequences thereof."""

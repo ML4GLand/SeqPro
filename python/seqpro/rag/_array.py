@@ -1,16 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Generic,
-    Literal,
-    TypeIs,
-    TypeVar,
-    cast,
-    overload,
-)
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
 
 import awkward as ak
 import numpy as np
@@ -28,7 +19,7 @@ from awkward.index import Index
 from awkward.types.listtype import ListType as _ListType
 from awkward.types.regulartype import RegularType as _RegularType
 from numpy.typing import NDArray
-from typing_extensions import ParamSpec, Self
+from typing_extensions import ParamSpec, Self, TypeIs
 
 from ._types import ak_dtypes
 from ._utils import OFFSET_TYPE, lengths_to_offsets
