@@ -25,11 +25,28 @@ from awkward.contents import (
     RegularArray,
 )
 from awkward.index import Index
+from awkward.types.listtype import ListType as _ListType
+from awkward.types.numpytype import NumpyType as _NumpyType
+from awkward.types.regulartype import RegularType as _RegularType
 from numpy.typing import NDArray
 from typing_extensions import ParamSpec, Self
 
 from ._types import ak_dtypes
 from ._utils import OFFSET_TYPE, lengths_to_offsets
+
+# Patch ListType._get_typestr to support callable __typestr__ values so that
+# the Ragged type string can be computed dynamically from the content type.
+_orig_list_get_typestr = _ListType._get_typestr
+
+
+def _callable_list_get_typestr(self, behavior):
+    typestr = _orig_list_get_typestr(self, behavior)
+    if callable(typestr):
+        return typestr(self._content, behavior)
+    return typestr
+
+
+_ListType._get_typestr = _callable_list_get_typestr  # type: ignore[method-assign]
 
 DTYPE_co = TypeVar("DTYPE_co", bound=ak_dtypes | np.void, covariant=True)
 RDTYPE_co = TypeVar("RDTYPE_co", bound=ak_dtypes | np.void, covariant=True)
@@ -619,6 +636,22 @@ def apply_ufunc(
 
 ak.behavior["*", Ragged.__name__] = Ragged
 ak.behavior[np.ufunc, Ragged.__name__] = apply_ufunc
+
+
+def _ragged_typestr(content_type, behavior):
+    # Walk RegularType wrappers to collect fixed dims, then wrap the innermost
+    # scalar type: e.g. RegularType(4, NumpyType("int32")) → "var * 4 * Ragged[int32]"
+    dims = []
+    t = content_type
+    while isinstance(t, _RegularType):
+        dims.append(str(t.size))
+        t = t.content
+    inner = "".join(t._str("", True, behavior))
+    prefix = "".join(f"{d} * " for d in dims)
+    return f"var * {prefix}Ragged[{inner}]"
+
+
+ak.behavior["__typestr__", Ragged.__name__] = _ragged_typestr
 
 
 def _n_var(arr: ak.Array) -> int:

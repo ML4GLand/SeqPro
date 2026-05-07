@@ -269,3 +269,19 @@ def test_is_rag_dtype_record_wrong_struct_returns_false(rag_record):
     dt_wrong_names = np.dtype([("x", np.int64), ("y", np.float64)])
     assert not is_rag_dtype(rag_record, dt_wrong_types)
     assert not is_rag_dtype(rag_record, dt_wrong_names)
+
+
+def test_typestr_scalar_dtype():
+    r = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
+    assert str(ak.type(r)) == "3 * var * Ragged[int64]"
+
+
+def test_typestr_multidim_inner():
+    data = np.zeros((6, 4), dtype=np.int32)
+    r = Ragged.from_offsets(data, (2, None, 4), np.array([0, 2, 6]))
+    assert str(ak.type(r)) == "2 * var * 4 * Ragged[int32]"
+
+
+def test_typestr_float():
+    r = Ragged.from_lengths(np.ones(6, dtype=np.float32), np.array([2, 1, 3]))
+    assert str(ak.type(r)) == "3 * var * Ragged[float32]"
