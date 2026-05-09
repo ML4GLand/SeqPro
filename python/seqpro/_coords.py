@@ -4,7 +4,7 @@ import narwhals as nw
 import polars as pl
 import polars_config_meta  # noqa: F401
 from attrs import define
-from narwhals.typing import Frame, FrameT
+from narwhals.typing import IntoFrame, IntoFrameT
 
 
 @define(frozen=True)
@@ -58,7 +58,7 @@ _HINT_MSG = (
 )
 
 
-def detect_schema(bed: Frame, hint: SchemaLike | None = None) -> CoordSchema:
+def detect_schema(bed: IntoFrame, hint: SchemaLike | None = None) -> CoordSchema:
     bed = nw.from_native(bed)
 
     cols = set(bed.columns)
@@ -97,7 +97,9 @@ def detect_schema(bed: Frame, hint: SchemaLike | None = None) -> CoordSchema:
     )
 
 
-def set_schema(bed: FrameT, to: SchemaLike, from_: SchemaLike | None = None) -> FrameT:
+def set_schema(
+    bed: IntoFrameT, to: SchemaLike, from_: SchemaLike | None = None
+) -> IntoFrameT:
     """Rename coordinate columns to match a target schema.
 
     Parameters
