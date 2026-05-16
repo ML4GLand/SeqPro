@@ -7,21 +7,26 @@ from ._utils import SeqType, cast_seqs, check_axes
 from .alphabets._alphabets import NucleotideAlphabet
 
 
-def length(seqs: str | list[str]) -> NDArray[np.integer]:
+def length(seqs: SeqType, length_axis: int | None = None) -> NDArray[np.integer]:
     """Calculate the length of each sequence.
 
     Parameters
     ----------
     seqs
-        List of sequences.
+        Sequences. For arrays, ``length_axis`` selects which axis encodes sequence
+        length; defaults to the last axis.
+    length_axis
+        Axis to count non-empty characters along. Defaults to the last axis.
 
     Returns
     -------
     NDArray[np.integer]
-        Array containing the length of each sequence.
+        Array containing the length of each sequence; ``length_axis`` is removed.
     """
     _seqs = cast_seqs(seqs)
-    return (_seqs != b"").sum(-1)
+    if length_axis is None:
+        length_axis = -1
+    return (_seqs != b"").sum(length_axis)
 
 
 def gc_content(

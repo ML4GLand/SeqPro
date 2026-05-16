@@ -1,11 +1,19 @@
-from typing import Literal, cast
+from typing import Literal, cast, overload
 
+import awkward as ak
 import numpy as np
 from numpy.typing import NDArray
 
-from ._numba import gufunc_pad_both, gufunc_pad_left, gufunc_tokenize
+from ._numba import (
+    gufunc_ohe,
+    gufunc_ohe_char_idx,
+    gufunc_pad_both,
+    gufunc_pad_left,
+    gufunc_tokenize,
+)
 from ._utils import SeqType, StrSeqType, array_slice, cast_seqs, check_axes
 from .alphabets._alphabets import AminoAlphabet, NucleotideAlphabet
+from .rag import Ragged
 
 
 def pad_seqs(
@@ -51,6 +59,8 @@ def pad_seqs(
 
     if length_axis is None:
         length_axis = seqs.ndim - 1
+    elif length_axis < 0:
+        length_axis = seqs.ndim + length_axis
 
     if string_input:
         if pad_value is None:
@@ -104,106 +114,209 @@ def pad_seqs(
     return seqs
 
 
+@overload
 def ohe(
-    seqs: StrSeqType, alphabet: NucleotideAlphabet | AminoAlphabet
-) -> NDArray[np.uint8]:
-    """One hot encode a nucleotide sequence.
+    seqs: StrSeqType, alphabet: "NucleotideAlphabet | AminoAlphabet"
+) -> NDArray[np.uint8]: ...
+@overload
+def ohe(
+    seqs: "Ragged[np.bytes_]", alphabet: "NucleotideAlphabet | AminoAlphabet"
+) -> "Ragged[np.uint8]": ...
+def ohe(
+    seqs: "StrSeqType | Ragged[np.bytes_]",
+    alphabet: "NucleotideAlphabet | AminoAlphabet",
+) -> "NDArray[np.uint8] | Ragged[np.uint8]":
+    """One hot encode sequences against an alphabet.
 
     Parameters
     ----------
     seqs
+        Sequences to encode. Ragged input must have dtype np.bytes_ (S1).
     alphabet
 
     Returns
     -------
-    NDArray[np.uint8]
-        One-hot encoded sequences with shape (..., length, alphabet_size).
+    NDArray[np.uint8] | Ragged[np.uint8]
+        One-hot encoded sequences. Dense output has shape (..., length, alphabet_size).
+        Ragged output has shape (n, ~L, A).
     """
-    return alphabet.ohe(seqs)
+    arr = (
+        alphabet.array
+        if isinstance(alphabet, NucleotideAlphabet)
+        else alphabet.aa_array
+    )
+
+    if isinstance(seqs, Ragged):
+        seqs = Ragged(ak.to_packed(seqs))
+        n = len(seqs.lengths.ravel())
+        A = arr.shape[0]
+        trailing = seqs.data.shape[1:]
+        flat = gufunc_ohe(seqs.data.view(np.uint8), arr.view(np.uint8))
+        # gufunc appends A last: (..., *trailing, A) → move A to axis 1
+        if trailing:
+            flat = np.moveaxis(flat, -1, 1)
+        return Ragged.from_offsets(flat, (n, None, A, *trailing), seqs.offsets)
+
+    _seqs = cast_seqs(seqs)
+    return gufunc_ohe(_seqs.view(np.uint8), arr.view(np.uint8))
 
 
+@overload
 def decode_ohe(
     seqs: NDArray[np.uint8],
     ohe_axis: int,
-    alphabet: NucleotideAlphabet | AminoAlphabet,
+    alphabet: "NucleotideAlphabet | AminoAlphabet",
     unknown_char: str = "N",
-) -> NDArray[np.bytes_]:
+) -> NDArray[np.bytes_]: ...
+@overload
+def decode_ohe(
+    seqs: "Ragged[np.uint8]",
+    ohe_axis: int,
+    alphabet: "NucleotideAlphabet | AminoAlphabet",
+    unknown_char: str = "N",
+) -> "Ragged[np.bytes_]": ...
+def decode_ohe(
+    seqs: "NDArray[np.uint8] | Ragged[np.uint8]",
+    ohe_axis: int,
+    alphabet: "NucleotideAlphabet | AminoAlphabet",
+    unknown_char: str = "N",
+) -> "NDArray[np.bytes_] | Ragged[np.bytes_]":
     """Convert an OHE array to an S1 byte array.
 
     Parameters
     ----------
     seqs
+        OHE array. Ragged input must have shape (n, ~L, A, ...) as produced by ohe().
     ohe_axis
+        Axis of the one-hot dimension. Ignored for Ragged input (always axis 1 of flat data).
     alphabet
     unknown_char
         Single character to use for unknown values, by default "N"
 
     Returns
     -------
-    NDArray[np.bytes_]
-        S1 byte array of decoded characters.
+    NDArray[np.bytes_] | Ragged[np.bytes_]
+        S1 byte array of decoded characters; ohe_axis is removed from the shape.
     """
-    return alphabet.decode_ohe(seqs=seqs, ohe_axis=ohe_axis, unknown_char=unknown_char)
+    arr = (
+        alphabet.array
+        if isinstance(alphabet, NucleotideAlphabet)
+        else alphabet.aa_array
+    )
+    _alphabet = np.concatenate([arr, [unknown_char.encode("ascii")]])
+
+    if isinstance(seqs, Ragged):
+        seqs = Ragged(ak.to_packed(seqs))
+        n = len(seqs.lengths.ravel())
+        # A is always at axis 1 in flat data produced by ohe()
+        trailing = seqs.data.shape[2:]
+        idx = gufunc_ohe_char_idx(seqs.data, axis=1)  # type: ignore
+        flat = _alphabet[idx]
+        return Ragged.from_offsets(flat, (n, None, *trailing), seqs.offsets)
+
+    idx = gufunc_ohe_char_idx(seqs, axis=ohe_axis)  # type: ignore
+    ohe_axis_idx = seqs.ndim + ohe_axis if ohe_axis < 0 else ohe_axis
+    shape = (*seqs.shape[:ohe_axis_idx], *seqs.shape[ohe_axis_idx + 1 :])
+    return _alphabet[idx].reshape(shape)
 
 
+@overload
 def tokenize(
     seqs: StrSeqType,
     token_map: dict[str, int],
     unknown_token: int,
     out: NDArray[np.int32] | None = None,
-) -> NDArray[np.int32]:
-    """Tokenize nucleotides. Replaces each nucleotide with its corresponding token, if provided. Otherwise, uses each
-    nucleotide's index in the alphabet. Nucleotides not in the alphabet or list of tokens are replaced with -1.
+) -> NDArray[np.int32]: ...
+@overload
+def tokenize(
+    seqs: Ragged[np.bytes_],
+    token_map: dict[str, int],
+    unknown_token: int,
+    out: None = None,
+) -> Ragged[np.int32]: ...
+def tokenize(
+    seqs: StrSeqType | Ragged[np.bytes_],
+    token_map: dict[str, int],
+    unknown_token: int,
+    out: NDArray[np.int32] | None = None,
+) -> NDArray[np.int32] | Ragged[np.int32]:
+    """Tokenize sequences. Maps each character to its integer token.
+    Characters absent from token_map are replaced with unknown_token.
 
     Parameters
     ----------
     seqs
-        Sequences to tokenize.
+        Sequences to tokenize. Ragged input must have dtype np.bytes_ (S1).
     token_map
-        Mapping of nucleotides to tokens.
+        Mapping of characters to tokens.
     unknown_token
         Token to use for unknown values.
     out
-        Output array to store the result in. If not provided, a new array is created.
+        Output array to store the result in. Only valid for non-Ragged input.
 
     Returns
     -------
-    NDArray[np.int32]
-        Integer token IDs with the same shape as the input sequences.
+    NDArray[np.int32] | Ragged[np.int32]
+        Integer token IDs with the same shape/layout as the input.
     """
-    seqs = cast_seqs(seqs)
     source = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
     target = np.array(list(token_map.values()), dtype=np.int32)
     _unknown_token = np.int32(unknown_token)
-    return gufunc_tokenize(seqs.view(np.uint8), source, target, _unknown_token, out)
+
+    if isinstance(seqs, Ragged):
+        seqs = Ragged(ak.to_packed(seqs))
+        n = len(seqs.lengths.ravel())
+        trailing = seqs.data.shape[1:]
+        flat = gufunc_tokenize(seqs.data.view(np.uint8), source, target, _unknown_token)
+        return Ragged.from_offsets(flat, (n, None, *trailing), seqs.offsets)
+
+    _seqs = cast_seqs(seqs)
+    return gufunc_tokenize(_seqs.view(np.uint8), source, target, _unknown_token, out)
 
 
+@overload
 def decode_tokens(
     seqs: NDArray[np.int32],
     token_map: dict[str, int],
     unknown_char: str = "N",
-) -> NDArray[np.bytes_]:
-    """Untokenize nucleotides. Replaces each token/index with its corresponding
-    nucleotide in the alphabet.
-
+) -> NDArray[np.bytes_]: ...
+@overload
+def decode_tokens(
+    seqs: Ragged[np.int32],
+    token_map: dict[str, int],
+    unknown_char: str = "N",
+) -> Ragged[np.bytes_]: ...
+def decode_tokens(
+    seqs: NDArray[np.int32] | Ragged[np.int32],
+    token_map: dict[str, int],
+    unknown_char: str = "N",
+) -> NDArray[np.bytes_] | Ragged[np.bytes_]:
+    """Untokenize sequences. Maps each integer token back to its character.
+    Tokens absent from token_map are replaced with unknown_char.
 
     Parameters
     ----------
-    ids
-    alphabet
-    tokens
-        List of tokens to use for each nucleotide, by default None
+    seqs
+        Token ID array. Ragged input must have dtype np.int32.
+    token_map
+        Mapping of characters to tokens (same map used for tokenization).
     unknown_char
-        Character to replace unknown tokens with, by default 'N'
-
+        Character to replace unknown tokens with, by default 'N'.
 
     Returns
     -------
-    NDArray[np.bytes_]
-        S1 byte array of decoded characters with the same shape as the input.
+    NDArray[np.bytes_] | Ragged[np.bytes_]
+        S1 byte array with the same shape/layout as the input.
     """
     target = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
     source = np.array(list(token_map.values()), dtype=np.int32)
     _unk_char = np.uint8(ord(unknown_char))
-    _seqs = gufunc_tokenize(seqs, source, target, _unk_char).view("S1")
-    return _seqs
+
+    if isinstance(seqs, Ragged):
+        seqs = Ragged(ak.to_packed(seqs))
+        n = len(seqs.lengths.ravel())
+        trailing = seqs.data.shape[1:]
+        flat = gufunc_tokenize(seqs.data, source, target, _unk_char).view("S1")
+        return Ragged.from_offsets(flat, (n, None, *trailing), seqs.offsets)
+
+    return gufunc_tokenize(seqs, source, target, _unk_char).view("S1")
