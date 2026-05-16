@@ -59,6 +59,8 @@ def pad_seqs(
 
     if length_axis is None:
         length_axis = seqs.ndim - 1
+    elif length_axis < 0:
+        length_axis = seqs.ndim + length_axis
 
     if string_input:
         if pad_value is None:
@@ -264,8 +266,9 @@ def tokenize(
     if isinstance(seqs, Ragged):
         seqs = Ragged(ak.to_packed(seqs))
         n = len(seqs.lengths.ravel())
+        trailing = seqs.data.shape[1:]
         flat = gufunc_tokenize(seqs.data.view(np.uint8), source, target, _unknown_token)
-        return Ragged.from_offsets(flat, (n, None), seqs.offsets)
+        return Ragged.from_offsets(flat, (n, None, *trailing), seqs.offsets)
 
     _seqs = cast_seqs(seqs)
     return gufunc_tokenize(_seqs.view(np.uint8), source, target, _unknown_token, out)
@@ -312,7 +315,8 @@ def decode_tokens(
     if isinstance(seqs, Ragged):
         seqs = Ragged(ak.to_packed(seqs))
         n = len(seqs.lengths.ravel())
+        trailing = seqs.data.shape[1:]
         flat = gufunc_tokenize(seqs.data, source, target, _unk_char).view("S1")
-        return Ragged.from_offsets(flat, (n, None), seqs.offsets)
+        return Ragged.from_offsets(flat, (n, None, *trailing), seqs.offsets)
 
     return gufunc_tokenize(seqs, source, target, _unk_char).view("S1")

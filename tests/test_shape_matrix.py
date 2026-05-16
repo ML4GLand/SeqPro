@@ -363,9 +363,7 @@ def test_length_shape_matrix(pattern):
     baseline_out = sp.length(baseline)
 
     patterned, new_la = add_leading_trailing_dense(baseline, pattern, length_axis=-1)
-    # sp.length does NOT take a length_axis arg — call without it and expect
-    # mostly-wrong results / errors for patterns other than baseline.
-    patterned_out = sp.length(patterned)
+    patterned_out = sp.length(patterned, length_axis=new_la)
 
     assert_broadcast_equal_dense(patterned_out, baseline_out, pattern)
 

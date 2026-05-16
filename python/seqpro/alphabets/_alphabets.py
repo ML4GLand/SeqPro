@@ -13,7 +13,7 @@ from .._numba import (
     gufunc_translate,
     ufunc_comp_dna,
 )
-from .._utils import SeqType, StrSeqType, cast_seqs, check_axes, is_dtype
+from .._utils import SeqType, StrSeqType, array_slice, cast_seqs, check_axes, is_dtype
 from ..rag import Ragged, is_rag_dtype
 
 
@@ -323,21 +323,23 @@ class AminoAlphabet:
             codon_size = self.codon_array.shape[-1]
             if length_axis is None:
                 length_axis = -1
+            if length_axis < 0:
+                length_axis = seqs.ndim + length_axis
             if seqs.shape[length_axis] % codon_size != 0:
                 raise ValueError(
                     "Sequence length is not evenly divisible by codon length."
                 )
-            if length_axis < 0:
-                length_axis = seqs.ndim + length_axis
+            # sliding_window_view appends the window axis at the end, so the
+            # original length_axis position now holds the stride-able codon axis.
             codons = np.lib.stride_tricks.sliding_window_view(
-                seqs, window_shape=codon_size, axis=-1
-            )[..., ::codon_size, :]
-            codon_axis = length_axis + 1
+                seqs, window_shape=codon_size, axis=length_axis
+            )
+            codons = array_slice(codons, length_axis, slice(None, None, codon_size))
             return gufunc_translate(
                 codons.view(np.uint8),
                 self.codon_array.view(np.uint8),
                 self.aa_array.view(np.uint8),
-                axes=[codon_axis, (-2, -1), (-1), ()],  # type: ignore
+                axes=[-1, (-2, -1), (-1), ()],  # type: ignore
             ).view("S1")
 
         # --- Ragged path ---
@@ -369,19 +371,24 @@ class AminoAlphabet:
 
         # Translate the entire flat buffer in one vectorized call. This is valid because
         # translation is invariant to splitting/concatenation when all lengths % codon_size == 0.
+        # nuc_bytes_flat shape: (total, *trailing) — translation broadcasts over trailing axes.
         total = nuc_bytes_flat.shape[0]
+        trailing = nuc_bytes_flat.shape[1:]
         if total > 0:
             codons = np.lib.stride_tricks.sliding_window_view(
                 nuc_bytes_flat, codon_size, axis=0
-            )[::codon_size, :]  # (total // codon_size, codon_size)
+            )
+            # sliding_window_view appends window axis at end → slice axis 0 by codon_size
+            codons = codons[::codon_size]
+            # codons shape: (num_codons, *trailing, codon_size); codon axis is last
             translated_flat: NDArray[np.bytes_] = gufunc_translate(
                 codons.view(np.uint8),
                 self.codon_array.view(np.uint8),
                 self.aa_array.view(np.uint8),
-                axes=[1, (-2, -1), (-1), ()],  # type: ignore
-            ).view("S1")  # (total // codon_size,)
+                axes=[-1, (-2, -1), (-1), ()],  # type: ignore
+            ).view("S1")  # (num_codons, *trailing)
         else:
-            translated_flat = np.empty(0, dtype="S1")
+            translated_flat = np.empty((0, *trailing), dtype="S1")
 
         new_offsets = offsets // codon_size  # (n+1,) position-based in translated_flat
 
@@ -401,11 +408,15 @@ class AminoAlphabet:
             out_offsets = new_offsets  # 1D — ListOffsetArray
 
         if is_ohe:
+            # OHE input: trailing was the OHE alphabet axis (consumed by decode_ohe),
+            # so translated_flat has no trailing — re-encode and reshape.
             n_aa = len(self.aa_array)
-            ohe_flat = self.ohe(translated_flat).flatten()
+            ohe_flat = self.ohe(translated_flat).reshape(-1, n_aa)
             return Ragged.from_offsets(ohe_flat, (n, None, n_aa), out_offsets)
         else:
-            return Ragged.from_offsets(translated_flat, (n, None), out_offsets)
+            return Ragged.from_offsets(
+                translated_flat, (n, None, *trailing), out_offsets
+            )
 
     def ohe(self, seqs: StrSeqType) -> NDArray[np.uint8]:
         """One hot encode an amino acid sequence."""

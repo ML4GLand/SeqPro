@@ -93,10 +93,12 @@ def check_axes(
             "Need a length axis to process an ndarray with itemsize == 1 (S1, u1)."
         )
 
-    # length_axis != ohe_axis
+    # length_axis != ohe_axis (exclude bool — used as "skip this check" sentinel)
     if (
         isinstance(length_axis, int)
+        and not isinstance(length_axis, bool)
         and isinstance(ohe_axis, int)
+        and not isinstance(ohe_axis, bool)
         and (length_axis == ohe_axis)
     ):
         raise ValueError("Length and OHE axis must be different.")
