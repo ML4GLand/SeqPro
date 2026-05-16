@@ -10,8 +10,6 @@ from numpy.typing import NDArray
 from .._numba import (
     _nb_find_stop_ends,
     gufunc_complement_bytes,
-    gufunc_ohe,
-    gufunc_ohe_char_idx,
     gufunc_translate,
     ufunc_comp_dna,
 )
@@ -74,20 +72,10 @@ class NucleotideAlphabet:
                 raise ValueError("Reverse of alphabet does not yield the complement.")
 
     def ohe(self, seqs: StrSeqType) -> NDArray[np.uint8]:
-        """One hot encode a nucleotide sequence.
+        """One hot encode a nucleotide sequence."""
+        from .._encoders import ohe as _ohe
 
-        Parameters
-        ----------
-        seqs
-
-        Returns
-        -------
-        NDArray[np.uint8]
-            One-hot encoded sequences; last axis is alphabet size, second-to-last is
-            sequence length.
-        """
-        _seqs = cast_seqs(seqs)
-        return gufunc_ohe(_seqs.view(np.uint8), self.array.view(np.uint8))
+        return _ohe(seqs, self)
 
     def decode_ohe(
         self,
@@ -95,32 +83,52 @@ class NucleotideAlphabet:
         ohe_axis: int,
         unknown_char: str = "N",
     ) -> NDArray[np.bytes_]:
-        """Convert an OHE array to an S1 byte array.
+        """Convert an OHE array to an S1 byte array."""
+        from .._encoders import decode_ohe as _decode_ohe
 
-        Parameters
-        ----------
-        seqs
-        ohe_axis
-        unknown_char
-            Single character to use for unknown values, by default "N"
+        return _decode_ohe(seqs, ohe_axis, self, unknown_char)
 
-        Returns
-        -------
-        NDArray[np.bytes_]
-            S1 byte array of decoded characters; ohe_axis is removed from the shape.
-        """
-        idx = gufunc_ohe_char_idx(seqs, axis=ohe_axis)  # type: ignore
+    @overload
+    def tokenize(
+        self,
+        seqs: StrSeqType,
+        token_map: dict[str, int],
+        unknown_token: int,
+        out: NDArray[np.int32] | None = None,
+    ) -> NDArray[np.int32]: ...
+    @overload
+    def tokenize(
+        self,
+        seqs: Ragged[np.bytes_],
+        token_map: dict[str, int],
+        unknown_token: int,
+        out: None = None,
+    ) -> Ragged[np.int32]: ...
+    def tokenize(self, seqs, token_map, unknown_token, out=None):
+        """Tokenize sequences using the given token map. Delegates to sp.tokenize."""
+        from .._encoders import tokenize as _tokenize
 
-        if ohe_axis < 0:
-            ohe_axis_idx = seqs.ndim + ohe_axis
-        else:
-            ohe_axis_idx = ohe_axis
+        return _tokenize(seqs, token_map, unknown_token, out)
 
-        shape = *seqs.shape[:ohe_axis_idx], *seqs.shape[ohe_axis_idx + 1 :]
+    @overload
+    def decode_tokens(
+        self,
+        seqs: NDArray[np.int32],
+        token_map: dict[str, int],
+        unknown_char: str = "N",
+    ) -> NDArray[np.bytes_]: ...
+    @overload
+    def decode_tokens(
+        self,
+        seqs: Ragged[np.int32],
+        token_map: dict[str, int],
+        unknown_char: str = "N",
+    ) -> Ragged[np.bytes_]: ...
+    def decode_tokens(self, seqs, token_map, unknown_char="N"):
+        """Decode token IDs back to sequences. Delegates to sp.decode_tokens."""
+        from .._encoders import decode_tokens as _decode_tokens
 
-        _alphabet = np.concatenate([self.array, [unknown_char.encode("ascii")]])
-
-        return _alphabet[idx].reshape(shape)
+        return _decode_tokens(seqs, token_map, unknown_char)
 
     def _complement_bytes(
         self, byte_arr: NDArray[np.bytes_], out: NDArray[np.bytes_] | None = None
@@ -384,7 +392,10 @@ class AminoAlphabet:
                 translated_flat.view(np.uint8), starts, full_ends, np.uint8(ord("*"))
             )
             out_offsets = np.stack(
-                [starts, ends]
+                [
+                    starts,
+                    ends,
+                ]
             )  # (2, n) — ListArray (non-contiguous view)
         else:
             out_offsets = new_offsets  # 1D — ListOffsetArray
@@ -397,20 +408,10 @@ class AminoAlphabet:
             return Ragged.from_offsets(translated_flat, (n, None), out_offsets)
 
     def ohe(self, seqs: StrSeqType) -> NDArray[np.uint8]:
-        """One hot encode an amino acid sequence.
+        """One hot encode an amino acid sequence."""
+        from .._encoders import ohe as _ohe
 
-        Parameters
-        ----------
-        seqs
-
-        Returns
-        -------
-        NDArray[np.uint8]
-            One-hot encoded sequences; last axis is alphabet size, second-to-last is
-            sequence length.
-        """
-        _seqs = cast_seqs(seqs)
-        return gufunc_ohe(_seqs.view(np.uint8), self.aa_array.view(np.uint8))
+        return _ohe(seqs, self)
 
     def decode_ohe(
         self,
@@ -418,32 +419,10 @@ class AminoAlphabet:
         ohe_axis: int,
         unknown_char: str = "X",
     ) -> NDArray[np.bytes_]:
-        """Convert an OHE array to an S1 byte array.
+        """Convert an OHE array to an S1 byte array."""
+        from .._encoders import decode_ohe as _decode_ohe
 
-        Parameters
-        ----------
-        seqs
-        ohe_axis
-        unknown_char
-            Single character to use for unknown values, by default "X"
-
-        Returns
-        -------
-        NDArray[np.bytes_]
-            S1 byte array of decoded characters; ohe_axis is removed from the shape.
-        """
-        idx = gufunc_ohe_char_idx(seqs, axis=ohe_axis)  # type: ignore
-
-        if ohe_axis < 0:
-            ohe_axis_idx = seqs.ndim + ohe_axis
-        else:
-            ohe_axis_idx = ohe_axis
-
-        shape = *seqs.shape[:ohe_axis_idx], *seqs.shape[ohe_axis_idx + 1 :]
-
-        _alphabet = np.concatenate([self.aa_array, [unknown_char.encode("ascii")]])
-
-        return _alphabet[idx].reshape(shape)
+        return _decode_ohe(seqs, ohe_axis, self, unknown_char)
 
 
 DNA = NucleotideAlphabet("ACGT", "TGCA")
