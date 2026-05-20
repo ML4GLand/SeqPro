@@ -17,6 +17,48 @@ fn lut_size(alphabet_size: usize, k_minus_1: u32) -> Option<u32> {
     if n <= MAX_LUT { Some(n) } else { None }
 }
 
+/// Per-thread reusable storage for one row of k-shuffle work.
+///
+/// Each rayon worker owns one of these (allocated via `map_init` in
+/// `k_shuffle`) and reuses it across rows. The LUT uses a sparse-reset
+/// strategy: only positions written this row are restored to `u32::MAX`.
+pub(crate) struct ShuffleBuffers {
+    /// Length `MAX_LUT`. Each entry is either `u32::MAX` (unseen) or the
+    /// vertex id of the (k-1)-mer with this encoded value. The whole
+    /// allocation is initialized to `u32::MAX` exactly once, in `new`.
+    lut: Box<[u32]>,
+    /// Encoded (k-1)-mer values that were written into `lut` this row.
+    /// Used by `reset_lut` to undo only those writes.
+    lut_written: Vec<u32>,
+    /// Vertex id of each (k-1)-mer window, in window order.
+    codes: Vec<u32>,
+    /// Vertex storage for one row.
+    vertices: Vec<Vertex>,
+    /// Adjacency-list storage for one row.
+    indices: Vec<u32>,
+}
+
+impl ShuffleBuffers {
+    pub(crate) fn new() -> Self {
+        Self {
+            lut: vec![u32::MAX; MAX_LUT as usize].into_boxed_slice(),
+            lut_written: Vec::new(),
+            codes: Vec::new(),
+            vertices: Vec::new(),
+            indices: Vec::new(),
+        }
+    }
+
+    /// Restore `u32::MAX` at every position previously written.
+    /// O(written count), not O(MAX_LUT).
+    fn reset_lut(&mut self) {
+        for &c in &self.lut_written {
+            self.lut[c as usize] = u32::MAX;
+        }
+        self.lut_written.clear();
+    }
+}
+
 /// Maps (k-1)-mers in a sequence to dense vertex ids 0..n_vertices.
 pub(crate) trait KmerIndex {
     /// Lookup by integer code (fast path) OR byte slice (slow path).
@@ -513,6 +555,29 @@ mod test {
         );
     }
 
+#[test]
+fn shuffle_buffers_sparse_reset_only_touches_written_positions() {
+    let mut buf = ShuffleBuffers::new();
+    // Initially all u32::MAX.
+    assert!(buf.lut.iter().all(|&x| x == u32::MAX));
+    // Write a few positions.
+    buf.lut[3] = 7;
+    buf.lut[100] = 9;
+    buf.lut_written.extend_from_slice(&[3, 100]);
+    // Sparse reset.
+    buf.reset_lut();
+    // Restored at those positions.
+    assert_eq!(buf.lut[3], u32::MAX);
+    assert_eq!(buf.lut[100], u32::MAX);
+    // lut_written cleared.
+    assert!(buf.lut_written.is_empty());
+    // Second reset is a no-op (regression check on a missing clear).
+    buf.lut[42] = 5;
+    buf.lut_written.push(42);
+    buf.reset_lut();
+    assert_eq!(buf.lut[42], u32::MAX);
+    assert!(buf.lut_written.is_empty());
+}
     #[test]
     fn equivalence_with_reference_impl_for_k_2_through_8() {
         use ndarray::Array1;
