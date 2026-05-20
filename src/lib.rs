@@ -1,4 +1,6 @@
 pub mod kshuffle;
+#[cfg(test)]
+mod kshuffle_ref;
 
 use ndarray::prelude::*;
 use numpy::{IntoPyArray, PyArray, PyReadonlyArray};
