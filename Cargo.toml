@@ -24,3 +24,4 @@ features = ["abi3-py39"]
 
 [dev-dependencies]
 derive_builder = "0.13.1"
+proptest = "1.4"

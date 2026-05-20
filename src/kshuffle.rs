@@ -412,6 +412,7 @@ fn random_walk<R: Rng>(
 #[cfg(test)]
 mod test {
     use super::*;
+    use proptest::prelude::*;
 
     fn kmer_frequencies(seq: &[u8], k: usize) -> HashMap<&[u8], u32> {
         let mut freqs = HashMap::new();
@@ -424,21 +425,24 @@ mod test {
         freqs
     }
 
-    #[test]
-    fn same_freq() {
-        let k = 2;
-        let alphabet_size = 4;
-        let seq = ArrayView1::from(b"AATAT");
+    proptest! {
+        #[test]
+        fn k_shuffle_preserves_kmer_frequencies(
+            len in 8usize..256,
+            k in 2usize..8,
+            seed in any::<u64>(),
+            bytes in proptest::collection::vec(0u8..4, 256),
+        ) {
+            prop_assume!(k < len);
+            let seq: Vec<u8> = bytes.into_iter().take(len).map(|c| b"ACGT"[c as usize]).collect();
+            let seq_arr = ndarray::Array1::from(seq.clone());
+            let mut out = ndarray::Array1::<u8>::zeros(len);
+            super::k_shuffle1(seq_arr.view(), k, Some(seed), out.view_mut(), 4, b"ACGT").unwrap();
 
-        let freqs = kmer_frequencies(seq.as_slice().unwrap(), k);
-        let mut shuffled = Array::from_elem(seq.len(), 0u8);
-        let res = k_shuffle1(seq.view(), k, Some(1), shuffled.view_mut(), alphabet_size, b"ACGT");
-        assert!(res.is_ok());
-
-        let shuffled_freqs = kmer_frequencies(shuffled.as_slice().unwrap(), k);
-
-        println!("{:?}", shuffled);
-        assert_eq!(freqs, shuffled_freqs);
+            let in_freqs = kmer_frequencies(seq_arr.as_slice().unwrap(), k);
+            let out_freqs = kmer_frequencies(out.as_slice().unwrap(), k);
+            prop_assert_eq!(in_freqs, out_freqs);
+        }
     }
 
     #[test]
