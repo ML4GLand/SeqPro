@@ -229,94 +229,12 @@ fn k_shuffle1(
         return Ok(());
     }
 
-    if k == 2 {
-        if seq.is_standard_layout() {
-            return k_shuffle1_k2(seq, &mut rng, out, alphabet_bytes, buffers);
-        } else {
-            let owned: ndarray::Array1<u8> = seq.to_owned();
-            return k_shuffle1_k2(owned.view(), &mut rng, out, alphabet_bytes, buffers);
-        }
-    }
-
     if seq.is_standard_layout() {
         k_shuffle1_inner(seq, k, &mut rng, out, alphabet_size, alphabet_bytes, buffers)
     } else {
         let owned: ndarray::Array1<u8> = seq.to_owned();
         k_shuffle1_inner(owned.view(), k, &mut rng, out, alphabet_size, alphabet_bytes, buffers)
     }
-}
-
-/// Specialized k-shuffle path for k=2 (dinucleotide shuffle).
-///
-/// For k=2, the (k-1)-mer is a single byte, so the vertex id of position
-/// `i` is just `b2c[seq[i]]`. This bypasses the LUT/codes machinery
-/// entirely. The Wilson + random_walk phases are unchanged.
-fn k_shuffle1_k2(
-    seq: ArrayView1<u8>,
-    rng: &mut SmallRng,
-    out: ArrayViewMut1<u8>,
-    alphabet_bytes: &[u8],
-    buffers: &mut ShuffleBuffers,
-) -> Result<()> {
-    let seq_slice = seq.as_slice().expect("k_shuffle1_k2 requires contiguous row");
-    let l = seq_slice.len();
-    let n_lets = l; // for k=2, n_lets = l - k + 2 = l
-    let b2c = kmer_encode::build_byte_to_code(alphabet_bytes);
-
-    // Phase 1: resolve vertex ids inline. Vertex space <= 256; we assign
-    // dense ids 0..n_vertices in first-seen order via a 256-entry table.
-    let mut byte_to_vid = [u32::MAX; 256];
-    let mut n_vertices: u32 = 0;
-    buffers.codes.clear();
-    buffers.codes.reserve(l);
-    for &b in seq_slice {
-        let c = b2c[b as usize] as usize;
-        let mut id = byte_to_vid[c];
-        if id == u32::MAX {
-            id = n_vertices;
-            byte_to_vid[c] = id;
-            n_vertices += 1;
-        }
-        buffers.codes.push(id);
-    }
-
-    // Phase 2: vertices.
-    buffers.vertices.clear();
-    buffers.vertices.resize_with(n_vertices as usize, Vertex::default);
-    for (i, &v) in buffers.codes.iter().enumerate() {
-        let vertex = &mut buffers.vertices[v as usize];
-        if i < (n_lets - 1) {
-            vertex.n_indices += 1;
-        }
-        vertex.i_sequence = i as u32;
-    }
-
-    // Phase 3a: prefix-sum idx_offset.
-    let mut current_idx: u32 = 0;
-    for v in buffers.vertices.iter_mut() {
-        v.idx_offset = current_idx;
-        current_idx += v.n_indices;
-    }
-
-    // Phase 3b: adjacency.
-    buffers.indices.clear();
-    buffers.indices.resize(n_lets - 1, 0u32);
-    for i in 0..(n_lets - 1) {
-        let u_id = buffers.codes[i] as usize;
-        let v_id = buffers.codes[i + 1];
-        let u = &mut buffers.vertices[u_id];
-        if u.n_indices > 0 {
-            buffers.indices[(u.idx_offset + u.i_indices) as usize] = v_id;
-            u.i_indices += 1;
-        }
-    }
-
-    // Phase 4: Wilson + random_walk.
-    let root_idx = buffers.codes[buffers.codes.len() - 1] as usize;
-    wilson_random_spanning_tree(&mut buffers.vertices, &buffers.indices, root_idx, rng);
-    random_walk(&mut buffers.vertices, &mut buffers.indices, root_idx, rng, seq, 2, out);
-
-    Ok(())
 }
 
 fn k_shuffle1_inner(
