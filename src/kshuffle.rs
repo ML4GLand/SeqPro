@@ -8,6 +8,128 @@ use anyhow::{bail, Result};
 use ndarray::prelude::*;
 use rand::rngs::SmallRng;
 
+use crate::kmer_encode;
+
+const MAX_LUT: u32 = 16_384;
+
+/// Returns `Some(α^(k-1))` if `DirectLut` fits, else `None`.
+fn lut_size(alphabet_size: usize, k_minus_1: u32) -> Option<u32> {
+    let n = (alphabet_size as u32).checked_pow(k_minus_1)?;
+    if n <= MAX_LUT { Some(n) } else { None }
+}
+
+/// Maps (k-1)-mers in a sequence to dense vertex ids 0..n_vertices.
+pub(crate) trait KmerIndex {
+    /// Lookup by integer code (fast path) OR byte slice (slow path).
+    /// Implementations use whichever they need; the other is ignored.
+    fn lookup(&self, code: u32, bytes: &[u8]) -> u32;
+    fn n_vertices(&self) -> u32;
+}
+
+/// Direct-indexed lookup table. Used when α^(k-1) ≤ MAX_LUT.
+pub(crate) struct DirectLut {
+    /// table[encoded_kmer] = vertex_id, or u32::MAX if unseen.
+    table: Vec<u32>,
+    n_vertices: u32,
+}
+
+impl DirectLut {
+    /// Build by walking the sequence once with a rolling encoder.
+    /// Stops assigning new vertex ids once the bound `max_uniq_lets` is hit
+    /// (matches the current code's behavior).
+    pub(crate) fn build(
+        seq: &[u8],
+        k_minus_1: usize,
+        alphabet_size: u32,
+        b2c: &[u8; 256],
+        lut_capacity: u32,
+        max_uniq_lets: u32,
+    ) -> (Self, Vec<u32>) {
+        let mut table = vec![u32::MAX; lut_capacity as usize];
+        let n_windows = seq.len() - k_minus_1 + 1;
+        let mut codes: Vec<u32> = Vec::with_capacity(n_windows);
+        let mut n_vertices: u32 = 0;
+
+        let base_pow_km2 = if k_minus_1 >= 1 {
+            alphabet_size.pow((k_minus_1 - 1) as u32)
+        } else {
+            1
+        };
+
+        let mut code = kmer_encode::encode_first(seq, k_minus_1, alphabet_size, b2c);
+        codes.push(code);
+        if table[code as usize] == u32::MAX && n_vertices < max_uniq_lets {
+            table[code as usize] = n_vertices;
+            n_vertices += 1;
+        }
+
+        for i in 0..(n_windows - 1) {
+            code = kmer_encode::roll(
+                code,
+                seq[i],
+                seq[i + k_minus_1],
+                base_pow_km2,
+                alphabet_size,
+                b2c,
+            );
+            codes.push(code);
+            if table[code as usize] == u32::MAX && n_vertices < max_uniq_lets {
+                table[code as usize] = n_vertices;
+                n_vertices += 1;
+            }
+        }
+
+        (Self { table, n_vertices }, codes)
+    }
+}
+
+impl KmerIndex for DirectLut {
+    #[inline]
+    fn lookup(&self, code: u32, _bytes: &[u8]) -> u32 {
+        self.table[code as usize]
+    }
+    fn n_vertices(&self) -> u32 {
+        self.n_vertices
+    }
+}
+
+/// Borrowed-slice HashMap fallback for protein / large k.
+pub(crate) struct HashLut<'a> {
+    map: HashMap<&'a [u8], u32, Xxh3Builder>,
+    n_vertices: u32,
+}
+
+impl<'a> HashLut<'a> {
+    pub(crate) fn build(
+        seq: &'a [u8],
+        k_minus_1: usize,
+        max_uniq_lets: u32,
+    ) -> Self {
+        let mut map: HashMap<&'a [u8], u32, Xxh3Builder> =
+            HashMap::with_capacity_and_hasher(max_uniq_lets as usize, Xxh3Builder::new());
+        let mut n_vertices: u32 = 0;
+        for kmer in seq.windows(k_minus_1) {
+            if n_vertices >= max_uniq_lets { break; }
+            map.entry(kmer).or_insert_with(|| {
+                let id = n_vertices;
+                n_vertices += 1;
+                id
+            });
+        }
+        Self { map, n_vertices }
+    }
+}
+
+impl<'a> KmerIndex for HashLut<'a> {
+    #[inline]
+    fn lookup(&self, _code: u32, bytes: &[u8]) -> u32 {
+        *self.map.get(bytes).expect("k-mer must be present (built from same seq)")
+    }
+    fn n_vertices(&self) -> u32 {
+        self.n_vertices
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum KShuffleError {
     #[error("k must be greater than 0")]
@@ -299,5 +421,45 @@ mod test {
 
         println!("{:?}", shuffled);
         assert_eq!(freqs, shuffled_freqs);
+    }
+
+    #[test]
+    fn direct_lut_assigns_ids_in_first_seen_order() {
+        let b2c = crate::kmer_encode::build_byte_to_code(b"ACGT");
+        // Sequence AACGAA, k-1=2 → windows: AA, AC, CG, GA, AA
+        // First-seen unique: AA, AC, CG, GA → 4 vertices, ids 0..3
+        let (lut, codes) = DirectLut::build(b"AACGAA", 2, 4, &b2c, 16, 100);
+        assert_eq!(lut.n_vertices(), 4);
+        // codes for windows: AA=0, AC=1, CG=6, GA=8, AA=0
+        assert_eq!(codes, vec![0, 1, 6, 8, 0]);
+        assert_eq!(lut.lookup(0, b"AA"), 0);
+        assert_eq!(lut.lookup(1, b"AC"), 1);
+        assert_eq!(lut.lookup(6, b"CG"), 2);
+        assert_eq!(lut.lookup(8, b"GA"), 3);
+    }
+
+    #[test]
+    fn hash_lut_assigns_ids_in_first_seen_order() {
+        let seq: &[u8] = b"AACGAA";
+        let h = HashLut::build(seq, 2, 100);
+        assert_eq!(h.n_vertices(), 4);
+        assert_eq!(h.lookup(0, b"AA"), 0);
+        assert_eq!(h.lookup(0, b"AC"), 1);
+        assert_eq!(h.lookup(0, b"CG"), 2);
+        assert_eq!(h.lookup(0, b"GA"), 3);
+    }
+
+    #[test]
+    fn direct_lut_and_hash_lut_agree_on_ids() {
+        let b2c = crate::kmer_encode::build_byte_to_code(b"ACGT");
+        let seq: &[u8] = b"ACGTACGTACGT";
+        let k_minus_1 = 3;
+        let (lut, codes) = DirectLut::build(seq, k_minus_1, 4, &b2c, 64, 100);
+        let h = HashLut::build(seq, k_minus_1, 100);
+        assert_eq!(lut.n_vertices(), h.n_vertices());
+        for (i, &code) in codes.iter().enumerate() {
+            let bytes = &seq[i..i + k_minus_1];
+            assert_eq!(lut.lookup(code, bytes), h.lookup(code, bytes));
+        }
     }
 }
