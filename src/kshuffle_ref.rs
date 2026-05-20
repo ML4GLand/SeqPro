@@ -59,7 +59,7 @@ pub fn k_shuffle_ref<D: Dimension>(
     out
 }
 
-fn k_shuffle1_ref(
+pub(crate) fn k_shuffle1_ref(
     seq: ArrayView1<u8>,
     k: usize,
     seed: Option<u64>,

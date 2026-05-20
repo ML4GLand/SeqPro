@@ -510,4 +510,45 @@ mod test {
             "rows in a batch should get independent shuffles, not identical ones"
         );
     }
+
+    #[test]
+    fn equivalence_with_reference_impl_for_k_2_through_8() {
+        use ndarray::Array1;
+        use rand::{Rng, SeedableRng};
+        use rand::rngs::SmallRng;
+
+        let alphabet_size = 4;
+        let alphabet_bytes = b"ACGT";
+        let mut seedgen = SmallRng::seed_from_u64(0xDEAD_BEEF);
+
+        for &len in &[16usize, 64, 256, 1024] {
+            for &k in &[2usize, 3, 4, 5, 6, 7, 8] {
+                if k >= len { continue; }
+                // Random DNA sequence.
+                let seq: Vec<u8> = (0..len).map(|_| alphabet_bytes[seedgen.gen_range(0..4)]).collect();
+                let seq_arr = Array1::from(seq.clone());
+                let row_seed: u64 = seedgen.gen();
+
+                let mut out_new = Array1::<u8>::zeros(len);
+                let mut out_ref = Array1::<u8>::zeros(len);
+
+                // New impl
+                super::k_shuffle1(
+                    seq_arr.view(), k, Some(row_seed),
+                    out_new.view_mut(), alphabet_size, alphabet_bytes,
+                ).unwrap();
+
+                // Reference impl
+                crate::kshuffle_ref::k_shuffle1_ref(
+                    seq_arr.view(), k, Some(row_seed),
+                    out_ref.view_mut(), alphabet_size,
+                ).unwrap();
+
+                assert_eq!(
+                    out_new, out_ref,
+                    "mismatch at len={} k={} seed={}", len, k, row_seed
+                );
+            }
+        }
+    }
 }
