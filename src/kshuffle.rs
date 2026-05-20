@@ -299,22 +299,8 @@ fn k_shuffle1_inner(
 
     // Phase 4: Wilson + random_walk.
     let root_idx = buffers.codes[buffers.codes.len() - 1] as usize;
-    wilson_random_spanning_tree(
-        &mut buffers.vertices,
-        &buffers.indices,
-        root_idx,
-        rng,
-        &mut buffers.path,
-    );
-    random_walk(
-        &mut buffers.vertices,
-        &mut buffers.indices,
-        root_idx,
-        rng,
-        seq,
-        k,
-        out,
-    );
+    wilson_random_spanning_tree(&mut buffers.vertices, &buffers.indices, root_idx, rng);
+    random_walk(&mut buffers.vertices, &mut buffers.indices, root_idx, rng, seq, k, out);
 
     Ok(())
 }
@@ -324,51 +310,49 @@ fn wilson_random_spanning_tree<R: Rng>(
     indices: &[u32],
     root_idx: usize,
     rng: &mut R,
-    path: &mut Vec<u32>,
 ) {
-    vertices[root_idx].intree = true;
+    let root_vertex = &mut vertices[root_idx];
+    root_vertex.intree = true;
 
     for i in 0..vertices.len() {
-        if vertices[i].intree {
-            continue;
-        }
-        debug_assert!(path.is_empty());
-
-        let mut u_idx = i;
-        loop {
-            // Walk hits the existing tree → commit `path` and stop.
-            if vertices[u_idx].intree {
-                break;
-            }
-            // Walk revisits a vertex already on the current path → loop erasure.
-            if vertices[u_idx].on_path {
-                // Pop until the stack top is u_idx; clear on_path on popped entries.
-                while let Some(&top) = path.last() {
-                    if top as usize == u_idx {
+        {
+            let mut u_idx = i;
+            loop {
+                {
+                    let u = &vertices[u_idx];
+                    if u.intree {
                         break;
                     }
-                    vertices[top as usize].on_path = false;
-                    path.pop();
                 }
-                // u_idx is still on top of the path; on_path[u_idx] stays true.
-            } else {
-                vertices[u_idx].on_path = true;
-                path.push(u_idx as u32);
+                {
+                    let u = &mut vertices[u_idx];
+                    u.next = rng.gen_range(0..u.n_indices);
+                }
+                {
+                    let u = &vertices[u_idx];
+                    u_idx = indices[(u.idx_offset + u.next) as usize] as usize;
+                }
             }
-
-            // Re-roll u's next choice on every visit (matches original behavior).
-            let u = &mut vertices[u_idx];
-            u.next = rng.gen_range(0..u.n_indices);
-            u_idx = indices[(u.idx_offset + u.next) as usize] as usize;
         }
-
-        // Commit the loop-erased path to the tree.
-        for &v in path.iter() {
-            let vert = &mut vertices[v as usize];
-            vert.intree = true;
-            vert.on_path = false;
+        {
+            let mut u_idx = i;
+            loop {
+                {
+                    let u = &vertices[u_idx];
+                    if u.intree {
+                        break;
+                    }
+                }
+                {
+                    let u = &mut vertices[u_idx];
+                    u.intree = true;
+                }
+                {
+                    let u = &vertices[u_idx];
+                    u_idx = indices[(u.idx_offset + u.next) as usize] as usize;
+                }
+            }
         }
-        path.clear();
     }
 }
 
