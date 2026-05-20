@@ -157,15 +157,29 @@ pub fn k_shuffle<D: Dimension>(
     alphabet_bytes: &[u8],
 ) -> Array<u8, D> {
     let mut out = Array::from_elem(seqs.raw_dim(), 0u8);
-    let results = out
+
+    // Derive a per-row seed from a parent RNG so that:
+    //  - same user seed + same batch produces identical output across runs
+    //    and across rayon thread counts;
+    //  - rows within a batch get independent shuffles.
+    let n_rows: usize = out.rows().into_iter().count();
+    let mut parent = match seed {
+        Some(s) => SmallRng::seed_from_u64(s),
+        None => SmallRng::from_entropy(),
+    };
+    let row_seeds: Vec<u64> = (0..n_rows).map(|_| parent.gen()).collect();
+
+    let results: Vec<Result<()>> = out
         .rows_mut()
         .into_iter()
         .zip(seqs.rows())
+        .zip(row_seeds.into_iter())
         .par_bridge()
-        .map(|(out_row, row)| {
-            k_shuffle1(row, k, seed, out_row, alphabet_size, alphabet_bytes)
+        .map(|((out_row, row), row_seed)| {
+            k_shuffle1(row, k, Some(row_seed), out_row, alphabet_size, alphabet_bytes)
         })
-        .collect::<Vec<_>>();
+        .collect();
+
     for result in results {
         result.expect("k_shuffle error");
     }
@@ -465,5 +479,35 @@ mod test {
             let bytes = &seq[i..i + k_minus_1];
             assert_eq!(lut.lookup(code, bytes), h.lookup(code, bytes));
         }
+    }
+
+    #[test]
+    fn determinism_across_runs_and_thread_counts() {
+        use ndarray::Array2;
+        let alphabet_size = 4;
+        let k = 4;
+        // 8 rows of length 32, deterministic DNA-like content
+        let mut seqs = Array2::<u8>::zeros((8, 32));
+        for (i, mut row) in seqs.rows_mut().into_iter().enumerate() {
+            for (j, b) in row.iter_mut().enumerate() {
+                *b = b"ACGT"[(i + j) % 4];
+            }
+        }
+
+        let run = || {
+            super::k_shuffle(seqs.view(), k, Some(42), alphabet_size, b"ACGT")
+        };
+        let a = run();
+        let b = run();
+        assert_eq!(a, b, "k_shuffle must be deterministic with a fixed seed");
+
+        // Rows within the batch should NOT all be identical to each other
+        // (regression check on the seed-reuse bug).
+        let row0 = a.row(0).to_owned();
+        let row1 = a.row(1).to_owned();
+        assert_ne!(
+            row0, row1,
+            "rows in a batch should get independent shuffles, not identical ones"
+        );
     }
 }
