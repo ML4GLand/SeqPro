@@ -36,6 +36,8 @@ pub(crate) struct ShuffleBuffers {
     vertices: Vec<Vertex>,
     /// Adjacency-list storage for one row.
     indices: Vec<u32>,
+    /// Wilson walk path stack.
+    path: Vec<u32>,
 }
 
 impl ShuffleBuffers {
@@ -46,6 +48,7 @@ impl ShuffleBuffers {
             codes: Vec::new(),
             vertices: Vec::new(),
             indices: Vec::new(),
+            path: Vec::new(),
         }
     }
 
@@ -164,6 +167,7 @@ struct Vertex {
     next: u32,
     i_sequence: u32,
     intree: bool,
+    on_path: bool,    // true while vertex sits on the current Wilson walk's stack
 }
 
 pub fn k_shuffle<D: Dimension>(
