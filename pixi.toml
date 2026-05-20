@@ -4,6 +4,10 @@ channels = ["conda-forge", "bioconda"]
 name = "SeqPro"
 platforms = ["linux-64", "osx-arm64"]
 
+[target.osx-arm64.activation.env]
+LD_LIBRARY_PATH = "$CONDA_PREFIX/lib"
+DYLD_LIBRARY_PATH = "$CONDA_PREFIX/lib"
+
 [environments]
 dev = { features = ["dev", "py310"] }
 doc = { features = ["doc", "py312"] }
@@ -30,6 +34,8 @@ hypothesis = "*"
 prek = "*"
 ipykernel = ">=7.2.0,<8"
 basedpyright = ">=1.39.3,<2"
+seaborn = ">=0.13.2,<0.14"
+statsmodels = ">=0.14.6,<0.15"
 
 [pypi-dependencies]
 seqpro = { path = ".", editable = true }
@@ -83,3 +89,8 @@ ipywidgets = "*"
 
 [feature.bench.tasks]
 i-kernel = "ipython kernel install --user --name seqpro-bench"
+
+[feature.bench.dependencies]
+marimo = ">=0.23.5,<0.24"
+seaborn = ">=0.13.2,<0.14"
+statsmodels = ">=0.14.6,<0.15"
