@@ -25,6 +25,8 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
 ///    Length of k-mers to preserve frequencies of.
 /// alphabet_size : int
 ///    Number of unique characters in the alphabet.
+/// alphabet_bytes : bytes
+///    Ordered alphabet bytes (e.g. b"ACGT").
 /// seed : int, optional
 ///   Seed for the random number generator.
 fn _k_shuffle<'py>(
@@ -32,9 +34,10 @@ fn _k_shuffle<'py>(
     seqs: PyReadonlyArray<'py, u8, IxDyn>,
     k: usize,
     alphabet_size: usize,
+    alphabet_bytes: &[u8],
     seed: Option<u64>,
 ) -> &'py PyArray<u8, IxDyn> {
     let seqs = seqs.as_array();
-    let out = kshuffle::k_shuffle(seqs, k, seed, alphabet_size);
+    let out = kshuffle::k_shuffle(seqs, k, seed, alphabet_size, alphabet_bytes);
     out.into_pyarray(py)
 }

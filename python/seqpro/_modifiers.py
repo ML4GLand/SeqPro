@@ -89,7 +89,9 @@ def k_shuffle(
 
     seqs = np.moveaxis(seqs, length_axis, -1)  # length must be final
 
-    shuffled = _k_shuffle(seqs.view("u1"), k, len(alphabet), seed).view("S1")
+    shuffled = _k_shuffle(
+        seqs.view("u1"), k, len(alphabet), alphabet.array.tobytes(), seed
+    ).view("S1")
 
     shuffled = np.moveaxis(shuffled, -1, length_axis)  # put length back where it was
 

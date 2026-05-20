@@ -1,4 +1,3 @@
-use derive_builder::Builder;
 use rand::{seq::SliceRandom, Rng, SeedableRng};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -140,22 +139,14 @@ pub enum KShuffleError {
     NEntriesTooSmall,
 }
 
-#[derive(Builder)]
-#[builder(pattern = "immutable")]
+#[derive(Clone, Default)]
 struct Vertex {
-    idx_offset: usize,
-    n_indices: usize,
-    i_indices: usize,
+    idx_offset: u32,
+    n_indices: u32,   // 0 = sentinel
+    i_indices: u32,
+    next: u32,
+    i_sequence: u32,
     intree: bool,
-    next: usize,
-    i_sequence: usize,
-}
-
-struct HEntry {
-    /// Number of unique k-mers that come before this k-mer
-    i_vertices: usize,
-    /// First index where k-mer appears
-    i_sequence: usize,
 }
 
 pub fn k_shuffle<D: Dimension>(
@@ -163,21 +154,21 @@ pub fn k_shuffle<D: Dimension>(
     k: usize,
     seed: Option<u64>,
     alphabet_size: usize,
+    alphabet_bytes: &[u8],
 ) -> Array<u8, D> {
-    let mut out = unsafe { Array::uninit(seqs.raw_dim()).assume_init() };
-
+    let mut out = Array::from_elem(seqs.raw_dim(), 0u8);
     let results = out
         .rows_mut()
         .into_iter()
         .zip(seqs.rows())
         .par_bridge()
-        .map(|(out_row, row)| k_shuffle1(row, k, seed, out_row, alphabet_size))
+        .map(|(out_row, row)| {
+            k_shuffle1(row, k, seed, out_row, alphabet_size, alphabet_bytes)
+        })
         .collect::<Vec<_>>();
-
     for result in results {
         result.expect("k_shuffle error");
     }
-
     out
 }
 
@@ -187,19 +178,15 @@ fn k_shuffle1(
     seed: Option<u64>,
     mut out: ArrayViewMut1<u8>,
     alphabet_size: usize,
+    alphabet_bytes: &[u8],
 ) -> Result<()> {
     let seed = seed.unwrap_or_else(|| rand::thread_rng().gen());
     let mut rng = SmallRng::seed_from_u64(seed);
     let l = seq.len();
 
-    if k >= l {
-        seq.assign_to(out);
-        return Ok(());
-    }
-
-    if k < 1 {
-        bail!(KShuffleError::KLessThanOne);
-    }
+    if k >= l { seq.assign_to(out); return Ok(()); }
+    if k < 1 { bail!(KShuffleError::KLessThanOne); }
+    assert!(alphabet_size >= 2, "alphabet_size must be >= 2");
 
     if k == 1 {
         seq.assign_to(&mut out);
@@ -207,85 +194,98 @@ fn k_shuffle1(
         return Ok(());
     }
 
+    if seq.is_standard_layout() {
+        k_shuffle1_inner(seq, k, &mut rng, out, alphabet_size, alphabet_bytes)
+    } else {
+        let owned: ndarray::Array1<u8> = seq.to_owned();
+        k_shuffle1_inner(owned.view(), k, &mut rng, out, alphabet_size, alphabet_bytes)
+    }
+}
+
+fn k_shuffle1_inner(
+    seq: ArrayView1<u8>,
+    k: usize,
+    rng: &mut SmallRng,
+    out: ArrayViewMut1<u8>,
+    alphabet_size: usize,
+    alphabet_bytes: &[u8],
+) -> Result<()> {
+    let l = seq.len();
+    let seq_slice = seq.as_slice().expect("k_shuffle1 requires contiguous row");
+    let k_minus_1 = k - 1;
     let n_lets = l - k + 2;
-    let max_uniq_lets = n_lets.min(alphabet_size.pow((k - 1) as u32));
-    let mut htable = HashMap::with_capacity_and_hasher(max_uniq_lets, Xxh3Builder::new());
+    let max_uniq_lets = n_lets.min(alphabet_size.pow(k_minus_1 as u32)) as u32;
+    let alpha_u32 = alphabet_size as u32;
+    let b2c = kmer_encode::build_byte_to_code(alphabet_bytes);
 
-    // find distinct verticess
-    let mut n_vertices = 0;
-    for (pos, kmer) in seq.windows(k - 1).into_iter().enumerate() {
-        if n_vertices < max_uniq_lets {
-            htable.entry(kmer.to_vec()).or_insert_with(|| {
-                let hentry = HEntry {
-                    i_vertices: n_vertices,
-                    i_sequence: pos,
-                };
-                n_vertices += 1;
-                hentry
-            });
+    // Phase 1: build k-mer index, materialize vertex id per window position.
+    // `window_vid[i]` = vertex id of the (k-1)-mer starting at position i.
+    let n_windows = l - k_minus_1 + 1;
+    let mut window_vid: Vec<u32> = Vec::with_capacity(n_windows);
+
+    let n_vertices: u32 = match lut_size(alphabet_size, k_minus_1 as u32) {
+        Some(cap) => {
+            let (lut, codes) =
+                DirectLut::build(seq_slice, k_minus_1, alpha_u32, &b2c, cap, max_uniq_lets);
+            for &c in &codes {
+                window_vid.push(lut.lookup(c, &[]));
+            }
+            lut.n_vertices()
         }
-    }
-
-    let root = seq.slice(s![-(k as isize - 1)..]).to_vec();
-    let mut indices = vec![0 as usize; n_lets - 1];
-    let mut vertices = (0..n_vertices)
-        .map(|_| VertexBuilder::default().intree(false).n_indices(0).next(0))
-        .collect::<Vec<_>>();
-
-    // set i_sequence and n_indices for each vertex
-    for (i, kmer) in seq.windows(k - 1).into_iter().enumerate() {
-        let hentry = htable.get(&kmer.to_vec()).unwrap();
-        let v = &mut vertices[hentry.i_vertices];
-
-        if i < n_lets - 1 {
-            let n_indices = v.n_indices.map_or(1, |n| n + 1);
-            vertices[hentry.i_vertices] = v.i_sequence(hentry.i_sequence).n_indices(n_indices);
-        } else {
-            vertices[hentry.i_vertices] = v.i_sequence(hentry.i_sequence);
+        None => {
+            let h = HashLut::build(seq_slice, k_minus_1, max_uniq_lets);
+            for i in 0..n_windows {
+                window_vid.push(h.lookup(0, &seq_slice[i..i + k_minus_1]));
+            }
+            h.n_vertices()
         }
+    };
+
+    // Phase 2: allocate vertices; fill n_indices and i_sequence in one pass.
+    // Matches the original code's rule: for i < n_lets - 1, increment n_indices
+    // and update i_sequence; for i == n_lets - 1 (the final window), update
+    // i_sequence only (this is the "root" k-mer at the sequence's tail).
+    let mut vertices: Vec<Vertex> = vec![Vertex::default(); n_vertices as usize];
+    for (i, &v) in window_vid.iter().enumerate() {
+        let vertex = &mut vertices[v as usize];
+        if i < (n_lets - 1) {
+            vertex.n_indices += 1;
+        }
+        vertex.i_sequence = i as u32; // last-write-wins, matches original
     }
 
-    // distribute indices
-    let mut current_idx = 0usize;
-    for v in &mut vertices {
-        *v = v.idx_offset(current_idx).into();
-        current_idx += v.n_indices.unwrap();
+    // Phase 3a: prefix-sum idx_offset.
+    let mut current_idx: u32 = 0;
+    for v in vertices.iter_mut() {
+        v.idx_offset = current_idx;
+        current_idx += v.n_indices;
     }
 
-    let mut vertices = vertices
-        .into_iter()
-        .map(|v| v.i_indices(0).build().unwrap())
-        .collect::<Vec<_>>();
-
-    // populate indices for each vertex
-    for (kmer1, kmer2) in seq
-        .slice(s![..-1])
-        .windows(k - 1)
-        .into_iter()
-        .zip(seq.slice(s![1..]).windows(k - 1))
-    {
-        let eu = htable.get(&kmer1.to_vec()).unwrap();
-        let ev = htable.get(&kmer2.to_vec()).unwrap();
-
-        let u = &mut vertices[eu.i_vertices];
+    // Phase 3b: populate adjacency. For each consecutive window pair (u, v)
+    // in the sequence (excluding the final window as `u`), append v's id to
+    // u's outgoing edge list.
+    let mut indices: Vec<u32> = vec![0u32; n_lets - 1];
+    for i in 0..(n_lets - 1) {
+        let u_id = window_vid[i] as usize;
+        let v_id = window_vid[i + 1];
+        let u = &mut vertices[u_id];
         if u.n_indices > 0 {
-            let i_indices = u.i_indices;
-            indices[u.idx_offset + i_indices] = ev.i_vertices;
+            indices[(u.idx_offset + u.i_indices) as usize] = v_id;
             u.i_indices += 1;
         }
     }
 
-    // Wilson algorithm for random arborescence
-    let root_idx = htable.get(&root).unwrap().i_vertices;
-    wilson_random_spanning_tree(&mut vertices, &indices, root_idx, &mut rng);
-    random_walk(&mut vertices, &mut indices, root_idx, &mut rng, seq, k, out);
+    // Phase 4: Wilson + random_walk. Root = the final window's vertex id.
+    let root_idx = window_vid[n_windows - 1] as usize;
+    wilson_random_spanning_tree(&mut vertices, &indices, root_idx, rng);
+    random_walk(&mut vertices, &mut indices, root_idx, rng, seq, k, out);
 
     Ok(())
 }
 
 fn wilson_random_spanning_tree<R: Rng>(
     vertices: &mut Vec<Vertex>,
-    indices: &Vec<usize>,
+    indices: &Vec<u32>,
     root_idx: usize,
     rng: &mut R,
 ) {
@@ -293,7 +293,6 @@ fn wilson_random_spanning_tree<R: Rng>(
     root_vertex.intree = true;
 
     for i in 0..vertices.len() {
-        // let mut u = &mut vertices[i];
         {
             let mut u_idx = i;
             loop {
@@ -309,7 +308,7 @@ fn wilson_random_spanning_tree<R: Rng>(
                 }
                 {
                     let u = &vertices[u_idx];
-                    u_idx = indices[u.idx_offset + u.next];
+                    u_idx = indices[(u.idx_offset + u.next) as usize] as usize;
                 }
             }
         }
@@ -328,7 +327,7 @@ fn wilson_random_spanning_tree<R: Rng>(
                 }
                 {
                     let u = &vertices[u_idx];
-                    u_idx = indices[u.idx_offset + u.next];
+                    u_idx = indices[(u.idx_offset + u.next) as usize] as usize;
                 }
             }
         }
@@ -337,24 +336,27 @@ fn wilson_random_spanning_tree<R: Rng>(
 
 fn random_walk<R: Rng>(
     vertices: &mut Vec<Vertex>,
-    indices: &mut Vec<usize>,
+    indices: &mut Vec<u32>,
     root_idx: usize,
     rng: &mut R,
     seq: ArrayView1<u8>,
     k: usize,
     mut out: ArrayViewMut1<u8>,
 ) {
-    let mut j;
     for (i, u) in vertices.iter_mut().enumerate() {
         if i != root_idx {
             let idx = u.n_indices - 1;
-            j = indices[u.idx_offset + idx];
-            indices[u.idx_offset + idx] = indices[u.idx_offset + u.next];
-            let next = u.next;
-            indices[u.idx_offset + next] = j;
-            indices[u.idx_offset..u.idx_offset + idx].shuffle(rng);
+            let off = u.idx_offset as usize;
+            let next = u.next as usize;
+            let idx_us = idx as usize;
+            let tmp_idx = indices[off + idx_us];
+            indices[off + idx_us] = indices[off + next];
+            indices[off + next] = tmp_idx;
+            indices[off..off + idx_us].shuffle(rng);
         } else {
-            indices[u.idx_offset..u.idx_offset + u.n_indices].shuffle(rng);
+            let off = u.idx_offset as usize;
+            let n = u.n_indices as usize;
+            indices[off..off + n].shuffle(rng);
         }
         u.i_indices = 0;
     }
@@ -363,25 +365,27 @@ fn random_walk<R: Rng>(
     let out = out.as_slice_mut().unwrap();
     out[..k - 1].clone_from_slice(seq.slice(s![..k - 1]).as_slice().unwrap());
     let mut i = k - 1;
-    let mut u_idx = 0;
+    let mut u_idx = 0usize;
     loop {
-        let v_idx = {
+        let v_idx_u32 = {
             let u = &vertices[u_idx];
             if u.i_indices >= u.n_indices {
                 break;
             }
-            indices[u.idx_offset + u.i_indices]
+            indices[(u.idx_offset + u.i_indices) as usize]
         };
+        let v_idx = v_idx_u32 as usize;
         {
+            let j: usize;
             if u_idx != v_idx {
                 let v = &vertices[v_idx];
-                j = v.i_sequence + k - 2;
+                j = v.i_sequence as usize + k - 2;
                 out[i] = seq[j];
                 i += 1;
                 vertices[u_idx].i_indices += 1;
             } else {
                 let v = &mut vertices[v_idx];
-                j = v.i_sequence + k - 2;
+                j = v.i_sequence as usize + k - 2;
                 out[i] = seq[j];
                 i += 1;
                 v.i_indices += 1;
@@ -413,8 +417,8 @@ mod test {
         let seq = ArrayView1::from(b"AATAT");
 
         let freqs = kmer_frequencies(seq.as_slice().unwrap(), k);
-        let mut shuffled = unsafe { Array::uninit(seq.len()).assume_init() };
-        let res = k_shuffle1(seq.view(), k, Some(1), shuffled.view_mut(), alphabet_size);
+        let mut shuffled = Array::from_elem(seq.len(), 0u8);
+        let res = k_shuffle1(seq.view(), k, Some(1), shuffled.view_mut(), alphabet_size, b"ACGT");
         assert!(res.is_ok());
 
         let shuffled_freqs = kmer_frequencies(shuffled.as_slice().unwrap(), k);

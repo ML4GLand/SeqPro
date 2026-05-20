@@ -11,7 +11,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 anyhow = "1.0.99"
-derive_builder = "0.13.1"
 ndarray = { version = "0.15.6", features = ["rayon"] }
 numpy = "0.20.0"
 rand = { version = "0.8.5", features = ["small_rng"] }
@@ -22,3 +21,6 @@ xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 [dependencies.pyo3]
 version = "0.20"
 features = ["abi3-py39"]
+
+[dev-dependencies]
+derive_builder = "0.13.1"
