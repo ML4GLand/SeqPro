@@ -63,7 +63,7 @@ mod tests {
     fn encode_first_acgt_k4() {
         // (k-1) = 3, alphabet=4: ACG -> 0*16 + 1*4 + 2 = 6
         let b2c = build_byte_to_code(DNA);
-        assert_eq!(encode_first(b"ACGT", 3, 4, &b2c), 0 * 16 + 1 * 4 + 2);
+        assert_eq!(encode_first(b"ACGT", 3, 4, &b2c), 6); // ACG -> 0*16 + 1*4 + 2
     }
 
     #[test]

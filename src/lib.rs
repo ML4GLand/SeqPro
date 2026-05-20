@@ -1,6 +1,7 @@
 pub mod kshuffle;
 pub mod kmer_encode;
 #[cfg(test)]
+#[allow(dead_code, clippy::all)]
 mod kshuffle_ref;
 
 use ndarray::prelude::*;

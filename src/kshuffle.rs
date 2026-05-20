@@ -173,7 +173,7 @@ pub fn k_shuffle<D: Dimension>(
         .rows_mut()
         .into_iter()
         .zip(seqs.rows())
-        .zip(row_seeds.into_iter())
+        .zip(row_seeds)
         .par_bridge()
         .map(|((out_row, row), row_seed)| {
             k_shuffle1(row, k, Some(row_seed), out_row, alphabet_size, alphabet_bytes)
@@ -298,8 +298,8 @@ fn k_shuffle1_inner(
 }
 
 fn wilson_random_spanning_tree<R: Rng>(
-    vertices: &mut Vec<Vertex>,
-    indices: &Vec<u32>,
+    vertices: &mut [Vertex],
+    indices: &[u32],
     root_idx: usize,
     rng: &mut R,
 ) {
@@ -349,8 +349,8 @@ fn wilson_random_spanning_tree<R: Rng>(
 }
 
 fn random_walk<R: Rng>(
-    vertices: &mut Vec<Vertex>,
-    indices: &mut Vec<u32>,
+    vertices: &mut [Vertex],
+    indices: &mut [u32],
     root_idx: usize,
     rng: &mut R,
     seq: ArrayView1<u8>,
@@ -363,9 +363,7 @@ fn random_walk<R: Rng>(
             let off = u.idx_offset as usize;
             let next = u.next as usize;
             let idx_us = idx as usize;
-            let tmp_idx = indices[off + idx_us];
-            indices[off + idx_us] = indices[off + next];
-            indices[off + next] = tmp_idx;
+            indices.swap(off + idx_us, off + next);
             indices[off..off + idx_us].shuffle(rng);
         } else {
             let off = u.idx_offset as usize;
