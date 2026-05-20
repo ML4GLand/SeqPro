@@ -579,4 +579,54 @@ fn shuffle_buffers_sparse_reset_only_touches_written_positions() {
             }
         }
     }
+
+    #[test]
+    fn buffer_reuse_matches_fresh_buffer_output() {
+        use ndarray::Array1;
+        use rand::{Rng, SeedableRng};
+        use rand::rngs::SmallRng;
+
+        let alphabet_size = 4;
+        let alphabet_bytes = b"ACGT";
+        let mut seedgen = SmallRng::seed_from_u64(0xCAFEBABE);
+
+        // Build a fixed list of (seq, k, seed) triples spanning the supported range.
+        let mut cases: Vec<(Vec<u8>, usize, u64)> = Vec::new();
+        for &len in &[16usize, 64, 256] {
+            for &k in &[2usize, 3, 4, 6, 8] {
+                if k >= len { continue; }
+                for _ in 0..5 {
+                    let seq: Vec<u8> = (0..len)
+                        .map(|_| alphabet_bytes[seedgen.gen_range(0..4)])
+                        .collect();
+                    cases.push((seq, k, seedgen.gen()));
+                }
+            }
+        }
+
+        // Run each case twice: once with a fresh buffer, once with a reused buffer.
+        let mut reused = ShuffleBuffers::new();
+        for (seq, k, seed) in &cases {
+            let seq_arr = Array1::from(seq.clone());
+            let len = seq.len();
+
+            let mut out_fresh = Array1::<u8>::zeros(len);
+            let mut fresh = ShuffleBuffers::new();
+            super::k_shuffle1(
+                seq_arr.view(), *k, Some(*seed),
+                out_fresh.view_mut(), alphabet_size, alphabet_bytes, &mut fresh,
+            ).unwrap();
+
+            let mut out_reused = Array1::<u8>::zeros(len);
+            super::k_shuffle1(
+                seq_arr.view(), *k, Some(*seed),
+                out_reused.view_mut(), alphabet_size, alphabet_bytes, &mut reused,
+            ).unwrap();
+
+            assert_eq!(
+                out_fresh, out_reused,
+                "mismatch at len={} k={} seed={}", len, k, seed
+            );
+        }
+    }
 }
