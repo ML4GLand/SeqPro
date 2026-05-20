@@ -60,7 +60,11 @@ def k_shuffle(
         Needed for OHE input. Axis that corresponds to the one hot encoding, should be
         the same size as the length of the alphabet.
     seed
-        Seed or generator for shuffling.
+        Seed or generator for shuffling. When given a fixed integer seed, the
+        same ``(seed, batch_size, k)`` produces byte-identical output across
+        runs and across thread counts; each row in a batch receives an
+        independent shuffle derived from a parent RNG seeded by this value.
+        Changing batch size changes the per-row seeds.
 
     Returns
     -------
