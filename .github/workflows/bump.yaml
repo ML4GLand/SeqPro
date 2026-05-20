@@ -1,11 +1,41 @@
 name: Bump version
 
 on:
+  workflow_call:
+    inputs:
+      increment:
+        description: "Force a specific bump (auto|PATCH|MINOR|MAJOR)"
+        type: string
+        required: false
+        default: "auto"
+      dry_run:
+        description: "Compute the bump but do not commit/push"
+        type: boolean
+        required: false
+        default: false
+    outputs:
+      tag:
+        description: "The version string after the bump (or projected version in dry-run)"
+        value: ${{ jobs.bump.outputs.tag }}
   workflow_dispatch:
+    inputs:
+      increment:
+        description: "Force a specific bump"
+        type: choice
+        required: false
+        default: "auto"
+        options: ["auto", "PATCH", "MINOR", "MAJOR"]
+      dry_run:
+        description: "Compute the bump but do not commit/push"
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   bump:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.emit.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,8 +49,6 @@ jobs:
         id: detect
         run: |
           PROJECT_VERSION=$(cz version --project)
-          # Only match tags in the current format (no 'v' prefix) to avoid false
-          # positives from legacy v-prefixed tags.
           LATEST_TAG=$(git tag --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
           if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$PROJECT_VERSION" ]; then
             echo "partial=true" >> $GITHUB_OUTPUT
@@ -29,14 +57,24 @@ jobs:
             echo "partial=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Bump version
-        if: steps.detect.outputs.partial != 'true'
+      - name: Bump version (real)
+        if: steps.detect.outputs.partial != 'true' && inputs.dry_run == false
         uses: commitizen-tools/commitizen-action@master
         with:
           github_token: ${{ secrets.GH_TOKEN }}
+          increment: ${{ inputs.increment != 'auto' && inputs.increment || '' }}
+
+      - name: Bump version (dry-run)
+        if: steps.detect.outputs.partial != 'true' && inputs.dry_run == true
+        run: |
+          ARGS="--dry-run --yes"
+          if [ "${{ inputs.increment }}" != "auto" ]; then
+            ARGS="$ARGS --increment ${{ inputs.increment }}"
+          fi
+          cz bump $ARGS
 
       - name: Fix partial bump (tag exists on remote, update files only)
-        if: steps.detect.outputs.partial == 'true'
+        if: steps.detect.outputs.partial == 'true' && inputs.dry_run == false
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -47,3 +85,10 @@ jobs:
           git commit -m "bump: version $NEW_VERSION"
           git push origin main
           git push origin "$BUMPED_VERSION"
+
+      - name: Emit resulting tag
+        id: emit
+        run: |
+          TAG=$(cz version --project)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Resolved tag: $TAG"
