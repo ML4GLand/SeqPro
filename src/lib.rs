@@ -1,4 +1,5 @@
 pub mod kshuffle;
+pub mod kmer_encode;
 #[cfg(test)]
 mod kshuffle_ref;
 
