@@ -84,11 +84,12 @@ jobs:
       dry_run: ${{ inputs.dry_run }}
 
   publish:
-    needs: release
+    needs: [resolve, bump, release]
     uses: ./.github/workflows/publish.yaml
     secrets: inherit
     with:
       dry_run: ${{ inputs.dry_run }}
+      tag: ${{ needs.bump.outputs.tag || needs.resolve.outputs.tag }}
 
   merge:
     needs: publish

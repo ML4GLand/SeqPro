@@ -20,6 +20,11 @@ on:
         type: boolean
         required: false
         default: false
+      tag:
+        description: 'Tag to check out and build wheels from (defaults to caller ref)'
+        type: string
+        required: false
+        default: ''
   workflow_dispatch:
     inputs:
       dry_run:
@@ -27,6 +32,11 @@ on:
         type: boolean
         required: false
         default: false
+      tag:
+        description: 'Tag to check out and build wheels from (defaults to current ref)'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -51,6 +61,8 @@ jobs:
             target: ppc64le
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
@@ -89,6 +101,8 @@ jobs:
             target: armv7
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
@@ -128,6 +142,8 @@ jobs:
             python_arch: arm64
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
@@ -165,6 +181,8 @@ jobs:
             target: aarch64
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
@@ -193,6 +211,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
