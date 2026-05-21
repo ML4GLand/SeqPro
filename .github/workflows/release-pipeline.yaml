@@ -94,6 +94,7 @@ jobs:
 
   merge:
     needs: publish
+    if: always() && needs.publish.result == 'success'
     uses: ./.github/workflows/merge.yaml
     secrets: inherit
     with:
