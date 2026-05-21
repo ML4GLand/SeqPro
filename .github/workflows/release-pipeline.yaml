@@ -25,6 +25,11 @@ on:
         required: false
         default: false
 
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
 jobs:
   resolve:
     runs-on: ubuntu-latest
