@@ -85,6 +85,7 @@ jobs:
 
   publish:
     needs: [resolve, bump, release]
+    if: always() && needs.release.result == 'success'
     uses: ./.github/workflows/publish.yaml
     secrets: inherit
     with:
