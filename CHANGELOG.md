@@ -1,3 +1,36 @@
+## 0.11.1 (2026-05-21)
+
+### Feat
+
+- **ci**: add release-pipeline.yaml orchestrator
+- add on_path flag to Vertex and path stack to ShuffleBuffers
+- specialize k=2 path to skip LUT and codes lookup
+- add ShuffleBuffers with sparse-reset LUT
+- add KmerIndex trait with DirectLut and HashLut impls
+- add kmer_encode module with rolling integer encoder
+- ragged support for ohe, decode_ohe, tokenize, decode_tokens
+
+### Fix
+
+- **ci**: grant orchestrator permissions required by called workflows
+- **ci**: make merge.yaml workflow_call-able, drop workflow_run
+- **ci**: make publish.yaml workflow_call-able, drop workflow_run
+- **ci**: make release.yaml workflow_call-able with dry_run
+- **ci**: make bump.yaml workflow_call-able with increment and dry_run
+- derive per-row seeds so batches get independent shuffles
+- support arbitrary leading/trailing dims across public functions
+- types
+
+### Refactor
+
+- pool LUT and reuse buffers via ShuffleBuffers
+- rewrite k_shuffle1 with KmerIndex strategy + u32 Vertex
+
+### Perf
+
+- replace two-pass Wilson with single-pass loop-erased random walk
+- add criterion benchmark for k_shuffle
+
 ## 0.11.0 (2026-05-07)
 
 ### Feat
