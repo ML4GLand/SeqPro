@@ -72,3 +72,7 @@ Only `kshuffle.rs` is compiled. It's exposed as `seqpro._k_shuffle` (called by `
 - Axis arguments (`length_axis`, `ohe_axis`) are always integers referring to the NumPy axis index; negative indexing is supported.
 - The `transforms/` module wraps functional ops into callable objects with `__call__` for use in data pipelines.
 - Conventional commits are enforced — use `feat:`, `fix:`, `ci:`, `bump:`, `refactor:`, `docs:`, etc. prefixes.
+
+## Skills
+
+This repo ships an installable skill at `skills/seqpro/SKILL.md` (skills.sh layout) describing how to use seqpro. **Any PR that adds a new public feature, changes a public signature, or makes a breaking change MUST update `skills/seqpro/SKILL.md` in the same PR.** Doc-only edits and internal refactors do not require updates unless they change conventions documented in the skill. Reviewers should reject feature/breaking PRs that don't touch the skill.
