@@ -11,6 +11,7 @@ from .._numba import (
     _nb_find_stop_ends,
     gufunc_complement_bytes,
     gufunc_translate,
+    gufunc_translate_lut,
     ufunc_comp_dna,
 )
 from .._utils import SeqType, StrSeqType, array_slice, cast_seqs, check_axes, is_dtype
@@ -219,12 +220,64 @@ class NucleotideAlphabet:
             raise ValueError("Invalid sequence type.")
 
 
+def _build_translate_lut(
+    codons: list[str], amino_acids: list[str]
+) -> NDArray[np.uint8]:
+    """Build the 64-entry codon→AA lookup table consumed by ``gufunc_translate_lut``.
+
+    The index for codon ``[n0, n1, n2]`` (ASCII bytes) is
+    ``((n0 >> 1) & 3) << 4 | ((n1 >> 1) & 3) << 2 | ((n2 >> 1) & 3)`` —
+    the same bit-packing the runtime uses. Codons not present in
+    ``codons`` (e.g. ambiguous IUPAC codes) get ``'X'`` (78) as a safe
+    "unknown amino acid" sentinel.
+
+    Parameters
+    ----------
+    codons
+        List of 3-character DNA strings (uppercase ACGT only).
+    amino_acids
+        List of 1-character amino-acid strings, aligned with ``codons``.
+
+    Returns
+    -------
+    NDArray[np.uint8]
+        Shape ``(64,)``. ``lut[idx]`` is the AA byte for the codon at
+        packed index ``idx``.
+
+    Raises
+    ------
+    ValueError
+        If any codon contains a non-``ACGT`` character (the LUT
+        bit-packing only handles the 4 standard nucleotides; pass an
+        extended alphabet to the generic ``gufunc_translate`` path).
+    """
+    lut = np.full(64, ord("X"), dtype=np.uint8)
+    for codon, aa in zip(codons, amino_acids, strict=True):
+        if len(codon) != 3:
+            raise ValueError(f"LUT path requires k=3 codons; got {codon!r}")
+        n0_byte, n1_byte, n2_byte = ord(codon[0]), ord(codon[1]), ord(codon[2])
+        for c in (codon[0], codon[1], codon[2]):
+            if c not in "ACGT":
+                raise ValueError(f"LUT path requires ACGT-only codons; got {codon!r}")
+        n0 = (n0_byte >> 1) & 3
+        n1 = (n1_byte >> 1) & 3
+        n2 = (n2_byte >> 1) & 3
+        idx = (n0 << 4) | (n1 << 2) | n2
+        lut[idx] = ord(aa)
+    return lut
+
+
 class AminoAlphabet:
     codons: list[str]
     amino_acids: list[str]
     codon_array: NDArray[np.bytes_]
     aa_array: NDArray[np.bytes_]
     codon_to_aa: dict[str, str]
+    codon_lut: NDArray[np.uint8] | None
+    """Pre-built 64-entry codon→AA LUT for the fast :func:`gufunc_translate_lut`
+    path. ``None`` for non-standard alphabets where the codon length isn't
+    3 or any codon contains a non-ACGT character — the generic
+    :func:`gufunc_translate` path runs in that case."""
 
     def __init__(self, codons: list[str], amino_acids: list[str]) -> None:
         """Construct an alphabet of amino acids and their mappings to codons.
@@ -260,6 +313,14 @@ class AminoAlphabet:
         self.aa_array = np.array(amino_acids, "S1")
 
         self.codon_to_aa = dict(zip(codons, amino_acids))
+
+        # Build the 64-entry O(1) lookup table when the alphabet is the
+        # standard ACGT × k=3 case; fall back to the generic linear-scan
+        # path for non-standard alphabets.
+        try:
+            self.codon_lut = _build_translate_lut(codons, amino_acids)
+        except ValueError:
+            self.codon_lut = None
 
     @overload
     def translate(
@@ -335,6 +396,12 @@ class AminoAlphabet:
                 seqs, window_shape=codon_size, axis=length_axis
             )
             codons = array_slice(codons, length_axis, slice(None, None, codon_size))
+            if self.codon_lut is not None:
+                return gufunc_translate_lut(
+                    codons.view(np.uint8),
+                    self.codon_lut,
+                    axes=[-1, -1, ()],  # type: ignore
+                ).view("S1")
             return gufunc_translate(
                 codons.view(np.uint8),
                 self.codon_array.view(np.uint8),

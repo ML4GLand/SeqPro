@@ -34,6 +34,76 @@ def test_gufunc_translate(
     np.testing.assert_array_equal(actual, desired)
 
 
+# --- LUT path tests ---
+
+
+def test_aa_alphabet_has_lut():
+    """Standard ACGT × k=3 alphabet builds the 64-entry LUT at __init__."""
+    assert sp.AA.codon_lut is not None
+    assert sp.AA.codon_lut.shape == (64,)
+    assert sp.AA.codon_lut.dtype == np.uint8
+
+
+def test_lut_translates_every_standard_codon():
+    """All 64 standard codons translate to the same AA via LUT as via the codon table."""
+    from seqpro._numba import gufunc_translate_lut
+
+    for codon, expected_aa in zip(sp.AA.codons, sp.AA.amino_acids, strict=True):
+        seq_kmer = sp.cast_seqs(codon).view(np.uint8)
+        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+        assert int(actual) == ord(expected_aa), (
+            f"codon {codon!r} → {chr(int(actual))!r}, expected {expected_aa!r}"
+        )
+
+
+def test_lut_translates_stop_codons():
+    """The three stop codons TAA, TAG, TGA map to '*'."""
+    from seqpro._numba import gufunc_translate_lut
+
+    for stop in ("TAA", "TAG", "TGA"):
+        seq_kmer = sp.cast_seqs(stop).view(np.uint8)
+        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+        assert chr(int(actual)) == "*", f"{stop} → {chr(int(actual))}, expected '*'"
+
+
+def test_lut_translates_start_codon():
+    """ATG → M."""
+    from seqpro._numba import gufunc_translate_lut
+
+    seq_kmer = sp.cast_seqs("ATG").view(np.uint8)
+    actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+    assert chr(int(actual)) == "M"
+
+
+def test_lut_and_linear_scan_produce_identical_output():
+    """Random-codon fuzz: LUT path == linear-scan path bitwise."""
+    from seqpro._numba import gufunc_translate_lut
+
+    rng = np.random.default_rng(0)
+    n = 5000
+    codons_idx = rng.choice(4, size=(n, 3))  # 0..3 per position
+    # Map index back to ASCII byte using the alphabet order (ACGT).
+    byte_for_idx = np.array([ord(c) for c in "ACGT"], dtype=np.uint8)
+    codons_bytes = byte_for_idx[codons_idx]  # (n, 3) uint8
+
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    expected = gufunc_translate(codons_bytes, kmer_keys, kmer_values)
+    actual = gufunc_translate_lut(codons_bytes, sp.AA.codon_lut)
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_alphabet_translate_uses_lut_by_default():
+    """``sp.AA.translate`` should now go through the LUT path on standard
+    AA. Cross-validate against BioPython to confirm the LUT is correct."""
+    rng = np.random.default_rng(1)
+    nucs = list("ACGT")
+    seq = "".join(rng.choice(nucs, size=300, replace=True))
+    bio_aa = str(translate(seq))
+    sp_aa = sp.AA.translate(seq, length_axis=-1).view("S1")
+    np.testing.assert_array_equal(sp_aa, sp.cast_seqs(bio_aa))
+
+
 def case_1d():
     seqs = sp.cast_seqs("ATCGAT")
     desired = sp.cast_seqs("ID")
