@@ -23,6 +23,7 @@ Python/Rust package for fast biological-sequence processing. Python+NumPy+Numba 
 - **Axis arguments are required and explicit**: most functions take `length_axis` and (for OHE) `ohe_axis` as positional/keyword ints. Negative indices allowed. `check_axes()` validates and raises early — don't catch and paper over.
 - **No Python loops over sequences in library code.** Hot paths use NumPy, Numba kernels in `_numba.py`, or the Rust extension. If you're tempted to write a `for` over residues, look for an existing vectorized op or a Numba kernel first.
 - **Alphabets are singletons**: `sp.DNA`, `sp.RNA`, `sp.AA`. Construct custom ones via `sp.NucleotideAlphabet` / `sp.AminoAlphabet` (`python/seqpro/alphabets/_alphabets.py`).
+- **`AminoAlphabet.translate(seqs, ..., validate=False)`**: translates nucleotides → amino acids. Pass `validate=True` to raise on any input outside the alphabet — non-ACGT bytes (lowercase, `N`, IUPAC codes) for string/byte input, or any non-one-hot row for OHE input. When `validate=True` returns without raising, the translation is guaranteed exact; the default `validate=False` skips the check for speed and treats out-of-alphabet input as undefined.
 - **Transforms** (`python/seqpro/transforms/`) wrap functional ops as callables — use these in data pipelines instead of inline lambdas.
 
 ## Quick reference

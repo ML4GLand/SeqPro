@@ -118,7 +118,12 @@ def gufunc_translate(
     kmer_values: NDArray[np.uint8],
     res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:  # type: ignore
-    """Translate 3-mers into amino acids.
+    """Translate k-mers into amino acids via an O(n) linear scan.
+
+    Generic fallback for non-standard alphabets (codon length other than 3,
+    or extended/IUPAC characters). For the standard genetic code (k=3, ACGT),
+    ``AminoAlphabet.translate`` automatically uses the O(1)
+    :func:`gufunc_translate_lut` path instead.
 
     Parameters
     ----------
@@ -135,6 +140,57 @@ def gufunc_translate(
         if (seq_kmers == kmer_keys[i]).all():
             res[0] = kmer_values[i]  # type: ignore
             break
+
+
+@nb.njit(cache=True)
+def _pack_codon_index(b0, b1, b2):
+    """Pack a 3-codon's ASCII bytes into a 6-bit LUT index in ``[0, 63]``.
+
+    Uses the 2-bit-per-nucleotide hash ``(byte >> 1) & 3``, a bijection on
+    ``{A, C, G, T}``. This is the single source of truth for the codon→index
+    mapping: both the runtime lookup (:func:`gufunc_translate_lut`) and the
+    table builder (``_build_translate_lut``) call it, so they cannot drift
+    out of sync.
+    """
+    n0 = (b0 >> 1) & 3
+    n1 = (b1 >> 1) & 3
+    n2 = (b2 >> 1) & 3
+    return (n0 << 4) | (n1 << 2) | n2
+
+
+@nb.guvectorize(
+    ["(u1[:], u1[:], u1[:])"],
+    "(k),(m)->()",
+    target="parallel",
+    cache=True,
+)
+def gufunc_translate_lut(
+    seq_kmers: NDArray[np.uint8],
+    codon_lut: NDArray[np.uint8],
+    res: NDArray[np.uint8] | None = None,
+) -> NDArray[np.uint8]:  # type: ignore
+    """Translate a 3-codon to its amino acid via an O(1) lookup table.
+
+    Selected automatically by ``AminoAlphabet.translate`` for the standard
+    genetic code (k=3, ACGT); non-standard alphabets use
+    :func:`gufunc_translate` instead.
+
+    The LUT is indexed by ``_pack_codon_index``, which hashes each nucleotide's
+    ASCII byte with ``(byte >> 1) & 3`` — a bijection on ``{A, C, G, T}`` — and
+    packs the three 2-bit codes into a 6-bit index in ``[0, 63]``. The
+    64-element ``codon_lut`` (built by ``AminoAlphabet`` at construction) returns
+    the amino-acid byte for that index.
+
+    Parameters
+    ----------
+    seq_kmers
+        A 3-codon as ASCII bytes (e.g. ``[65, 84, 71]`` = ``"ATG"``).
+    codon_lut
+        64-byte LUT, built by ``AminoAlphabet`` at construction time.
+    res
+        Output buffer.
+    """
+    res[0] = codon_lut[_pack_codon_index(seq_kmers[0], seq_kmers[1], seq_kmers[2])]
 
 
 @nb.guvectorize(
