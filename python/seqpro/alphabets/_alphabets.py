@@ -221,46 +221,45 @@ class NucleotideAlphabet:
             raise ValueError("Invalid sequence type.")
 
 
+def _can_build_lut(codons: list[str]) -> bool:
+    """True when the standard O(1) LUT path applies: every codon is length-3
+    and uses only the four standard nucleotides A, C, G, T. Non-standard
+    alphabets (different codon size or extended/IUPAC characters) use the
+    generic :func:`gufunc_translate` scan instead."""
+    return all(len(c) == 3 and set(c) <= set("ACGT") for c in codons)
+
+
 def _build_translate_lut(
     codons: list[str], amino_acids: list[str]
 ) -> NDArray[np.uint8]:
     """Build the 64-entry codon→AA lookup table consumed by ``gufunc_translate_lut``.
 
-    The index for codon ``[n0, n1, n2]`` (ASCII bytes) is
-    ``((n0 >> 1) & 3) << 4 | ((n1 >> 1) & 3) << 2 | ((n2 >> 1) & 3)`` —
-    the same bit-packing the runtime uses. Codons not present in
-    ``codons`` (e.g. ambiguous IUPAC codes) get ``'X'`` (78) as a safe
-    "unknown amino acid" sentinel.
+    The packed index for each codon is computed by ``_pack_codon_index`` — the
+    same hash the runtime uses — so the table and the lookup cannot drift.
+
+    Callers must gate construction with ``_can_build_lut`` (length-3, ACGT-only
+    codons); this function does not re-validate. The table is initialised to the
+    ``'X'`` (unknown amino acid) byte so that a *partial* standard alphabet — one
+    that is ACGT/k=3 but omits some of the 64 codons — resolves missing codons to
+    ``'X'`` rather than uninitialised memory. For the complete standard genetic
+    code all 64 slots are overwritten.
 
     Parameters
     ----------
     codons
-        List of 3-character DNA strings (uppercase ACGT only).
+        List of length-3 DNA strings (uppercase ACGT).
     amino_acids
-        List of 1-character amino-acid strings, aligned with ``codons``.
+        List of single-character amino-acid strings, aligned with ``codons``.
 
     Returns
     -------
     NDArray[np.uint8]
-        Shape ``(64,)``. ``lut[idx]`` is the AA byte for the codon at
-        packed index ``idx``.
-
-    Raises
-    ------
-    ValueError
-        If any codon contains a non-``ACGT`` character (the LUT
-        bit-packing only handles the 4 standard nucleotides; pass an
-        extended alphabet to the generic ``gufunc_translate`` path).
+        Shape ``(64,)``; ``lut[idx]`` is the AA byte for the codon at packed
+        index ``idx``.
     """
     lut = np.full(64, ord("X"), dtype=np.uint8)
     for codon, aa in zip(codons, amino_acids, strict=True):
-        if len(codon) != 3:
-            raise ValueError(f"LUT path requires k=3 codons; got {codon!r}")
-        n0_byte, n1_byte, n2_byte = ord(codon[0]), ord(codon[1]), ord(codon[2])
-        for c in (codon[0], codon[1], codon[2]):
-            if c not in "ACGT":
-                raise ValueError(f"LUT path requires ACGT-only codons; got {codon!r}")
-        idx = _pack_codon_index(n0_byte, n1_byte, n2_byte)
+        idx = _pack_codon_index(ord(codon[0]), ord(codon[1]), ord(codon[2]))
         lut[idx] = ord(aa)
     return lut
 
@@ -312,12 +311,11 @@ class AminoAlphabet:
 
         self.codon_to_aa = dict(zip(codons, amino_acids))
 
-        # Build the 64-entry O(1) lookup table when the alphabet is the
-        # standard ACGT × k=3 case; fall back to the generic linear-scan
-        # path for non-standard alphabets.
-        try:
+        # Build the 64-entry O(1) lookup table only for the standard ACGT × k=3
+        # case; non-standard alphabets use the generic linear-scan path.
+        if _can_build_lut(codons):
             self.codon_lut = _build_translate_lut(codons, amino_acids)
-        except ValueError:
+        else:
             self.codon_lut = None
 
     @overload

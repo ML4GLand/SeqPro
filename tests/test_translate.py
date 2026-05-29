@@ -247,3 +247,31 @@ def test_translate_ragged_error_bad_length():
     rag = _make_ragged_bytes("ATCG")  # length 4, not divisible by 3
     with pytest.raises(ValueError, match="divisible by codon"):
         sp.AA.translate(rag)
+
+
+def test_can_build_lut_predicate():
+    from seqpro.alphabets._alphabets import _can_build_lut
+
+    assert _can_build_lut(["ATG", "AAA"]) is True
+    assert _can_build_lut(["AUG"]) is False  # U is not in ACGT
+    assert _can_build_lut(["AT", "ATG"]) is False  # not all length-3
+    assert _can_build_lut(["AT"]) is False
+
+
+def test_nonstandard_alphabet_has_no_lut():
+    """A non-ACGT alphabet falls back: codon_lut is None."""
+    alpha = sp.AminoAlphabet(["AUG", "UAA"], ["M", "*"])
+    assert alpha.codon_lut is None
+
+
+def test_partial_acgt_alphabet_fills_unknown_with_X():
+    """A k=3 ACGT alphabet missing codons still builds a LUT; absent codons
+    resolve to the 'X' sentinel rather than garbage."""
+    from seqpro._numba import _pack_codon_index
+
+    alpha = sp.AminoAlphabet(["ATG"], ["M"])
+    assert alpha.codon_lut is not None
+    idx_atg = int(_pack_codon_index(ord("A"), ord("T"), ord("G")))
+    assert chr(alpha.codon_lut[idx_atg]) == "M"
+    idx_aaa = int(_pack_codon_index(ord("A"), ord("A"), ord("A")))
+    assert chr(alpha.codon_lut[idx_aaa]) == "X"
