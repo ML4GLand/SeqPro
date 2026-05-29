@@ -305,3 +305,32 @@ def test_translate_ragged_bytes_validate_raises():
     rag = _make_ragged_bytes("ATGNNN")
     with pytest.raises(ValueError, match="outside the alphabet"):
         sp.AA.translate(rag, validate=True)
+
+
+def test_translate_ohe_validate_passes_valid():
+    ohe = sp.DNA.ohe(sp.cast_seqs("ATCGAT"))
+    rag = Ragged.from_lengths(ohe, np.array([6]))
+    # Should not raise.
+    sp.AA.translate(rag, nuc_alphabet=sp.DNA, validate=True)
+
+
+def test_translate_ohe_validate_raises_multihot():
+    ohe = sp.DNA.ohe(sp.cast_seqs("ATCGAT")).copy()
+    ohe[0, :] = 1  # multi-hot row (sum == 4)
+    rag = Ragged.from_lengths(ohe, np.array([6]))
+    with pytest.raises(ValueError, match="one-hot"):
+        sp.AA.translate(rag, nuc_alphabet=sp.DNA, validate=True)
+
+
+def test_translate_ohe_validate_raises_allzero():
+    ohe = sp.DNA.ohe(sp.cast_seqs("ATCGAT")).copy()
+    ohe[0, :] = 0  # all-zero row (sum == 0)
+    rag = Ragged.from_lengths(ohe, np.array([6]))
+    with pytest.raises(ValueError, match="one-hot"):
+        sp.AA.translate(rag, nuc_alphabet=sp.DNA, validate=True)
+
+
+def test_check_ohe_rows_raises_on_1d_data():
+    """A 1-D buffer (not (total, n_nuc)) yields a clear ValueError, not IndexError."""
+    with pytest.raises(ValueError, match="must be 2-D"):
+        sp.AA._check_ohe_rows(np.zeros(6, dtype=np.uint8), 4)

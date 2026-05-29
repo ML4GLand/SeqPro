@@ -337,6 +337,32 @@ class AminoAlphabet:
                 f"the alphabet {{{allowed}}}: found {bad!r}."
             )
 
+    def _check_ohe_rows(self, data: NDArray[np.uint8], n_nuc: int) -> None:
+        """Raise ``ValueError`` unless every row of OHE ``data`` (alphabet axis
+        is axis 1 of the packed flat buffer) is exactly one-hot over ``n_nuc``
+        nucleotides. Used by ``translate(validate=True)`` for OHE Ragged input.
+
+        Required because decoding maps an all-zero row to the unknown sentinel
+        but a *multi-hot* row silently resolves to a real nucleotide — so a
+        decode-then-membership check would not catch it.
+        """
+        if data.ndim != 2:
+            raise ValueError(
+                f"translate(validate=True): OHE data must be 2-D (total, n_nuc), "
+                f"got shape {data.shape!r}."
+            )
+        if data.shape[1] != n_nuc:
+            raise ValueError(
+                f"translate(validate=True): OHE width {data.shape[1]} does not "
+                f"match nucleotide alphabet size {n_nuc}."
+            )
+        sums = data.sum(axis=1, dtype=np.int64)
+        if not bool((sums == 1).all()):
+            raise ValueError(
+                "translate(validate=True): every OHE row must be one-hot "
+                "(exactly one 1 per nucleotide position)."
+            )
+
     @overload
     def translate(
         self,
@@ -456,6 +482,8 @@ class AminoAlphabet:
         if is_ohe:
             if nuc_alphabet is None:
                 raise ValueError("nuc_alphabet is required for OHE Ragged input.")
+            if validate:
+                self._check_ohe_rows(seqs.data, len(nuc_alphabet.array))
             nuc_bytes_flat: NDArray[np.bytes_] = nuc_alphabet.decode_ohe(  # type: ignore[union-attr]
                 seqs.data, ohe_axis=-1
             )
