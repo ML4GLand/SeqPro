@@ -93,6 +93,18 @@ def test_lut_and_linear_scan_produce_identical_output():
     np.testing.assert_array_equal(actual, expected)
 
 
+def test_pack_codon_index_bijective_over_acgt():
+    """The 64 ACGT codons map to 64 distinct indices covering exactly [0, 63]."""
+    from seqpro._numba import _pack_codon_index
+
+    idxs = set()
+    for a in "ACGT":
+        for b in "ACGT":
+            for c in "ACGT":
+                idxs.add(int(_pack_codon_index(ord(a), ord(b), ord(c))))
+    assert idxs == set(range(64))
+
+
 def test_alphabet_translate_uses_lut_by_default():
     """``sp.AA.translate`` should now go through the LUT path on standard
     AA. Cross-validate against BioPython to confirm the LUT is correct."""

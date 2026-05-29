@@ -142,6 +142,22 @@ def gufunc_translate(
             break
 
 
+@nb.njit(cache=True)
+def _pack_codon_index(b0, b1, b2):
+    """Pack a 3-codon's ASCII bytes into a 6-bit LUT index in ``[0, 63]``.
+
+    Uses the 2-bit-per-nucleotide hash ``(byte >> 1) & 3``, a bijection on
+    ``{A, C, G, T}``. This is the single source of truth for the codon→index
+    mapping: both the runtime lookup (:func:`gufunc_translate_lut`) and the
+    table builder (``_build_translate_lut``) call it, so they cannot drift
+    out of sync.
+    """
+    n0 = (b0 >> 1) & 3
+    n1 = (b1 >> 1) & 3
+    n2 = (b2 >> 1) & 3
+    return (n0 << 4) | (n1 << 2) | n2
+
+
 @nb.guvectorize(
     ["(u1[:], u1[:], u1[:])"],
     "(k),(m)->()",
@@ -188,11 +204,7 @@ def gufunc_translate_lut(
     LUT fits in L1 cache (64 bytes); the lookup is two integer shifts +
     two ors + one array dereference per codon.
     """
-    n0 = (seq_kmers[0] >> 1) & 3
-    n1 = (seq_kmers[1] >> 1) & 3
-    n2 = (seq_kmers[2] >> 1) & 3
-    idx = (n0 << 4) | (n1 << 2) | n2
-    res[0] = codon_lut[idx]
+    res[0] = codon_lut[_pack_codon_index(seq_kmers[0], seq_kmers[1], seq_kmers[2])]
 
 
 @nb.guvectorize(

@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 
 from .._numba import (
     _nb_find_stop_ends,
+    _pack_codon_index,
     gufunc_complement_bytes,
     gufunc_translate,
     gufunc_translate_lut,
@@ -259,10 +260,7 @@ def _build_translate_lut(
         for c in (codon[0], codon[1], codon[2]):
             if c not in "ACGT":
                 raise ValueError(f"LUT path requires ACGT-only codons; got {codon!r}")
-        n0 = (n0_byte >> 1) & 3
-        n1 = (n1_byte >> 1) & 3
-        n2 = (n2_byte >> 1) & 3
-        idx = (n0 << 4) | (n1 << 2) | n2
+        idx = _pack_codon_index(n0_byte, n1_byte, n2_byte)
         lut[idx] = ord(aa)
     return lut
 
