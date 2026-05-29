@@ -118,12 +118,12 @@ def gufunc_translate(
     kmer_values: NDArray[np.uint8],
     res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:  # type: ignore
-    """Translate k-mers into amino acids via O(n) linear scan.
+    """Translate k-mers into amino acids via an O(n) linear scan.
 
-    Generic fallback for non-standard alphabets where the codon length
-    differs from 3. For standard genetic-code translation (k=3), prefer
-    :func:`gufunc_translate_lut` — orders of magnitude faster via O(1)
-    table lookup.
+    Generic fallback for non-standard alphabets (codon length other than 3,
+    or extended/IUPAC characters). For the standard genetic code (k=3, ACGT),
+    ``AminoAlphabet.translate`` automatically uses the O(1)
+    :func:`gufunc_translate_lut` path instead.
 
     Parameters
     ----------
@@ -169,25 +169,17 @@ def gufunc_translate_lut(
     codon_lut: NDArray[np.uint8],
     res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:  # type: ignore
-    """Translate a 3-codon to its amino acid via O(1) lookup table.
+    """Translate a 3-codon to its amino acid via an O(1) lookup table.
 
-    Replaces the O(64) linear scan in :func:`gufunc_translate` with a
-    single table dereference, exploiting that DNA's ASCII bytes already
-    encode a 2-bit-per-nucleotide hash via ``(byte >> 1) & 3``:
+    Selected automatically by ``AminoAlphabet.translate`` for the standard
+    genetic code (k=3, ACGT); non-standard alphabets use
+    :func:`gufunc_translate` instead.
 
-    - ``'A'`` (65) → 0
-    - ``'C'`` (67) → 1
-    - ``'T'`` (84) → 2
-    - ``'G'`` (71) → 3
-
-    Any permutation of {A, C, G, T} → {0, 1, 2, 3} works equally well,
-    so the LUT just needs to be built with the same bit-packing the
-    runtime uses. Indices are packed
-    ``(n0 << 4) | (n1 << 2) | n2`` for a 6-bit index in ``[0, 63]``;
-    the 64-element ``codon_lut`` returns the AA byte for each.
-
-    Only valid for ``k == 3`` (standard genetic code). Non-standard
-    alphabets keep using :func:`gufunc_translate`.
+    The LUT is indexed by ``_pack_codon_index``, which hashes each nucleotide's
+    ASCII byte with ``(byte >> 1) & 3`` — a bijection on ``{A, C, G, T}`` — and
+    packs the three 2-bit codes into a 6-bit index in ``[0, 63]``. The
+    64-element ``codon_lut`` (built by ``AminoAlphabet`` at construction) returns
+    the amino-acid byte for that index.
 
     Parameters
     ----------
@@ -197,12 +189,6 @@ def gufunc_translate_lut(
         64-byte LUT, built by ``AminoAlphabet`` at construction time.
     res
         Output buffer.
-
-    Notes
-    -----
-    Speedup vs :func:`gufunc_translate`: ~20-50× on large arrays. The
-    LUT fits in L1 cache (64 bytes); the lookup is two integer shifts +
-    two ors + one array dereference per codon.
     """
     res[0] = codon_lut[_pack_codon_index(seq_kmers[0], seq_kmers[1], seq_kmers[2])]
 

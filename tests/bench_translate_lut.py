@@ -1,13 +1,12 @@
-"""Microbench: O(64) linear scan vs O(1) LUT in ``gufunc_translate``.
+"""Microbench: O(64) linear scan vs O(1) LUT in ``AminoAlphabet.translate``.
 
-Skipped under the default test selection; run explicitly with::
+Not collected by pytest (filename is not ``test_*``). Run explicitly to measure
+the speedup on your hardware::
 
-    python tests/test_translate_lut_bench.py
+    python tests/bench_translate_lut.py
 
-Expected speedup: 20-50× depending on CPU + cache effects. The LUT is
-64 bytes (fits in L1), the lookup is two shifts + two ors + one
-dereference per codon, while the original scan does up to 64 byte-array
-comparisons per codon.
+Speedups are data- and hardware-dependent; this script reports measured numbers
+rather than asserting a fixed multiplier.
 """
 
 from __future__ import annotations
