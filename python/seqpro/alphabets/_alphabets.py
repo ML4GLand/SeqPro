@@ -504,12 +504,20 @@ class AminoAlphabet:
             # sliding_window_view appends window axis at end → slice axis 0 by codon_size
             codons = codons[::codon_size]
             # codons shape: (num_codons, *trailing, codon_size); codon axis is last
-            translated_flat: NDArray[np.bytes_] = gufunc_translate(
-                codons.view(np.uint8),
-                self.codon_array.view(np.uint8),
-                self.aa_array.view(np.uint8),
-                axes=[-1, (-2, -1), (-1), ()],  # type: ignore
-            ).view("S1")  # (num_codons, *trailing)
+            translated_flat: NDArray[np.bytes_]
+            if self.codon_lut is not None:
+                translated_flat = gufunc_translate_lut(
+                    codons.view(np.uint8),
+                    self.codon_lut,
+                    axes=[-1, -1, ()],  # type: ignore
+                ).view("S1")  # (num_codons, *trailing)
+            else:
+                translated_flat = gufunc_translate(
+                    codons.view(np.uint8),
+                    self.codon_array.view(np.uint8),
+                    self.aa_array.view(np.uint8),
+                    axes=[-1, (-2, -1), (-1), ()],  # type: ignore
+                ).view("S1")  # (num_codons, *trailing)
         else:
             translated_flat = np.empty((0, *trailing), dtype="S1")
 
