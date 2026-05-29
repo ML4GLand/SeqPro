@@ -1,3 +1,26 @@
+## 0.12.0 (2026-05-29)
+
+### Feat
+
+- **translate**: validate OHE inputs are one-hot
+- **translate**: add validate flag for nucleotide input checking
+
+### Fix
+
+- **ci**: merge runs when publish succeeded after a transitive skip
+- **ci**: allow publish to run when bump was skipped
+- **ci**: publish.yaml checks out the bumped tag, not the dispatch SHA
+
+### Refactor
+
+- **translate**: gate LUT build with predicate, drop exception control-flow
+- **translate**: single source of truth for codon LUT index
+
+### Perf
+
+- **translate**: route Ragged path through codon LUT
+- **translate**: O(1) LUT codon→AA lookup — 179× speedup on bench
+
 ## 0.11.1 (2026-05-21)
 
 ### Feat
