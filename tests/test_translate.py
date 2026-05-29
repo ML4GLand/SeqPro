@@ -275,3 +275,33 @@ def test_partial_acgt_alphabet_fills_unknown_with_X():
     assert chr(alpha.codon_lut[idx_atg]) == "M"
     idx_aaa = int(_pack_codon_index(ord("A"), ord("A"), ord("A")))
     assert chr(alpha.codon_lut[idx_aaa]) == "X"
+
+
+# --- validate flag tests ---
+
+
+def test_translate_validate_passes_on_valid_acgt():
+    # Should not raise.
+    sp.AA.translate("ATGAAA", length_axis=-1, validate=True)
+
+
+def test_translate_validate_raises_on_lowercase():
+    with pytest.raises(ValueError, match="outside the alphabet"):
+        sp.AA.translate("atgAAA", length_axis=-1, validate=True)
+
+
+def test_translate_validate_raises_on_N():
+    with pytest.raises(ValueError, match="outside the alphabet"):
+        sp.AA.translate("ATGNNN", length_axis=-1, validate=True)
+
+
+def test_translate_validate_false_does_not_raise_on_invalid():
+    # Default path performs no validation and must not raise.
+    out = sp.AA.translate("ATGNNN", length_axis=-1, validate=False)
+    assert out.shape[-1] == 2
+
+
+def test_translate_ragged_bytes_validate_raises():
+    rag = _make_ragged_bytes("ATGNNN")
+    with pytest.raises(ValueError, match="outside the alphabet"):
+        sp.AA.translate(rag, validate=True)

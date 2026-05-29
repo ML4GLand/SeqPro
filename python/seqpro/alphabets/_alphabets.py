@@ -275,6 +275,9 @@ class AminoAlphabet:
     path. ``None`` for non-standard alphabets where the codon length isn't
     3 or any codon contains a non-ACGT character — the generic
     :func:`gufunc_translate` path runs in that case."""
+    _valid_nuc_bytes: NDArray[np.uint8]
+    """Unique nucleotide bytes across all codons (e.g. ``ACGT`` for the standard
+    alphabet), used by ``translate(validate=True)`` to check string input."""
 
     def __init__(self, codons: list[str], amino_acids: list[str]) -> None:
         """Construct an alphabet of amino acids and their mappings to codons.
@@ -318,6 +321,22 @@ class AminoAlphabet:
         else:
             self.codon_lut = None
 
+        # Unique nucleotide bytes across all codons, for translate(validate=True).
+        nuc_chars = sorted({c for codon in codons for c in codon})
+        self._valid_nuc_bytes = np.array([ord(c) for c in nuc_chars], dtype=np.uint8)
+
+    def _check_nuc_bytes(self, buf: NDArray[np.uint8]) -> None:
+        """Raise ``ValueError`` if any byte in ``buf`` is outside the alphabet's
+        nucleotides. Used by ``translate(validate=True)`` for string input."""
+        ok = np.isin(buf, self._valid_nuc_bytes)
+        if not bool(ok.all()):
+            bad = np.unique(buf[~ok]).tobytes().decode("ascii", "replace")
+            allowed = self._valid_nuc_bytes.tobytes().decode("ascii")
+            raise ValueError(
+                f"translate(validate=True): input contains characters outside "
+                f"the alphabet {{{allowed}}}: found {bad!r}."
+            )
+
     @overload
     def translate(
         self,
@@ -326,6 +345,7 @@ class AminoAlphabet:
         *,
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
+        validate: bool = False,
     ) -> NDArray[np.bytes_]: ...
     @overload
     def translate(
@@ -335,6 +355,7 @@ class AminoAlphabet:
         *,
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
+        validate: bool = False,
     ) -> Ragged[np.bytes_]: ...
     @overload
     def translate(
@@ -344,6 +365,7 @@ class AminoAlphabet:
         *,
         nuc_alphabet: NucleotideAlphabet,
         truncate_stop: bool = False,
+        validate: bool = False,
     ) -> Ragged[np.uint8]: ...
     def translate(
         self,
@@ -352,6 +374,7 @@ class AminoAlphabet:
         *,
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
+        validate: bool = False,
     ) -> NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]:
         """Translate nucleotide sequences to amino acids.
 
@@ -367,6 +390,11 @@ class AminoAlphabet:
         truncate_stop
             When True, each output sequence is truncated at the first stop codon
             (inclusive). Only valid for Ragged input. Default False.
+        validate
+            When True, raise ValueError if any input nucleotide is outside this
+            alphabet (e.g. lowercase, ``N``, or other non-ACGT bytes; for OHE
+            input, any row that is not exactly one-hot). When validation passes,
+            the translation is guaranteed exact. Default False (no checking).
 
         Returns
         -------
@@ -377,6 +405,8 @@ class AminoAlphabet:
         if not isinstance(seqs, Ragged):
             check_axes(seqs, length_axis, False)
             seqs = cast_seqs(seqs)
+            if validate:
+                self._check_nuc_bytes(seqs.view(np.uint8))
             codon_size = self.codon_array.shape[-1]
             if length_axis is None:
                 length_axis = -1
@@ -431,6 +461,8 @@ class AminoAlphabet:
             )
         else:
             nuc_bytes_flat = seqs.data
+            if validate:
+                self._check_nuc_bytes(nuc_bytes_flat.view(np.uint8))
 
         # Translate the entire flat buffer in one vectorized call. This is valid because
         # translation is invariant to splitting/concatenation when all lengths % codon_size == 0.
