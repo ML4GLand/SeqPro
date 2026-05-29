@@ -354,3 +354,96 @@ def test_translate_ragged_fallback_for_nonstandard_alphabet():
     rag = Ragged.from_lengths(data, np.array([6]))
     out = alpha.translate(rag)
     np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("M*"))
+
+
+# --- path-activation tests ---
+# These guard that the LUT optimization is actually *used* for the standard
+# alphabet (and conversely that the scan is used for non-standard ones). Without
+# them, a regression that silently routed every call through the linear scan
+# would still pass every correctness test, because the scan is correct, just slow.
+
+
+def test_dense_standard_alphabet_uses_lut_not_scan(monkeypatch):
+    """Standard-alphabet dense path must hit the LUT kernel, never the scan."""
+    import seqpro.alphabets._alphabets as alpha_mod
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("linear scan was used instead of the LUT")
+
+    monkeypatch.setattr(alpha_mod, "gufunc_translate", _boom)
+    out = sp.AA.translate("ATGAAA", length_axis=-1).view("S1")
+    np.testing.assert_array_equal(out, sp.cast_seqs(str(translate("ATGAAA"))))
+
+
+def test_ragged_standard_alphabet_uses_lut_not_scan(monkeypatch):
+    """Standard-alphabet Ragged path must hit the LUT kernel, never the scan."""
+    import seqpro.alphabets._alphabets as alpha_mod
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("linear scan was used instead of the LUT")
+
+    monkeypatch.setattr(alpha_mod, "gufunc_translate", _boom)
+    rag = _make_ragged_bytes("ATGAAA")
+    out = sp.AA.translate(rag)
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("MK"))
+
+
+def test_nonstandard_alphabet_uses_scan_not_lut(monkeypatch):
+    """A non-standard (codon_lut=None) alphabet must use the scan, never the LUT."""
+    import seqpro.alphabets._alphabets as alpha_mod
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("LUT kernel was used for a non-standard alphabet")
+
+    monkeypatch.setattr(alpha_mod, "gufunc_translate_lut", _boom)
+    alpha = sp.AminoAlphabet(["AUG", "UAA"], ["M", "*"])
+    data = np.array(list("AUGUAA"), dtype="S1")
+    rag = Ragged.from_lengths(data, np.array([6]))
+    out = alpha.translate(rag)
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("M*"))
+
+
+# --- additional validate coverage ---
+
+
+def test_translate_ragged_bytes_validate_passes_on_valid():
+    """validate=True on clean multi-sequence Ragged bytes must not raise."""
+    rag = _make_ragged_bytes("ATGAAA", "GGGTTT")
+    out = sp.AA.translate(rag, validate=True)
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("MK"))
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[1]), sp.cast_seqs("GF"))
+
+
+def test_translate_validate_passes_on_2d_valid():
+    """validate=True over a 2-D dense array of valid sequences must not raise."""
+    seqs = sp.cast_seqs(["ATGAAA", "GGGTTT"])
+    out = sp.AA.translate(seqs, length_axis=-1, validate=True)
+    np.testing.assert_array_equal(out, sp.cast_seqs(["MK", "GF"]))
+
+
+def test_translate_validate_raises_on_2d_with_invalid():
+    """A non-ACGT byte anywhere in a 2-D dense array is caught by validate=True."""
+    seqs = sp.cast_seqs(["ATGAAA", "ATGNNN"])  # second row has N
+    with pytest.raises(ValueError, match="outside the alphabet"):
+        sp.AA.translate(seqs, length_axis=-1, validate=True)
+
+
+def test_check_ohe_rows_raises_on_width_mismatch():
+    """OHE width not matching the nucleotide alphabet size raises a clear error."""
+    data = np.zeros((6, 5), dtype=np.uint8)  # width 5 != DNA's 4
+    with pytest.raises(ValueError, match="width"):
+        sp.AA._check_ohe_rows(data, 4)
+
+
+def test_translate_ragged_multiseq_matches_biopython():
+    """Differential check over a multi-sequence, variable-length Ragged batch."""
+    rng = np.random.default_rng(11)
+    seqs = [
+        "".join(rng.choice(list("ACGT"), size=3 * int(rng.integers(2, 40))))
+        for _ in range(5)
+    ]
+    rag = _make_ragged_bytes(*seqs)
+    out = sp.AA.translate(rag)
+    for i, s in enumerate(seqs):
+        expected = sp.cast_seqs(str(translate(s)))
+        np.testing.assert_array_equal(_rag_bytes_to_array(out[i]), expected)
