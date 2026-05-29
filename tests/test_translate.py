@@ -334,3 +334,23 @@ def test_check_ohe_rows_raises_on_1d_data():
     """A 1-D buffer (not (total, n_nuc)) yields a clear ValueError, not IndexError."""
     with pytest.raises(ValueError, match="must be 2-D"):
         sp.AA._check_ohe_rows(np.zeros(6, dtype=np.uint8), 4)
+
+
+def test_translate_ragged_uses_lut_matches_biopython():
+    """Ragged path (now LUT-routed for the standard alphabet) matches BioPython."""
+    rng = np.random.default_rng(7)
+    seq = "".join(rng.choice(list("ACGT"), size=300))
+    rag = _make_ragged_bytes(seq)
+    out = sp.AA.translate(rag)
+    expected = sp.cast_seqs(str(translate(seq)))
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), expected)
+
+
+def test_translate_ragged_fallback_for_nonstandard_alphabet():
+    """Non-ACGT alphabet has codon_lut=None → Ragged path uses the scan fallback."""
+    alpha = sp.AminoAlphabet(["AUG", "UAA"], ["M", "*"])
+    assert alpha.codon_lut is None
+    data = np.array(list("AUGUAA"), dtype="S1")
+    rag = Ragged.from_lengths(data, np.array([6]))
+    out = alpha.translate(rag)
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("M*"))
