@@ -1,3 +1,13 @@
+## 0.12.1 (2026-05-31)
+
+### Fix
+
+- add attrs
+
+### Perf
+
+- **rag**: prototype flat-buffer ragged reverse_complement
+
 ## 0.12.0 (2026-05-29)
 
 ### Feat
