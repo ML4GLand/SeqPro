@@ -25,6 +25,7 @@ dependencies = [
     "setuptools>=70",                    # uv + pyranges seems to miss this
     "awkward>=2.5.0",
     "polars-config-meta[polars]>=0.3.2",
+    "attrs",
 ]
 
 [dependency-groups]

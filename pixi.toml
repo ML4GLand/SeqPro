@@ -46,12 +46,7 @@ numpy = "==1.26.0"
 polars = "==1.21.0"
 pandera = "==0.31.1"
 awkward = "==2.5.0"
-pandas = "*"
-natsort = "*"
 narwhals = "==2.20.0"
-pyarrow = "*"
-ipykernel = "*"
-prek = "*"
 
 [feature.dev.pypi-dependencies]
 pyranges = "==0.1.3"
