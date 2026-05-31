@@ -17,7 +17,7 @@ from ._array import Ragged, is_rag_dtype
 __all__ = ["reverse_complement"]
 
 
-@nb.njit(parallel=True, cache=True)
+@nb.njit(parallel=True, nogil=True, cache=True)
 def _reverse_complement_ragged(
     data: NDArray[np.uint8],
     offsets: NDArray[np.int64],
