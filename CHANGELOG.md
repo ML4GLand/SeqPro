@@ -1,3 +1,25 @@
+## 0.14.0 (2026-06-01)
+
+### Feat
+
+- **rag**: add Ragged.to_packed method and export to_packed
+- **rag**: add Numba-parallelized to_packed for flat layouts
+
+### Fix
+
+- **ci**: check out release tag and drop duplicate release trigger
+- **rag**: produce canonical list-of-records layout in to_packed
+
+### Refactor
+
+- **rag**: make Ragged.to_packed copy keyword-only; add multibyte-trailing test
+- **rag**: drop unused as_contiguous packing path in unbox
+
+### Perf
+
+- **rag**: microbenchmark to_packed throughput vs ak.to_packed
+- **rag**: use to_packed at internal ak.to_packed call sites
+
 ## 0.13.0 (2026-06-01)
 
 ### Feat
