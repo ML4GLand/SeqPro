@@ -90,6 +90,7 @@ rag = sp.rag.Ragged.empty((10, None, 4), dtype=np.uint8)   # batch of 10 OHE seq
 | Reshape non-ragged axes | `rag.reshape(batch, None, k, 4)` | Touch `rag.data.shape` directly |
 | Drop a size-1 axis | `rag.squeeze(axis)` (returns `ndarray` if collapses to 1D) | |
 | Densify to NumPy | `rag.to_numpy()` (pads/raises per `allow_missing`) | Loop and stack |
+| Densify + right-pad to fixed length | `sp.rag.to_padded(rag, pad_value, *, length=None)` — flat-buffer numba kernel; `length=None` pads to batch max, explicit `length` pads/truncates; ragged-axis-last, non-record only | `rag.to_numpy()` with manual slicing or `ak_str.rpad` (~3× slower; the awkward path allocates extra intermediates) |
 | Strip to plain awkward | `rag.to_ak()` | |
 
 ### Record-layout `Ragged` (multi-field)
