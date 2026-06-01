@@ -108,9 +108,7 @@ def reverse_complement(
 
     # The kernel assumes contiguous (N+1,) offsets and a contiguous flat buffer.
     if not rag.is_contiguous:
-        import awkward as ak
-
-        rag = Ragged(ak.to_packed(rag))
+        rag = to_packed(rag)
 
     offsets = np.ascontiguousarray(rag.offsets, dtype=np.int64)
     n_rows = offsets.shape[0] - 1
