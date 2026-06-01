@@ -1,3 +1,21 @@
+## 0.13.0 (2026-06-01)
+
+### Feat
+
+- **rag**: guard to_padded for record/trailing-dim/non-contiguous
+- **rag**: to_padded fixed-length pad and truncate
+- **rag**: flat-buffer to_padded (pad to batch max)
+
+## 0.12.1 (2026-05-31)
+
+### Fix
+
+- add attrs
+
+### Perf
+
+- **rag**: prototype flat-buffer ragged reverse_complement
+
 ## 0.12.0 (2026-05-29)
 
 ### Feat

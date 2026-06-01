@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 from ._array import Ragged, is_rag_dtype
 from ._utils import OFFSET_TYPE
 
-__all__ = ["reverse_complement", "to_packed"]
+__all__ = ["reverse_complement", "to_packed", "to_padded"]
 
 
 @nb.njit(parallel=True, nogil=True, cache=True)
@@ -272,3 +272,106 @@ def to_packed(rag: Ragged, *, copy: bool = True) -> Ragged:
     if packed_data is parts.data and packed_offsets is parts.offsets:
         return rag  # copy=False passthrough
     return Ragged.from_offsets(packed_data, parts.shape, packed_offsets)
+
+
+@nb.njit(parallel=True, nogil=True, cache=True)
+def _to_padded_copy(
+    data_u1: NDArray[np.uint8],
+    offsets: NDArray[np.int64],
+    out_u1: NDArray[np.uint8],
+    itemsize: int,
+    out_len: int,
+) -> None:  # pragma: no cover - exercised via to_padded
+    """Copy each ragged row's bytes into a pre-filled (n_rows, out_len) buffer.
+
+    ``out_u1`` is the flat uint8 view of a C-contiguous ``(n_rows, out_len)`` array
+    already filled with the pad value. For each row, the first
+    ``min(row_len, out_len)`` elements are copied (longer rows are truncated);
+    padded positions keep the pre-filled value. Parallel across rows.
+    """
+    n = offsets.shape[0] - 1
+    row_stride = out_len * itemsize
+    for i in nb.prange(n):
+        row_len = offsets[i + 1] - offsets[i]
+        ncopy = row_len if row_len < out_len else out_len
+        nbytes = ncopy * itemsize
+        src = offsets[i] * itemsize
+        dst = i * row_stride
+        for b in range(nbytes):
+            out_u1[dst + b] = data_u1[src + b]
+
+
+def to_padded(
+    rag: Ragged,
+    pad_value,
+    *,
+    length: int | None = None,
+) -> NDArray:
+    """Densify a Ragged into a right-padded rectilinear array via a flat-buffer kernel.
+
+    Flat-buffer alternative to the awkward idiom
+    ``Ragged(ak_str.rpad(rag, L, v)).to_numpy()`` (bytes) /
+    ``ak.to_numpy(ak.fill_none(ak.pad_none(rag, L, axis=-1, clip=True), v))`` (numeric):
+    each row is copied once into a pre-filled output buffer in a single parallel pass.
+    Pads the last axis to ``length`` if given, otherwise to the batch maximum ``rag.lengths.max()``.
+
+    Parameters
+    ----------
+    rag
+        Ragged array with exactly one ragged dimension and no fixed trailing
+        dimensions (the ragged axis is last). Any fixed-itemsize dtype.
+    pad_value
+        Fill value for positions past each row's length; must be castable to
+        ``rag.data.dtype`` (e.g. ``b"N"`` for S1, ``-1`` for int32).
+    length
+        Target length of the last axis. ``None`` (default) uses the batch maximum
+        ``rag.lengths.max()``. An explicit ``length`` right-pads shorter rows and
+        truncates longer rows to exactly ``length``.
+
+    Returns
+    -------
+    NDArray
+        Dense array of dtype ``rag.data.dtype`` and shape
+        ``(*rag.shape[:rag_dim], out_len)``.
+    """
+    import awkward as ak
+
+    if ak.fields(rag):
+        raise NotImplementedError(
+            "to_padded is not defined on record-layout Ragged arrays; "
+            "convert fields individually."
+        )
+
+    rag_dim = rag.rag_dim
+    if any(d is not None for d in rag.shape[rag_dim + 1 :]):
+        raise ValueError(
+            "to_padded requires the ragged axis to be last "
+            f"(no fixed trailing dims), got shape {rag.shape}."
+        )
+
+    if not rag.is_contiguous:
+        rag = to_packed(rag)
+
+    offsets = np.ascontiguousarray(rag.offsets, dtype=np.int64)
+    n_rows = offsets.shape[0] - 1
+
+    if length is not None:
+        out_len = int(length)
+    elif n_rows:
+        out_len = int(rag.lengths.max())
+    else:
+        out_len = 0
+
+    dtype = rag.data.dtype
+    itemsize = dtype.itemsize
+
+    out = np.full((n_rows, out_len), pad_value, dtype=dtype)
+    if n_rows and out_len:
+        data_u1 = np.ascontiguousarray(rag.data).reshape(-1).view(np.uint8)
+        out_u1 = out.reshape(-1).view(np.uint8)
+        _to_padded_copy(data_u1, offsets, out_u1, itemsize, out_len)
+
+    leading = rag.shape[:rag_dim]
+    if leading:
+        out = out.reshape(*leading, out_len)
+    return out
