@@ -70,3 +70,33 @@ class TestToPackedFlat:
         rag = _unpacked([3, 2], np.dtype("float64"))
         with pytest.raises(ValueError, match="already-packed"):
             to_packed(rag, copy=False)
+
+
+class TestToPackedRecord:
+    def _record(self):
+        import awkward as ak
+
+        lengths = np.array([3, 2, 4])
+        scores = np.arange(9, dtype=np.float64)
+        flags = np.arange(9, dtype=np.int8)
+        rec = ak.zip(
+            {
+                "score": Ragged.from_lengths(scores, lengths),
+                "flag": Ragged.from_lengths(flags, lengths),
+            }
+        )
+        return Ragged(rec)
+
+    def test_record_unpacked_packs_all_fields(self):
+        rec = self._record()[::-1]  # reorder -> ListArray-backed fields
+        out = to_packed(rec)
+        assert out.offsets.ndim == 1
+        assert out.offsets[0] == 0
+        assert ak.to_list(out) == ak.to_list(rec)
+        # fields share one offsets object (zero-copy SoA contract)
+        assert out["score"].offsets is out["flag"].offsets
+
+    def test_record_copy_false_passthrough(self):
+        rec = self._record()
+        out = to_packed(rec, copy=False)
+        assert out is rec

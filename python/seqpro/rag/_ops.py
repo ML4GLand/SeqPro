@@ -265,7 +265,7 @@ def to_packed(rag: Ragged, *, copy: bool = True) -> Ragged:
                 p.data, p.shape, offsets, copy=True
             )
             fields[name] = Ragged.from_offsets(packed_data, p.shape, packed_offsets)
-        return Ragged(ak.zip(fields, depth_limit=1))
+        return Ragged(ak.zip(fields))
 
     parts = rag._parts
     packed_data, packed_offsets = _pack_parts(
