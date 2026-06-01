@@ -492,6 +492,26 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
             arr = arr[..., None].view("S1")
         return arr
 
+    def to_packed(self, copy: bool = True) -> Ragged[RDTYPE_co]:
+        """Pack into a fresh contiguous, zero-based Ragged (1-D offsets).
+
+        Numba-parallelized replacement for ``Ragged(ak.to_packed(self))``.
+        See :func:`seqpro.rag.to_packed` for the ``copy`` semantics.
+
+        Parameters
+        ----------
+        copy
+            When ``True`` (default), return a freshly allocated owned array.
+            When ``False``, return zero-copy if already packed, else raise.
+
+        Returns
+        -------
+        Ragged[RDTYPE_co]
+        """
+        from ._ops import to_packed as _to_packed
+
+        return _to_packed(self, copy=copy)
+
     def __getitem__(self, where):
         arr = super().__getitem__(where)
         if isinstance(arr, ak.Array):

@@ -100,3 +100,22 @@ class TestToPackedRecord:
         rec = self._record()
         out = to_packed(rec, copy=False)
         assert out is rec
+
+
+class TestToPackedMethod:
+    def test_method_delegates(self):
+        rag = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([3, 3]))[
+            ::-1
+        ]
+        out = rag.to_packed()
+        assert out.offsets.ndim == 1
+        assert ak.to_list(out) == ak.to_list(rag)
+
+    def test_method_copy_false(self):
+        rag = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([3, 3]))
+        assert rag.to_packed(copy=False) is rag
+
+    def test_exported_from_package(self):
+        import seqpro.rag as rag_mod
+
+        assert hasattr(rag_mod, "to_packed")
