@@ -162,3 +162,55 @@ def test_sliced_nonzero_offset_start_correct():
         [[b"G", b"G", b"N", b"N", b"N"], [b"T", b"T", b"T", b"A", b"A"]], dtype="S1"
     )
     np.testing.assert_array_equal(out, expected)
+
+
+# --------------------------------------------------------------------------- #
+# Edge cases + multi-dtype awkward baseline
+# --------------------------------------------------------------------------- #
+
+
+def test_empty_batch():
+    rag = Ragged.from_lengths(
+        np.frombuffer(b"", dtype="S1").copy(), np.array([], dtype=np.uint32)
+    )
+    out = to_padded(rag, b"N")
+    assert out.shape == (0, 0)
+
+
+def test_all_empty_rows():
+    rag = Ragged.from_lengths(
+        np.frombuffer(b"", dtype="S1").copy(), np.array([0, 0, 0], dtype=np.uint32)
+    )
+    out = to_padded(rag, b"N")
+    assert out.shape == (3, 0)
+
+
+def test_length_zero_truncates_all():
+    rag = _make_bytes_rag(["ATCG", "GG"])
+    out = to_padded(rag, b"N", length=0)
+    assert out.shape == (2, 0)
+
+
+def test_matches_awkward_int32_iinfo_max():
+    rng = np.random.default_rng(3)
+    rows = [
+        list(rng.integers(0, 100, size=int(L))) for L in rng.integers(0, 15, size=10)
+    ]
+    rag = _make_numeric_rag(rows, np.int32)
+    pad = int(np.iinfo(np.int32).max)
+    length = max((len(r) for r in rows), default=0)
+    out = to_padded(rag, pad)
+    expected = _naive_pad_numeric(rag, pad, length)
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_matches_awkward_float32():
+    rng = np.random.default_rng(4)
+    rows = [
+        list(rng.random(int(L)).astype(np.float32)) for L in rng.integers(1, 12, size=9)
+    ]
+    rag = _make_numeric_rag(rows, np.float32)
+    length = max(len(r) for r in rows)
+    out = to_padded(rag, 0.0)
+    expected = _naive_pad_numeric(rag, 0.0, length)
+    np.testing.assert_array_equal(out, expected)
