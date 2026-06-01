@@ -96,3 +96,36 @@ def test_pad_to_max_leading_dims():
     assert out.shape == (2, 3, 4)
     np.testing.assert_array_equal(out[0, 0], np.frombuffer(b"ATNN", dtype="S1"))
     np.testing.assert_array_equal(out[1, 2], np.frombuffer(b"GGGN", dtype="S1"))
+
+
+def test_length_pad_beyond_max():
+    rag = _make_bytes_rag(["ATCG", "GG"])
+    out = to_padded(rag, b"N", length=6)
+    expected = np.array(
+        [[b"A", b"T", b"C", b"G", b"N", b"N"], [b"G", b"G", b"N", b"N", b"N", b"N"]],
+        dtype="S1",
+    )
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_length_truncate_below_max():
+    rag = _make_bytes_rag(["ATCG", "GG"])
+    out = to_padded(rag, b"N", length=3)
+    expected = np.array([[b"A", b"T", b"C"], [b"G", b"G", b"N"]], dtype="S1")
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_length_equal_to_max():
+    rag = _make_bytes_rag(["ATCG", "GG"])
+    out_explicit = to_padded(rag, b"N", length=4)
+    out_default = to_padded(rag, b"N")
+    np.testing.assert_array_equal(out_explicit, out_default)
+    assert out_explicit.dtype == out_default.dtype
+    assert out_explicit.shape == out_default.shape
+
+
+def test_length_truncate_numeric():
+    rag = _make_numeric_rag([[0, 1, 2, 3], [4, 5]], np.int32)
+    out = to_padded(rag, -1, length=2)
+    expected = np.array([[0, 1], [4, 5]], dtype=np.int32)
+    np.testing.assert_array_equal(out, expected)

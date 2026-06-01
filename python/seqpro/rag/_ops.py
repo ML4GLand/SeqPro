@@ -161,14 +161,16 @@ def _to_padded_copy(
 def to_padded(
     rag: Ragged,
     pad_value,
-):
+    *,
+    length: int | None = None,
+) -> NDArray:
     """Densify a Ragged into a right-padded rectilinear array via a flat-buffer kernel.
 
     Flat-buffer alternative to the awkward idiom
     ``Ragged(ak_str.rpad(rag, L, v)).to_numpy()`` (bytes) /
     ``ak.to_numpy(ak.fill_none(ak.pad_none(rag, L, axis=-1, clip=True), v))`` (numeric):
     each row is copied once into a pre-filled output buffer in a single parallel pass.
-    Pads the last axis to the batch maximum ``rag.lengths.max()``.
+    Pads the last axis to ``length`` if given, otherwise to the batch maximum ``rag.lengths.max()``.
 
     Parameters
     ----------
@@ -178,6 +180,10 @@ def to_padded(
     pad_value
         Fill value for positions past each row's length; must be castable to
         ``rag.data.dtype`` (e.g. ``b"N"`` for S1, ``-1`` for int32).
+    length
+        Target length of the last axis. ``None`` (default) uses the batch maximum
+        ``rag.lengths.max()``. An explicit ``length`` right-pads shorter rows and
+        truncates longer rows to exactly ``length``.
 
     Returns
     -------
@@ -190,7 +196,12 @@ def to_padded(
     offsets = np.ascontiguousarray(rag.offsets, dtype=np.int64)
     n_rows = offsets.shape[0] - 1
 
-    out_len = int(rag.lengths.max()) if n_rows else 0
+    if length is not None:
+        out_len = int(length)
+    elif n_rows:
+        out_len = int(rag.lengths.max())
+    else:
+        out_len = 0
 
     dtype = rag.data.dtype
     itemsize = dtype.itemsize
