@@ -191,7 +191,23 @@ def to_padded(
         Dense array of dtype ``rag.data.dtype`` and shape
         ``(*rag.shape[:rag_dim], out_len)``.
     """
+    import awkward as ak
+
+    if ak.fields(rag):
+        raise NotImplementedError(
+            "to_padded is not defined on record-layout Ragged arrays; "
+            "convert fields individually."
+        )
+
     rag_dim = rag.rag_dim
+    if any(d is not None for d in rag.shape[rag_dim + 1 :]):
+        raise ValueError(
+            "to_padded requires the ragged axis to be last "
+            f"(no fixed trailing dims), got shape {rag.shape}."
+        )
+
+    if not rag.is_contiguous:
+        rag = Ragged(ak.to_packed(rag))
 
     offsets = np.ascontiguousarray(rag.offsets, dtype=np.int64)
     n_rows = offsets.shape[0] - 1

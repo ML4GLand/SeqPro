@@ -5,6 +5,7 @@ from __future__ import annotations
 import awkward as ak
 import awkward.operations.str as ak_str
 import numpy as np
+import pytest
 
 from seqpro.rag import Ragged, lengths_to_offsets
 from seqpro.rag._ops import to_padded
@@ -128,4 +129,36 @@ def test_length_truncate_numeric():
     rag = _make_numeric_rag([[0, 1, 2, 3], [4, 5]], np.int32)
     out = to_padded(rag, -1, length=2)
     expected = np.array([[0, 1], [4, 5]], dtype=np.int32)
+    np.testing.assert_array_equal(out, expected)
+
+
+# --------------------------------------------------------------------------- #
+# Guards
+# --------------------------------------------------------------------------- #
+
+
+def test_record_layout_raises():
+    seq = _make_bytes_rag(["ATCG", "GG"])
+    score = _make_numeric_rag([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0]], np.float32)
+    rec = ak.zip({"seq": seq, "score": score})
+    assert isinstance(rec, Ragged)
+    with pytest.raises(NotImplementedError, match="record-layout"):
+        to_padded(rec, b"N")
+
+
+def test_trailing_fixed_dim_raises():
+    data = np.zeros((6, 4), dtype="S1")
+    rag = Ragged.from_offsets(data, (2, None, 4), np.array([0, 2, 6], dtype=np.int64))
+    with pytest.raises(ValueError, match="ragged axis to be last"):
+        to_padded(rag, b"N")
+
+
+def test_sliced_nonzero_offset_start_correct():
+    """A sliced Ragged with a nonzero starting offset still densifies correctly."""
+    rag = _make_bytes_rag(["ATCG", "GG", "TTTAA", "C"])
+    sliced = rag[1:3]  # 1-D offsets with a nonzero start (e.g. [4, 6, 11])
+    out = to_padded(sliced, b"N")
+    expected = np.array(
+        [[b"G", b"G", b"N", b"N", b"N"], [b"T", b"T", b"T", b"A", b"A"]], dtype="S1"
+    )
     np.testing.assert_array_equal(out, expected)
