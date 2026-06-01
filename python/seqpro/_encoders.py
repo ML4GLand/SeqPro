@@ -1,6 +1,5 @@
 from typing import Literal, cast, overload
 
-import awkward as ak
 import numpy as np
 from numpy.typing import NDArray
 
@@ -147,7 +146,7 @@ def ohe(
     )
 
     if isinstance(seqs, Ragged):
-        seqs = Ragged(ak.to_packed(seqs))
+        seqs = seqs.to_packed()
         n = len(seqs.lengths.ravel())
         A = arr.shape[0]
         trailing = seqs.data.shape[1:]
@@ -206,7 +205,7 @@ def decode_ohe(
     _alphabet = np.concatenate([arr, [unknown_char.encode("ascii")]])
 
     if isinstance(seqs, Ragged):
-        seqs = Ragged(ak.to_packed(seqs))
+        seqs = seqs.to_packed()
         n = len(seqs.lengths.ravel())
         # A is always at axis 1 in flat data produced by ohe()
         trailing = seqs.data.shape[2:]
@@ -264,7 +263,7 @@ def tokenize(
     _unknown_token = np.int32(unknown_token)
 
     if isinstance(seqs, Ragged):
-        seqs = Ragged(ak.to_packed(seqs))
+        seqs = seqs.to_packed()
         n = len(seqs.lengths.ravel())
         trailing = seqs.data.shape[1:]
         flat = gufunc_tokenize(seqs.data.view(np.uint8), source, target, _unknown_token)
@@ -313,7 +312,7 @@ def decode_tokens(
     _unk_char = np.uint8(ord(unknown_char))
 
     if isinstance(seqs, Ragged):
-        seqs = Ragged(ak.to_packed(seqs))
+        seqs = seqs.to_packed()
         n = len(seqs.lengths.ravel())
         trailing = seqs.data.shape[1:]
         flat = gufunc_tokenize(seqs.data, source, target, _unk_char).view("S1")

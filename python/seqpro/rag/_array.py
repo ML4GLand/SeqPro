@@ -492,6 +492,26 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
             arr = arr[..., None].view("S1")
         return arr
 
+    def to_packed(self, *, copy: bool = True) -> Ragged[RDTYPE_co]:
+        """Pack into a fresh contiguous, zero-based Ragged (1-D offsets).
+
+        Numba-parallelized replacement for ``Ragged(ak.to_packed(self))``.
+        See :func:`seqpro.rag.to_packed` for the ``copy`` semantics.
+
+        Parameters
+        ----------
+        copy
+            When ``True`` (default), return a freshly allocated owned array.
+            When ``False``, return zero-copy if already packed, else raise.
+
+        Returns
+        -------
+        Ragged[RDTYPE_co]
+        """
+        from ._ops import to_packed as _to_packed
+
+        return _to_packed(self, copy=copy)
+
     def __getitem__(self, where):
         arr = super().__getitem__(where)
         if isinstance(arr, ak.Array):
@@ -728,29 +748,20 @@ class RagParts(Generic[DTYPE_co]):
         return cls(data, shape, offsets)
 
 
-def unbox(
-    arr: ak.Array | Ragged[DTYPE_co], as_contiguous: bool = False
-) -> RagParts[DTYPE_co]:
+def unbox(arr: ak.Array | Ragged[DTYPE_co]) -> RagParts[DTYPE_co]:
     """Unbox an awkward array with a single ragged dimension into data, offsets, and shape.
-    Is guaranteed to be zero-copy if as_contiguous is False, in which case the data is a view
-    of the original array.
+    Always zero-copy: the returned data is a view of the original array.
 
     Parameters
     ----------
     arr
         The awkward array to unbox.
-    as_contiguous
-        If True, the data will be returned as a contiguous array. May force a copy into memory.
-        If the underlying data is memory-mapped, this could cause an out-of-memory error.
 
     Returns
     -------
     RagParts[DTYPE_co]
         Data, shape, and offsets extracted from the awkward array.
     """
-    if as_contiguous:
-        arr = ak.to_packed(arr)
-
     node = cast(Content, ak.to_layout(arr, allow_record=False))
     shape: list[int | None] = [len(node)]
     n_ragged = 0

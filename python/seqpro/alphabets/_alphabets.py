@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import MethodType
 from typing import cast, overload
 
-import awkward as ak
 import numpy as np
 from numpy.typing import NDArray
 
@@ -463,7 +462,7 @@ class AminoAlphabet:
 
         # --- Ragged path ---
         # Pack to ListOffsetArray so .data and .offsets are contiguous and valid.
-        seqs = Ragged(ak.to_packed(seqs))
+        seqs = seqs.to_packed()
 
         is_ohe = is_rag_dtype(seqs, np.uint8)
 
