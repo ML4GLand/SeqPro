@@ -748,29 +748,20 @@ class RagParts(Generic[DTYPE_co]):
         return cls(data, shape, offsets)
 
 
-def unbox(
-    arr: ak.Array | Ragged[DTYPE_co], as_contiguous: bool = False
-) -> RagParts[DTYPE_co]:
+def unbox(arr: ak.Array | Ragged[DTYPE_co]) -> RagParts[DTYPE_co]:
     """Unbox an awkward array with a single ragged dimension into data, offsets, and shape.
-    Is guaranteed to be zero-copy if as_contiguous is False, in which case the data is a view
-    of the original array.
+    Always zero-copy: the returned data is a view of the original array.
 
     Parameters
     ----------
     arr
         The awkward array to unbox.
-    as_contiguous
-        If True, the data will be returned as a contiguous array. May force a copy into memory.
-        If the underlying data is memory-mapped, this could cause an out-of-memory error.
 
     Returns
     -------
     RagParts[DTYPE_co]
         Data, shape, and offsets extracted from the awkward array.
     """
-    if as_contiguous:
-        arr = ak.to_packed(arr)
-
     node = cast(Content, ak.to_layout(arr, allow_record=False))
     shape: list[int | None] = [len(node)]
     n_ragged = 0
