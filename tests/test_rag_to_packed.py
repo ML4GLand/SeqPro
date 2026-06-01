@@ -71,6 +71,15 @@ class TestToPackedFlat:
         with pytest.raises(ValueError, match="already-packed"):
             to_packed(rag, copy=False)
 
+    def test_trailing_fixed_dims_multibyte(self):
+        # float64 (itemsize 8) with trailing dims: exercises elem = prod(trailing)*8
+        data = np.arange(3 * 3, dtype=np.float64).reshape(3, 3)
+        rag = Ragged.from_lengths(data, np.array([2, 1]))[::-1]
+        out = to_packed(rag)
+        assert out.dtype == np.dtype("float64")
+        assert out.shape[1:] == rag.shape[1:]
+        assert ak.to_list(out) == ak.to_list(rag)
+
 
 class TestToPackedRecord:
     def _record(self):

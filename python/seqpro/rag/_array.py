@@ -492,7 +492,7 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
             arr = arr[..., None].view("S1")
         return arr
 
-    def to_packed(self, copy: bool = True) -> Ragged[RDTYPE_co]:
+    def to_packed(self, *, copy: bool = True) -> Ragged[RDTYPE_co]:
         """Pack into a fresh contiguous, zero-based Ragged (1-D offsets).
 
         Numba-parallelized replacement for ``Ragged(ak.to_packed(self))``.
