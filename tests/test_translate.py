@@ -10,6 +10,9 @@ from seqpro._numba import gufunc_translate
 from seqpro.rag import Ragged
 
 
+_MARKER_X = np.uint8(ord("X"))
+
+
 def nb_1_kmer():
     seq_kmers = sp.cast_seqs("ATC").view(np.uint8)
     desired = sp.cast_seqs("I").view(np.uint8)
@@ -30,7 +33,7 @@ def test_gufunc_translate(
     kmer_keys = sp.AA.codon_array.view(np.uint8)
     kmer_values = sp.AA.aa_array.view(np.uint8)
 
-    actual = gufunc_translate(seq_kmers, kmer_keys, kmer_values)
+    actual = gufunc_translate(seq_kmers, kmer_keys, kmer_values, _MARKER_X)
     np.testing.assert_array_equal(actual, desired)
 
 
@@ -50,7 +53,7 @@ def test_lut_translates_every_standard_codon():
 
     for codon, expected_aa in zip(sp.AA.codons, sp.AA.amino_acids, strict=True):
         seq_kmer = sp.cast_seqs(codon).view(np.uint8)
-        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut, _MARKER_X)
         assert int(actual) == ord(expected_aa), (
             f"codon {codon!r} → {chr(int(actual))!r}, expected {expected_aa!r}"
         )
@@ -62,7 +65,7 @@ def test_lut_translates_stop_codons():
 
     for stop in ("TAA", "TAG", "TGA"):
         seq_kmer = sp.cast_seqs(stop).view(np.uint8)
-        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut, _MARKER_X)
         assert chr(int(actual)) == "*", f"{stop} → {chr(int(actual))}, expected '*'"
 
 
@@ -71,7 +74,7 @@ def test_lut_translates_start_codon():
     from seqpro._numba import gufunc_translate_lut
 
     seq_kmer = sp.cast_seqs("ATG").view(np.uint8)
-    actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+    actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut, _MARKER_X)
     assert chr(int(actual)) == "M"
 
 
@@ -88,8 +91,8 @@ def test_lut_and_linear_scan_produce_identical_output():
 
     kmer_keys = sp.AA.codon_array.view(np.uint8)
     kmer_values = sp.AA.aa_array.view(np.uint8)
-    expected = gufunc_translate(codons_bytes, kmer_keys, kmer_values)
-    actual = gufunc_translate_lut(codons_bytes, sp.AA.codon_lut)
+    expected = gufunc_translate(codons_bytes, kmer_keys, kmer_values, _MARKER_X)
+    actual = gufunc_translate_lut(codons_bytes, sp.AA.codon_lut, _MARKER_X)
     np.testing.assert_array_equal(actual, expected)
 
 
@@ -296,8 +299,10 @@ def test_translate_validate_raises_on_N():
 
 
 def test_translate_validate_false_does_not_raise_on_invalid():
-    # Default path performs no validation and must not raise.
-    out = sp.AA.translate("ATGNNN", length_axis=-1, validate=False)
+    # validate=False skips the alphabet check, but the default on_unknown="error"
+    # still raises on a non-canonical codon. Opt into on_unknown="pad" to keep
+    # the previous don't-raise behavior.
+    out = sp.AA.translate("ATGNNN", length_axis=-1, validate=False, on_unknown="pad")
     assert out.shape[-1] == 2
 
 
@@ -473,7 +478,7 @@ def test_gufunc_translate_nul_codon_emits_X():
     kmer_keys = sp.AA.codon_array.view(np.uint8)
     kmer_values = sp.AA.aa_array.view(np.uint8)
     seq = np.frombuffer(b"\x00\x00\x00", dtype=np.uint8).copy()
-    out = gufunc_translate(seq, kmer_keys, kmer_values)
+    out = gufunc_translate(seq, kmer_keys, kmer_values, _MARKER_X)
     assert int(out) == ord("X")
 
 
@@ -482,7 +487,7 @@ def test_gufunc_translate_N_codon_emits_X():
     kmer_keys = sp.AA.codon_array.view(np.uint8)
     kmer_values = sp.AA.aa_array.view(np.uint8)
     seq = np.frombuffer(b"NNN", dtype=np.uint8).copy()
-    out = gufunc_translate(seq, kmer_keys, kmer_values)
+    out = gufunc_translate(seq, kmer_keys, kmer_values, _MARKER_X)
     assert int(out) == ord("X")
 
 
@@ -492,7 +497,7 @@ def test_gufunc_translate_mixed_codon_emits_X():
     kmer_values = sp.AA.aa_array.view(np.uint8)
     for codon in (b"AAN", b"NAA", b"ANA", b"A\x00A"):
         seq = np.frombuffer(codon, dtype=np.uint8).copy()
-        out = gufunc_translate(seq, kmer_keys, kmer_values)
+        out = gufunc_translate(seq, kmer_keys, kmer_values, _MARKER_X)
         assert int(out) == ord("X"), f"{codon!r} -> {chr(int(out))!r}"
 
 
@@ -501,7 +506,7 @@ def test_gufunc_translate_lut_nul_codon_emits_X():
     from seqpro._numba import gufunc_translate_lut
 
     seq = np.frombuffer(b"\x00\x00\x00", dtype=np.uint8).copy()
-    out = gufunc_translate_lut(seq, sp.AA.codon_lut)
+    out = gufunc_translate_lut(seq, sp.AA.codon_lut, _MARKER_X)
     assert int(out) == ord("X"), (
         f"\\x00\\x00\\x00 -> {chr(int(out))!r} (pre-fix collided to K)"
     )
@@ -512,7 +517,7 @@ def test_gufunc_translate_lut_N_codon_emits_X():
     from seqpro._numba import gufunc_translate_lut
 
     seq = np.frombuffer(b"NNN", dtype=np.uint8).copy()
-    out = gufunc_translate_lut(seq, sp.AA.codon_lut)
+    out = gufunc_translate_lut(seq, sp.AA.codon_lut, _MARKER_X)
     assert int(out) == ord("X"), f"NNN -> {chr(int(out))!r} (pre-fix collided to T)"
 
 
@@ -522,24 +527,58 @@ def test_gufunc_translate_lut_mixed_codon_emits_X():
 
     for codon in (b"AAN", b"NAA", b"ANA", b"A\x00A", b"\x00AA", b"AA\x00"):
         seq = np.frombuffer(codon, dtype=np.uint8).copy()
-        out = gufunc_translate_lut(seq, sp.AA.codon_lut)
+        out = gufunc_translate_lut(seq, sp.AA.codon_lut, _MARKER_X)
         assert int(out) == ord("X"), f"{codon!r} -> {chr(int(out))!r}"
 
 
-def test_gufunc_translate_lut_lowercase_emits_X():
-    """LUT kernel: lowercase ACGT is non-canonical and must resolve to 'X'.
-
-    The LUT is built from uppercase codons; lowercase bytes ('a'=97, 'c'=99,
-    'g'=103, 't'=116) do happen to hash to the same packed indices as
-    uppercase, so without the byte range-check they'd quietly return the
-    *uppercase* translation. We document the fix's strict behavior here:
-    callers should upper-case their input before translation."""
+def test_gufunc_translate_lut_lowercase_translates_normally():
+    """LUT kernel: lowercase ACGT is now treated as the equivalent uppercase
+    (soft-mask is annotation, not biology). The kernel's bit-5 flip
+    (``b & 0xDF``) upper-cases ASCII alphas before the canonical-range check,
+    so ``b"atg"`` translates the same as ``b"ATG"`` → ``M``."""
     from seqpro._numba import gufunc_translate_lut
 
-    for codon in (b"atg", b"aaa", b"taa", b"AtG"):
+    lower_to_upper = {
+        b"atg": "M",
+        b"aaa": "K",
+        b"taa": "*",
+        b"AtG": "M",
+        b"acg": "T",
+        b"aCg": "T",
+    }
+    for codon, expected in lower_to_upper.items():
         seq = np.frombuffer(codon, dtype=np.uint8).copy()
-        out = gufunc_translate_lut(seq, sp.AA.codon_lut)
+        out = gufunc_translate_lut(seq, sp.AA.codon_lut, _MARKER_X)
+        assert chr(int(out)) == expected, (
+            f"{codon!r} -> {chr(int(out))!r}, expected {expected!r}"
+        )
+
+
+def test_gufunc_translate_lut_mixed_lowercase_with_N_still_unknown():
+    """Case-insensitivity must NOT extend to N; lowercase + N still resolves to X."""
+    from seqpro._numba import gufunc_translate_lut
+
+    for codon in (b"acN", b"NcG", b"aNg"):
+        seq = np.frombuffer(codon, dtype=np.uint8).copy()
+        out = gufunc_translate_lut(seq, sp.AA.codon_lut, _MARKER_X)
         assert int(out) == ord("X"), f"{codon!r} -> {chr(int(out))!r}"
+
+
+def test_gufunc_translate_scan_lowercase_translates_normally():
+    """Scan kernel: lowercase codons translate identically to uppercase."""
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    for codon, expected in (
+        (b"atg", "M"),
+        (b"aaa", "K"),
+        (b"taa", "*"),
+        (b"AcG", "T"),
+    ):
+        seq = np.frombuffer(codon, dtype=np.uint8).copy()
+        out = gufunc_translate(seq, kmer_keys, kmer_values, _MARKER_X)
+        assert chr(int(out)) == expected, (
+            f"scan: {codon!r} -> {chr(int(out))!r}, expected {expected!r}"
+        )
 
 
 def test_gufunc_translate_canonical_codons_unchanged():
@@ -551,8 +590,8 @@ def test_gufunc_translate_canonical_codons_unchanged():
     kmer_values = sp.AA.aa_array.view(np.uint8)
     for codon, expected_aa in zip(sp.AA.codons, sp.AA.amino_acids, strict=True):
         seq = sp.cast_seqs(codon).view(np.uint8)
-        actual_scan = gufunc_translate(seq, kmer_keys, kmer_values)
-        actual_lut = gufunc_translate_lut(seq, sp.AA.codon_lut)
+        actual_scan = gufunc_translate(seq, kmer_keys, kmer_values, _MARKER_X)
+        actual_lut = gufunc_translate_lut(seq, sp.AA.codon_lut, _MARKER_X)
         assert chr(int(actual_scan)) == expected_aa, (
             f"scan: {codon} -> {chr(int(actual_scan))!r}, expected {expected_aa!r}"
         )
@@ -569,28 +608,251 @@ def test_gufunc_translate_stop_codons_unchanged():
     kmer_values = sp.AA.aa_array.view(np.uint8)
     for stop in ("TAA", "TAG", "TGA"):
         seq = sp.cast_seqs(stop).view(np.uint8)
-        assert chr(int(gufunc_translate(seq, kmer_keys, kmer_values))) == "*"
-        assert chr(int(gufunc_translate_lut(seq, sp.AA.codon_lut))) == "*"
+        assert chr(int(gufunc_translate(seq, kmer_keys, kmer_values, _MARKER_X))) == "*"
+        assert chr(int(gufunc_translate_lut(seq, sp.AA.codon_lut, _MARKER_X))) == "*"
 
 
 def test_translate_dense_with_non_canonical_emits_X():
-    """End-to-end: ``sp.AA.translate`` on bytes containing N produces 'X' in the
-    output, not silent garbage. Caller can scan for 'X' to detect bad input."""
-    out = sp.AA.translate("ATGNNNAAA", length_axis=-1).view("S1")
+    """End-to-end: ``sp.AA.translate`` on bytes containing N with on_unknown='pad'
+    produces 'X' in the output, not silent garbage. Caller can scan for 'X' to
+    detect bad input."""
+    out = sp.AA.translate("ATGNNNAAA", length_axis=-1, on_unknown="pad").view("S1")
     np.testing.assert_array_equal(out, sp.cast_seqs("MXK"))
 
 
 def test_translate_ragged_with_non_canonical_emits_X():
-    """End-to-end Ragged path: N-containing codons become 'X' in the output."""
+    """End-to-end Ragged path: N-containing codons become 'X' in the output
+    when on_unknown='pad'."""
     rag = _make_ragged_bytes("ATGNNNAAA", "AAAGGGNNN")
-    out = sp.AA.translate(rag)
+    out = sp.AA.translate(rag, on_unknown="pad")
     np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("MXK"))
     np.testing.assert_array_equal(_rag_bytes_to_array(out[1]), sp.cast_seqs("KGX"))
 
 
 def test_translate_dense_nul_bytes_emits_X():
     """End-to-end: NUL-byte codons (the original seqlab failure mode) produce
-    'X', not embedded NULs that corrupt downstream string handling."""
+    'X' under on_unknown='pad', not embedded NULs that would corrupt downstream
+    string handling."""
     raw = np.frombuffer(b"ATG\x00\x00\x00AAA", dtype="S1").reshape(1, 9)
-    out = sp.AA.translate(raw, length_axis=-1).view("S1")
+    out = sp.AA.translate(raw, length_axis=-1, on_unknown="pad").view("S1")
     np.testing.assert_array_equal(out, np.array([[b"M", b"X", b"K"]]))
+
+
+# --- case-insensitive translation tests (Task 0.1) ---
+
+
+def test_translate_dense_lowercase_translates_normally():
+    """End-to-end dense: lowercase nucleotides translate identically to uppercase
+    (soft-mask is annotation, not biology). No on_unknown opt-in required."""
+    upper = sp.AA.translate("ATGAAATTT", length_axis=-1).view("S1")
+    lower = sp.AA.translate("atgaaattt", length_axis=-1).view("S1")
+    mixed = sp.AA.translate("AtGaAaTtT", length_axis=-1).view("S1")
+    np.testing.assert_array_equal(upper, lower)
+    np.testing.assert_array_equal(upper, mixed)
+
+
+def test_translate_dense_lowercase_acg_to_T():
+    """Spec example: ``b"acg"`` translates to ``T`` (same as ``ACG``)."""
+    out = sp.AA.translate("acg", length_axis=-1).view("S1")
+    np.testing.assert_array_equal(out, sp.cast_seqs("T"))
+
+
+def test_translate_ragged_lowercase_translates_normally():
+    """End-to-end Ragged: lowercase nucleotides translate identically to uppercase."""
+    rag = _make_ragged_bytes("atgaaa", "gggttt")
+    out = sp.AA.translate(rag)
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("MK"))
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[1]), sp.cast_seqs("GF"))
+
+
+def test_translate_dense_lowercase_with_N_still_unknown():
+    """Case-insensitivity does NOT extend to N or NUL: ``acgN`` is still unknown."""
+    # 9 bytes "ATGacgNAA" — codons ATG, acg, NAA → M, T, X
+    out = sp.AA.translate("ATGacgNAA", length_axis=-1, on_unknown="pad").view("S1")
+    np.testing.assert_array_equal(out, sp.cast_seqs("MTX"))
+
+
+# --- on_unknown policy tests (Task 0.2) ---
+
+
+def test_translate_default_on_unknown_is_error():
+    """Default policy raises on non-canonical input — safer for arbitrary callers."""
+    with pytest.raises(ValueError, match="unknown codon"):
+        sp.AA.translate("ATGNNN", length_axis=-1)
+
+
+def test_translate_error_mode_raises_with_position():
+    """on_unknown='error' includes the codon position in the message."""
+    with pytest.raises(ValueError, match="position 1"):
+        sp.AA.translate("ATGNNNAAA", length_axis=-1, on_unknown="error")
+
+
+def test_translate_error_mode_passes_on_canonical():
+    """on_unknown='error' is a no-op when input is fully canonical."""
+    out = sp.AA.translate("ATGAAATTT", length_axis=-1, on_unknown="error").view("S1")
+    np.testing.assert_array_equal(out, sp.cast_seqs("MKF"))
+
+
+def test_translate_pad_mode_with_default_marker():
+    """on_unknown='pad' (default marker 'X') emits one X per unknown codon."""
+    out = sp.AA.translate("ATGNNNAAA", length_axis=-1, on_unknown="pad").view("S1")
+    np.testing.assert_array_equal(out, sp.cast_seqs("MXK"))
+
+
+def test_translate_pad_mode_with_dash_marker():
+    """unknown_marker='-' emits '-' per unknown codon."""
+    out = sp.AA.translate(
+        "ATGNNNAAA", length_axis=-1, on_unknown="pad", unknown_marker="-"
+    ).view("S1")
+    np.testing.assert_array_equal(out, sp.cast_seqs("M-K"))
+
+
+def test_translate_pad_mode_with_question_marker():
+    """unknown_marker='?' emits '?' per unknown codon."""
+    out = sp.AA.translate(
+        "ATGNNNAAA", length_axis=-1, on_unknown="pad", unknown_marker="?"
+    ).view("S1")
+    np.testing.assert_array_equal(out, sp.cast_seqs("M?K"))
+
+
+def test_translate_collapse_mode_consecutive_runs():
+    """on_unknown='collapse': 3 consecutive unknown codons collapse to 1 marker.
+
+    Input has 5 codons (ATG, NNN, NNN, NNN, AAA); expected output is M X K
+    (the 3 consecutive unknowns collapse to one X)."""
+    rag = _make_ragged_bytes("ATG" + "NNN" * 3 + "AAA")
+    out = sp.AA.translate(rag, on_unknown="collapse")
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("MXK"))
+
+
+def test_translate_collapse_mode_non_consecutive():
+    """on_unknown='collapse': [unk, unk, unk, T, unk] -> [X, T, X] (two markers)."""
+    # Build codons: NNN, NNN, NNN, ACG (→ T), NNN. 5 codons → expected [X, T, X].
+    rag = _make_ragged_bytes("NNN" * 3 + "ACG" + "NNN")
+    out = sp.AA.translate(rag, on_unknown="collapse")
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("XTX"))
+
+
+def test_translate_collapse_mode_leading_run():
+    """Leading unknown run collapses to a single marker."""
+    # Codons: NNN, NNN, ATG, AAA → expected [X, M, K]
+    rag = _make_ragged_bytes("NNN" * 2 + "ATG" + "AAA")
+    out = sp.AA.translate(rag, on_unknown="collapse")
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("XMK"))
+
+
+def test_translate_collapse_mode_per_sequence_independent():
+    """Collapse runs do not bleed across Ragged sequence boundaries."""
+    # seq0: NNN NNN ATG → [X, M] ; seq1: NNN AAA → [X, K]
+    # The two N runs are in different sequences, so they each get their own X.
+    rag = _make_ragged_bytes("NNN" * 2 + "ATG", "NNN" + "AAA")
+    out = sp.AA.translate(rag, on_unknown="collapse")
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("XM"))
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[1]), sp.cast_seqs("XK"))
+
+
+def test_translate_collapse_with_custom_marker():
+    """Collapse mode honors the custom unknown_marker."""
+    rag = _make_ragged_bytes("ATG" + "NNN" * 3 + "AAA")
+    out = sp.AA.translate(rag, on_unknown="collapse", unknown_marker="-")
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("M-K"))
+
+
+def test_translate_shorten_mode_drops_unknowns():
+    """on_unknown='shorten' removes unknown codons entirely."""
+    rag = _make_ragged_bytes("ATG" + "NNN" + "AAA")
+    out = sp.AA.translate(rag, on_unknown="shorten")
+    # NNN dropped → just MK
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("MK"))
+
+
+def test_translate_shorten_mode_all_unknown():
+    """on_unknown='shorten' on an entirely-unknown sequence returns empty."""
+    rag = _make_ragged_bytes("NNN" * 3)
+    out = sp.AA.translate(rag, on_unknown="shorten")
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), np.array([], dtype="S1"))
+
+
+def test_translate_shorten_mode_per_sequence():
+    """Shorten preserves the per-sequence boundary and lengths."""
+    rag = _make_ragged_bytes("ATG" + "NNN" + "AAA", "NNN" + "GGG")
+    out = sp.AA.translate(rag, on_unknown="shorten")
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("MK"))
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[1]), sp.cast_seqs("G"))
+
+
+def test_translate_unknown_marker_empty_raises():
+    """An empty unknown_marker is rejected."""
+    with pytest.raises(ValueError, match="exactly one character"):
+        sp.AA.translate("ATGAAA", length_axis=-1, on_unknown="pad", unknown_marker="")
+
+
+def test_translate_unknown_marker_multichar_raises():
+    """A multi-character unknown_marker is rejected."""
+    with pytest.raises(ValueError, match="exactly one character"):
+        sp.AA.translate("ATGAAA", length_axis=-1, on_unknown="pad", unknown_marker="XX")
+
+
+def test_translate_invalid_on_unknown_raises():
+    """An unknown policy name is rejected with a clear error."""
+    with pytest.raises(ValueError, match="on_unknown"):
+        sp.AA.translate(
+            "ATGAAA",
+            length_axis=-1,
+            on_unknown="oops",  # type: ignore[arg-type]
+        )
+
+
+def test_translate_collapse_dense_rejected():
+    """on_unknown='collapse' on a dense array would change output length; rejected."""
+    with pytest.raises(ValueError, match="Ragged"):
+        sp.AA.translate("ATGNNNAAA", length_axis=-1, on_unknown="collapse")
+
+
+def test_translate_shorten_dense_rejected():
+    """on_unknown='shorten' on a dense array would change output length; rejected."""
+    with pytest.raises(ValueError, match="Ragged"):
+        sp.AA.translate("ATGNNNAAA", length_axis=-1, on_unknown="shorten")
+
+
+def test_translate_case_insensitive_under_every_mode():
+    """Case-insensitive translation holds under every on_unknown mode."""
+    # Lowercase canonical input should always translate to MK regardless of mode
+    # (no unknowns mean every policy is a no-op).
+    for mode in ("pad", "collapse", "shorten", "error"):
+        if mode in ("collapse", "shorten"):
+            rag = _make_ragged_bytes("atgaaa")
+            out = sp.AA.translate(rag, on_unknown=mode)
+            np.testing.assert_array_equal(
+                _rag_bytes_to_array(out[0]),
+                sp.cast_seqs("MK"),
+                err_msg=f"mode={mode}",
+            )
+        else:
+            out = sp.AA.translate("atgaaa", length_axis=-1, on_unknown=mode).view("S1")
+            np.testing.assert_array_equal(
+                out, sp.cast_seqs("MK"), err_msg=f"mode={mode}"
+            )
+
+
+def test_translate_ragged_error_mode_raises():
+    """Ragged path also raises under on_unknown='error'."""
+    rag = _make_ragged_bytes("ATGNNNAAA")
+    with pytest.raises(ValueError, match="unknown codon"):
+        sp.AA.translate(rag, on_unknown="error")
+
+
+def test_translate_ragged_default_is_error():
+    """Ragged default policy is 'error' (matching the dense default)."""
+    rag = _make_ragged_bytes("ATGNNNAAA")
+    with pytest.raises(ValueError, match="unknown codon"):
+        sp.AA.translate(rag)
+
+
+def test_translate_pad_back_compat_matches_pre_policy_behavior():
+    """Back-compat: on_unknown='pad' with unknown_marker='X' produces the same
+    output the pre-policy code produced (always-X)."""
+    # The previously-hard-coded behavior: every unknown codon → 'X'.
+    rag = _make_ragged_bytes("ATGNNNAAA\x00\x00\x00GGG")
+    out = sp.AA.translate(rag, on_unknown="pad", unknown_marker="X")
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("MXKXG"))

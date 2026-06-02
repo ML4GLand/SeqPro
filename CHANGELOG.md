@@ -1,8 +1,17 @@
 ## Unreleased
 
+### Feat
+
+- **translate**: case-insensitive translation in both kernels — lowercase `a/c/g/t` translate identically to their uppercase counterparts (the kernels upper-case via `b & 0xDF` before the canonical-range check). Soft-masked nucleotides (RepeatMasker output, GVL haplotype injection) no longer resolve to `'X'`; they translate normally.
+- **translate**: configurable `on_unknown` policy + `unknown_marker` on `AminoAlphabet.translate`. `on_unknown` is one of `"pad"` (emit one marker per unknown codon, the previous behavior), `"collapse"` (emit one marker per consecutive run of unknown codons — Ragged input only), `"shorten"` (drop unknown codons — Ragged input only), or `"error"` (the new default — raises `ValueError` with the codon position). `unknown_marker` is the single ASCII byte used as the sentinel under `pad` / `collapse` (default `"X"`). Existing call sites that relied on the previous "always emit X" behavior should opt in to `on_unknown="pad"` explicitly.
+
 ### Fix
 
 - **translate**: emit `'X'` (IUPAC unknown AA) for codons containing non-canonical bytes in both the generic `gufunc_translate` scan and the `gufunc_translate_lut` LUT kernels. The generic scan previously left the output uninitialised on a no-match exit (a fresh `np.empty` page typically reads as NUL, producing silently corrupt AA buffers); the LUT path hashed each byte with `(byte >> 1) & 3` and silently collided non-canonical bytes onto canonical codon slots (e.g. `NNN` → `T`, `\x00\x00\x00` → `K`). Both kernels now resolve any codon with a non-canonical byte to `'X'`, so downstream callers can detect and act on bad input.
+
+### BREAKING CHANGE
+
+- **translate**: the default `on_unknown="error"` raises `ValueError` on any non-canonical codon. Pre-existing callers that previously got `'X'` silently in the output must now pass `on_unknown="pad"` explicitly. The numba kernels (`gufunc_translate`, `gufunc_translate_lut`) gained a required `marker_byte: uint8` parameter — direct kernel callers must update their call sites.
 
 ## 0.14.0 (2026-06-01)
 

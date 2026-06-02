@@ -107,8 +107,8 @@ def gufunc_tokenize(
 
 
 @nb.guvectorize(
-    ["(u1[:], u1[:, :], u1[:], u1[:])"],
-    "(k),(j,k),(j)->()",
+    ["(u1[:], u1[:, :], u1[:], u1, u1[:])"],
+    "(k),(j,k),(j),()->()",
     target="parallel",
     cache=True,
 )
@@ -116,6 +116,7 @@ def gufunc_translate(
     seq_kmers: NDArray[np.uint8],
     kmer_keys: NDArray[np.uint8],
     kmer_values: NDArray[np.uint8],
+    marker_byte: np.uint8,
     res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:  # type: ignore
     """Translate k-mers into amino acids via an O(n) linear scan.
@@ -126,11 +127,17 @@ def gufunc_translate(
     :func:`gufunc_translate_lut` path instead.
 
     A k-mer that does not match any entry in ``kmer_keys`` resolves to the
-    ``'X'`` sentinel (ASCII 88) rather than leaving ``res[0]`` uninitialised.
-    ``guvectorize`` allocates output buffers via ``np.empty``, so without this
-    sentinel a missing-codon match would emit whatever byte happened to be on
-    the page — typically NUL on fresh pages, producing silently corrupt AA
-    sequences downstream.
+    caller-supplied ``marker_byte`` rather than leaving ``res[0]``
+    uninitialised. ``guvectorize`` allocates output buffers via ``np.empty``,
+    so without this sentinel a missing-codon match would emit whatever byte
+    happened to be on the page — typically NUL on fresh pages, producing
+    silently corrupt AA sequences downstream.
+
+    Case-insensitivity: ASCII letters in ``seq_kmers`` are upper-cased on the
+    fly via ``b & 0xDF`` (the bit-5 flip is a no-op on uppercase ASCII alphas
+    and turns lowercase into uppercase). The same transform is applied to
+    ``kmer_keys`` entries, so callers can pre-supply uppercase keys and have
+    soft-masked / mixed-case input still translate normally.
 
     Parameters
     ----------
@@ -140,16 +147,29 @@ def gufunc_translate(
         All unique k-mers as an (n, k) array.
     kmer_values
         Values corresponding to each k-mer, in corresponding order.
+    marker_byte
+        ASCII byte emitted when no kmer in ``kmer_keys`` matches the input
+        (i.e. an unknown codon). The Python wrapper validates this is a
+        single byte.
     res
         Array to save the result in, by default None
     """
-    # 'X' (ASCII 88) is the IUPAC sentinel for an unknown amino acid. We seed
-    # res[0] before the scan so a no-match exit (e.g. an N or NUL in the codon)
-    # produces 'X' rather than leaking the uninitialised np.empty buffer that
-    # ``guvectorize`` hands us.
-    res[0] = 88  # type: ignore
-    for i in nb.prange(len(kmer_keys)):
-        if (seq_kmers == kmer_keys[i]).all():
+    # marker_byte is the configurable IUPAC sentinel for an unknown amino
+    # acid. We seed res[0] before the scan so a no-match exit (e.g. an N or
+    # NUL in the codon) produces the marker rather than leaking the
+    # uninitialised np.empty buffer that ``guvectorize`` hands us.
+    res[0] = marker_byte  # type: ignore
+    k = len(seq_kmers)
+    for i in range(len(kmer_keys)):
+        match = True
+        for j in range(k):
+            # Upper-case both bytes via bit-5 flip (no-op on uppercase ASCII
+            # alphas; turns lowercase into uppercase). The mask only matters
+            # for ASCII alpha; non-alpha bytes still compare bytewise.
+            if (seq_kmers[j] & 0xDF) != (kmer_keys[i, j] & 0xDF):
+                match = False
+                break
+        if match:
             res[0] = kmer_values[i]  # type: ignore
             break
 
@@ -171,14 +191,15 @@ def _pack_codon_index(b0, b1, b2):
 
 
 @nb.guvectorize(
-    ["(u1[:], u1[:], u1[:])"],
-    "(k),(m)->()",
+    ["(u1[:], u1[:], u1, u1[:])"],
+    "(k),(m),()->()",
     target="parallel",
     cache=True,
 )
 def gufunc_translate_lut(
     seq_kmers: NDArray[np.uint8],
     codon_lut: NDArray[np.uint8],
+    marker_byte: np.uint8,
     res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:  # type: ignore
     """Translate a 3-codon to its amino acid via an O(1) lookup table.
@@ -198,8 +219,14 @@ def gufunc_translate_lut(
     would silently yield biologically wrong AAs (``NNN → T``, ``\\x00\\x00\\x00 →
     K``). To prevent that, every codon byte is range-checked against
     ``{A, C, G, T}`` before the LUT lookup; any non-canonical byte short-circuits
-    to the ``'X'`` (ASCII 88) sentinel — the IUPAC "unknown amino acid" marker —
-    so callers can detect and act on bad input downstream.
+    to the caller-supplied ``marker_byte`` sentinel so callers can detect and
+    act on bad input downstream.
+
+    Case-insensitivity: each input byte is first upper-cased via ``b & 0xDF``
+    (the bit-5 flip is a no-op on uppercase ASCII alphas and turns lowercase
+    into uppercase) before the range check and the LUT-index hash. Lowercase
+    nucleotides (e.g. soft-masked ``acg`` from RepeatMasker output) therefore
+    translate identically to their uppercase forms.
 
     Parameters
     ----------
@@ -207,16 +234,24 @@ def gufunc_translate_lut(
         A 3-codon as ASCII bytes (e.g. ``[65, 84, 71]`` = ``"ATG"``).
     codon_lut
         64-byte LUT, built by ``AminoAlphabet`` at construction time.
+    marker_byte
+        ASCII byte emitted when any codon byte is non-canonical (i.e. not in
+        ``{A, C, G, T, a, c, g, t}``). The Python wrapper validates this is a
+        single byte.
     res
         Output buffer.
     """
+    # Upper-case each input byte via bit-5 flip (no-op on ASCII uppercase
+    # alphas; lowercase 'a','c','g','t' become uppercase 'A','C','G','T').
+    # Non-alpha bytes (NUL, N, etc.) are still rejected by the range check
+    # below because their upper-cased forms remain outside {A,C,G,T}.
+    b0 = seq_kmers[0] & 0xDF
+    b1 = seq_kmers[1] & 0xDF
+    b2 = seq_kmers[2] & 0xDF
     # Validate each codon byte is in {'A','C','G','T'} (ASCII 65/67/71/84).
     # Outside that set, the (byte >> 1) & 3 hash silently collides with
     # canonical codons (e.g. NNN -> T, \x00\x00\x00 -> K), so we short-circuit
-    # to 'X' (88) without consulting the LUT.
-    b0 = seq_kmers[0]
-    b1 = seq_kmers[1]
-    b2 = seq_kmers[2]
+    # to the configurable marker_byte without consulting the LUT.
     if (
         (b0 == 65 or b0 == 67 or b0 == 71 or b0 == 84)
         and (b1 == 65 or b1 == 67 or b1 == 71 or b1 == 84)
@@ -224,7 +259,7 @@ def gufunc_translate_lut(
     ):
         res[0] = codon_lut[_pack_codon_index(b0, b1, b2)]
     else:
-        res[0] = 88  # 'X' — unknown AA sentinel
+        res[0] = marker_byte
 
 
 @nb.guvectorize(

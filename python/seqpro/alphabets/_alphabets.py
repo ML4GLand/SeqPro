@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import MethodType
-from typing import cast, overload
+from typing import Literal, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,6 +16,125 @@ from .._numba import (
 )
 from .._utils import SeqType, StrSeqType, array_slice, cast_seqs, check_axes, is_dtype
 from ..rag import Ragged, is_rag_dtype
+
+OnUnknown = Literal["pad", "collapse", "shorten", "error"]
+"""Policy for codons whose bytes aren't in ``{A, C, G, T, a, c, g, t}``.
+
+* ``"pad"`` — emit ``unknown_marker`` once per unknown codon (1 marker per AA
+  position). The shape of the output is preserved.
+* ``"collapse"`` — emit a single ``unknown_marker`` per consecutive run of
+  unknown codons (so a 3-AA deletion collapses to one marker). The output is
+  shorter than the input, only available for Ragged input.
+* ``"shorten"`` — drop unknown codons entirely; the output keeps only the
+  successfully translated codons. The output is shorter than the input, only
+  available for Ragged input.
+* ``"error"`` — raise :class:`ValueError` naming the first codon position
+  whose bytes were non-canonical (intended default for arbitrary callers).
+"""
+
+_ON_UNKNOWN_VALUES: tuple[OnUnknown, ...] = ("pad", "collapse", "shorten", "error")
+
+
+def _validate_on_unknown(on_unknown: str) -> OnUnknown:
+    """Return ``on_unknown`` unchanged if it's a recognised policy."""
+    if on_unknown not in _ON_UNKNOWN_VALUES:
+        raise ValueError(
+            f"on_unknown must be one of {_ON_UNKNOWN_VALUES!r}; got {on_unknown!r}."
+        )
+    return cast(OnUnknown, on_unknown)
+
+
+def _validate_unknown_marker(unknown_marker: str) -> np.uint8:
+    """Validate that ``unknown_marker`` is a single ASCII byte and return its ord."""
+    if not isinstance(unknown_marker, str):
+        raise ValueError(
+            f"unknown_marker must be a single-character str; got {type(unknown_marker).__name__}."
+        )
+    if len(unknown_marker) != 1:
+        raise ValueError(
+            f"unknown_marker must be exactly one character; got {unknown_marker!r} "
+            f"(length {len(unknown_marker)})."
+        )
+    code = ord(unknown_marker)
+    if code > 0xFF:
+        raise ValueError(
+            f"unknown_marker must be a single ASCII / latin-1 byte; got {unknown_marker!r}."
+        )
+    return np.uint8(code)
+
+
+def _codon_unknown_mask(
+    codons: NDArray[np.uint8],
+    valid_upper_bytes: NDArray[np.uint8],
+) -> NDArray[np.bool_]:
+    """Return a boolean array marking codons that contain a non-canonical byte.
+
+    Operates on the trailing (codon) axis of ``codons`` (shape ``(..., k)``).
+    A codon is unknown if any of its bytes, after upper-casing via ``& 0xDF``,
+    isn't in ``valid_upper_bytes``. Vectorised in numpy so it's cheap to call
+    from the Python wrapper.
+
+    Parameters
+    ----------
+    codons
+        Codon bytes; the codon axis is the last one.
+    valid_upper_bytes
+        The alphabet's nucleotide bytes upper-cased via ``& 0xDF``. For the
+        standard DNA alphabet this is ``ord({A, C, G, T})``; for a non-standard
+        alphabet (e.g. one containing ``U``) it's the upper-cased
+        ``_valid_nuc_bytes`` of that alphabet.
+    """
+    upper = codons & 0xDF
+    canonical = np.isin(upper, valid_upper_bytes)
+    return ~canonical.all(axis=-1)
+
+
+def _shrink_ragged_unknowns(
+    translated_flat: NDArray[np.bytes_],
+    new_offsets: NDArray[np.int64],
+    unknown_mask: NDArray[np.bool_],
+    on_unknown: OnUnknown,
+) -> tuple[NDArray[np.bytes_], NDArray[np.int64]]:
+    """Per-sequence shrink of the flat translated AA buffer for collapse / shorten.
+
+    ``translated_flat`` has leading shape ``(num_codons, *trailing)`` (the
+    trailing axis is empty for bytes Ragged input and is the nucleotide-alphabet
+    axis for OHE Ragged input). ``new_offsets`` is a 1-D ``(n+1,)`` array of
+    codon-axis offsets in ``translated_flat``. ``unknown_mask`` is a 1-D
+    ``(num_codons,)`` boolean array marking which codons were non-canonical.
+
+    Returns a new ``(translated_flat, new_offsets)`` pair where every sequence
+    has had its unknown codons collapsed or dropped per ``on_unknown``. Offsets
+    remain monotonic and ``(n+1,)``-shaped, so the caller can hand them straight
+    to ``Ragged.from_offsets``.
+    """
+    n_seq = len(new_offsets) - 1
+    keep_parts: list[NDArray[np.bool_]] = []
+    new_lengths = np.empty(n_seq, dtype=np.int64)
+    for i in range(n_seq):
+        start = int(new_offsets[i])
+        end = int(new_offsets[i + 1])
+        if end == start:
+            keep_parts.append(np.zeros(0, dtype=np.bool_))
+            new_lengths[i] = 0
+            continue
+        seq_mask = unknown_mask[start:end]
+        if on_unknown == "shorten":
+            keep = ~seq_mask
+        else:  # collapse
+            keep = np.ones(end - start, dtype=np.bool_)
+            # Drop an unknown codon iff its previous (in-sequence) codon is
+            # also unknown. The first codon of a sequence is always kept.
+            keep[1:] = ~(seq_mask[1:] & seq_mask[:-1])
+        keep_parts.append(keep)
+        new_lengths[i] = int(keep.sum())
+
+    keep_all = np.concatenate(keep_parts) if keep_parts else np.zeros(0, dtype=np.bool_)
+    new_translated = translated_flat[keep_all]
+    new_offsets_out = np.empty(n_seq + 1, dtype=np.int64)
+    new_offsets_out[0] = 0
+    np.cumsum(new_lengths, out=new_offsets_out[1:])
+    return new_translated, new_offsets_out
 
 
 class NucleotideAlphabet:
@@ -323,6 +442,11 @@ class AminoAlphabet:
         # Unique nucleotide bytes across all codons, for translate(validate=True).
         nuc_chars = sorted({c for codon in codons for c in codon})
         self._valid_nuc_bytes = np.array([ord(c) for c in nuc_chars], dtype=np.uint8)
+        # Upper-cased version of _valid_nuc_bytes (via bit-5 flip) for the
+        # case-insensitive unknown-codon detection inside ``translate``. For an
+        # alphabet whose nucleotides are already uppercase (the standard DNA
+        # case), this is identical to ``_valid_nuc_bytes``.
+        self._valid_upper_bytes = self._valid_nuc_bytes & np.uint8(0xDF)
 
     def _check_nuc_bytes(self, buf: NDArray[np.uint8]) -> None:
         """Raise ``ValueError`` if any byte in ``buf`` is outside the alphabet's
@@ -371,6 +495,8 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
         validate: bool = False,
+        on_unknown: OnUnknown = "error",
+        unknown_marker: str = "X",
     ) -> NDArray[np.bytes_]: ...
     @overload
     def translate(
@@ -381,6 +507,8 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
         validate: bool = False,
+        on_unknown: OnUnknown = "error",
+        unknown_marker: str = "X",
     ) -> Ragged[np.bytes_]: ...
     @overload
     def translate(
@@ -391,6 +519,8 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet,
         truncate_stop: bool = False,
         validate: bool = False,
+        on_unknown: OnUnknown = "error",
+        unknown_marker: str = "X",
     ) -> Ragged[np.uint8]: ...
     def translate(
         self,
@@ -400,6 +530,8 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
         validate: bool = False,
+        on_unknown: OnUnknown = "error",
+        unknown_marker: str = "X",
     ) -> NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]:
         """Translate nucleotide sequences to amino acids.
 
@@ -417,21 +549,50 @@ class AminoAlphabet:
             (inclusive). Only valid for Ragged input. Default False.
         validate
             When True, raise ValueError if any input nucleotide is outside this
-            alphabet (e.g. lowercase, ``N``, or other non-ACGT bytes; for OHE
-            input, any row that is not exactly one-hot). When validation passes,
-            the translation is guaranteed exact. Default False (no checking).
+            alphabet (e.g. ``N`` or other non-ACGT bytes; for OHE input, any row
+            that is not exactly one-hot). Lowercase ``acgt`` are tolerated by the
+            translation kernels (see ``on_unknown`` below) but are still rejected
+            by ``validate=True`` because the alphabet itself is uppercase. When
+            validation passes, the translation is guaranteed exact. Default False
+            (no checking).
+        on_unknown
+            How to handle codons whose bytes are outside ``{A, C, G, T, a, c, g,
+            t}``. One of:
+
+            * ``"pad"`` — emit ``unknown_marker`` once per unknown codon.
+            * ``"collapse"`` — emit a single ``unknown_marker`` per consecutive
+              run of unknown codons (output is shorter than input). Only valid
+              for Ragged input; dense arrays preserve shape so ``collapse`` is
+              rejected for them.
+            * ``"shorten"`` — drop unknown codons entirely (output is shorter
+              than input). Only valid for Ragged input.
+            * ``"error"`` — raise ``ValueError`` naming the first unknown codon
+              position. Default.
+
+        unknown_marker
+            Single ASCII character (e.g. ``"X"``, ``"-"``, ``"?"``) used as the
+            sentinel for unknown codons under ``on_unknown="pad"`` or
+            ``"collapse"``. Default ``"X"``.
 
         Returns
         -------
         NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]
             Translated amino acid sequences in the same container type as the input.
         """
+        on_unknown = _validate_on_unknown(on_unknown)
+        marker_byte = _validate_unknown_marker(unknown_marker)
 
         if not isinstance(seqs, Ragged):
             check_axes(seqs, length_axis, False)
             seqs = cast_seqs(seqs)
             if validate:
                 self._check_nuc_bytes(seqs.view(np.uint8))
+            if on_unknown in ("collapse", "shorten"):
+                raise ValueError(
+                    f"on_unknown={on_unknown!r} is only supported for Ragged "
+                    "input because it changes the output length. For dense "
+                    "arrays use 'pad' or 'error'."
+                )
             codon_size = self.codon_array.shape[-1]
             if length_axis is None:
                 length_axis = -1
@@ -447,18 +608,36 @@ class AminoAlphabet:
                 seqs, window_shape=codon_size, axis=length_axis
             )
             codons = array_slice(codons, length_axis, slice(None, None, codon_size))
+            codons_u1 = codons.view(np.uint8)
             if self.codon_lut is not None:
-                return gufunc_translate_lut(
-                    codons.view(np.uint8),
+                translated = gufunc_translate_lut(
+                    codons_u1,
                     self.codon_lut,
-                    axes=[-1, -1, ()],  # type: ignore
-                ).view("S1")
-            return gufunc_translate(
-                codons.view(np.uint8),
-                self.codon_array.view(np.uint8),
-                self.aa_array.view(np.uint8),
-                axes=[-1, (-2, -1), (-1), ()],  # type: ignore
-            ).view("S1")
+                    marker_byte,
+                    axes=[-1, -1, (), ()],  # type: ignore
+                )  # (..., n_codons)
+            else:
+                translated = gufunc_translate(
+                    codons_u1,
+                    self.codon_array.view(np.uint8),
+                    self.aa_array.view(np.uint8),
+                    marker_byte,
+                    axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
+                )  # (..., n_codons)
+
+            if on_unknown == "error":
+                # Compute unknown mask on the input codons directly; cheaper
+                # and decoupled from the user-chosen marker char.
+                mask = _codon_unknown_mask(codons_u1, self._valid_upper_bytes)
+                if mask.any():
+                    flat_pos = int(np.argmax(mask.ravel()))
+                    raise ValueError(
+                        f"translate(on_unknown='error'): unknown codon at flat "
+                        f"position {flat_pos} (codon index). Set on_unknown='pad' "
+                        f"to allow non-canonical codons."
+                    )
+
+            return translated.view("S1")
 
         # --- Ragged path ---
         # Pack to ListOffsetArray so .data and .offsets are contiguous and valid.
@@ -503,24 +682,60 @@ class AminoAlphabet:
             # sliding_window_view appends window axis at end → slice axis 0 by codon_size
             codons = codons[::codon_size]
             # codons shape: (num_codons, *trailing, codon_size); codon axis is last
+            codons_u1 = codons.view(np.uint8)
             translated_flat: NDArray[np.bytes_]
             if self.codon_lut is not None:
                 translated_flat = gufunc_translate_lut(
-                    codons.view(np.uint8),
+                    codons_u1,
                     self.codon_lut,
-                    axes=[-1, -1, ()],  # type: ignore
+                    marker_byte,
+                    axes=[-1, -1, (), ()],  # type: ignore
                 ).view("S1")  # (num_codons, *trailing)
             else:
                 translated_flat = gufunc_translate(
-                    codons.view(np.uint8),
+                    codons_u1,
                     self.codon_array.view(np.uint8),
                     self.aa_array.view(np.uint8),
-                    axes=[-1, (-2, -1), (-1), ()],  # type: ignore
+                    marker_byte,
+                    axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
                 ).view("S1")  # (num_codons, *trailing)
         else:
+            codons_u1 = np.empty((0, *trailing, codon_size), dtype=np.uint8)
             translated_flat = np.empty((0, *trailing), dtype="S1")
 
         new_offsets = offsets // codon_size  # (n+1,) position-based in translated_flat
+
+        # Apply on_unknown policy. For Ragged, we run per-sequence so that
+        # "collapse"/"shorten" can shrink each sequence independently while
+        # keeping the offsets array consistent. For OHE Ragged input the
+        # trailing axis is consumed by decode_ohe so the codons buffer is 1-D
+        # along the codon axis; collapse/shorten therefore work uniformly.
+        if on_unknown != "pad":
+            if total > 0:
+                unknown_mask_flat = _codon_unknown_mask(
+                    codons_u1, self._valid_upper_bytes
+                )
+                # unknown_mask_flat has the same leading shape as translated_flat
+                # (i.e. (num_codons, *trailing) collapsed because the codon axis
+                # is gone — and for non-OHE trailing is empty).
+            else:
+                unknown_mask_flat = np.zeros(0, dtype=np.bool_)
+
+            if on_unknown == "error":
+                if bool(unknown_mask_flat.any()):
+                    pos = int(np.argmax(unknown_mask_flat))
+                    raise ValueError(
+                        f"translate(on_unknown='error'): unknown codon at flat "
+                        f"position {pos} (codon index). Set on_unknown='pad', "
+                        f"'collapse', or 'shorten' to allow non-canonical codons."
+                    )
+            else:
+                # collapse / shorten: per-sequence shrink. Build a new flat
+                # buffer + new offsets, then continue with truncate_stop /
+                # OHE re-encoding using those.
+                translated_flat, new_offsets = _shrink_ragged_unknowns(
+                    translated_flat, new_offsets, unknown_mask_flat, on_unknown
+                )
 
         if truncate_stop:
             starts = new_offsets[:-1].astype(np.int64)
