@@ -1,3 +1,9 @@
+## Unreleased
+
+### Fix
+
+- **translate**: emit `'X'` (IUPAC unknown AA) for codons containing non-canonical bytes in both the generic `gufunc_translate` scan and the `gufunc_translate_lut` LUT kernels. The generic scan previously left the output uninitialised on a no-match exit (a fresh `np.empty` page typically reads as NUL, producing silently corrupt AA buffers); the LUT path hashed each byte with `(byte >> 1) & 3` and silently collided non-canonical bytes onto canonical codon slots (e.g. `NNN` → `T`, `\x00\x00\x00` → `K`). Both kernels now resolve any codon with a non-canonical byte to `'X'`, so downstream callers can detect and act on bad input.
+
 ## 0.14.0 (2026-06-01)
 
 ### Feat

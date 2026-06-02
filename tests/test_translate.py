@@ -447,3 +447,150 @@ def test_translate_ragged_multiseq_matches_biopython():
     for i, s in enumerate(seqs):
         expected = sp.cast_seqs(str(translate(s)))
         np.testing.assert_array_equal(_rag_bytes_to_array(out[i]), expected)
+
+
+# --- non-canonical-codon handling tests (X sentinel) ---
+#
+# Both translate kernels must emit the IUPAC unknown-AA byte 'X' (ASCII 88) for
+# any codon that contains a non-canonical nucleotide byte. Historically this was
+# not the case:
+#
+# * gufunc_translate (generic scan) left ``res[0]`` uninitialised on a no-match
+#   exit. Since ``guvectorize`` allocates outputs via ``np.empty``, a no-match
+#   codon (e.g. one containing N or NUL) silently emitted whatever byte was on
+#   the page — frequently NUL on fresh pages — producing corrupt AA buffers.
+# * gufunc_translate_lut packed the codon into a 6-bit LUT index with
+#   ``(byte >> 1) & 3`` per byte. That hash is a bijection on ACGT but collides
+#   for non-canonical bytes: ``NUL\x00`` and ``A`` both hash to 0; ``N`` (0x4E)
+#   hashes to 3. So ``NNN`` returned ``T`` and ``\\x00\\x00\\x00`` returned ``K``
+#   without any indication that the input was off-alphabet.
+#
+# The tests below pin the fix: every non-canonical codon now resolves to 'X'.
+
+
+def test_gufunc_translate_nul_codon_emits_X():
+    """Generic kernel: NUL codon resolves to 'X' (not a leak of np.empty)."""
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    seq = np.frombuffer(b"\x00\x00\x00", dtype=np.uint8).copy()
+    out = gufunc_translate(seq, kmer_keys, kmer_values)
+    assert int(out) == ord("X")
+
+
+def test_gufunc_translate_N_codon_emits_X():
+    """Generic kernel: NNN resolves to 'X'."""
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    seq = np.frombuffer(b"NNN", dtype=np.uint8).copy()
+    out = gufunc_translate(seq, kmer_keys, kmer_values)
+    assert int(out) == ord("X")
+
+
+def test_gufunc_translate_mixed_codon_emits_X():
+    """Generic kernel: mixed codons (one non-canonical byte) resolve to 'X'."""
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    for codon in (b"AAN", b"NAA", b"ANA", b"A\x00A"):
+        seq = np.frombuffer(codon, dtype=np.uint8).copy()
+        out = gufunc_translate(seq, kmer_keys, kmer_values)
+        assert int(out) == ord("X"), f"{codon!r} -> {chr(int(out))!r}"
+
+
+def test_gufunc_translate_lut_nul_codon_emits_X():
+    """LUT kernel: NUL codon must NOT collide with AAA -> K; it must be 'X'."""
+    from seqpro._numba import gufunc_translate_lut
+
+    seq = np.frombuffer(b"\x00\x00\x00", dtype=np.uint8).copy()
+    out = gufunc_translate_lut(seq, sp.AA.codon_lut)
+    assert int(out) == ord("X"), (
+        f"\\x00\\x00\\x00 -> {chr(int(out))!r} (pre-fix collided to K)"
+    )
+
+
+def test_gufunc_translate_lut_N_codon_emits_X():
+    """LUT kernel: NNN must NOT collide with a canonical codon; it must be 'X'."""
+    from seqpro._numba import gufunc_translate_lut
+
+    seq = np.frombuffer(b"NNN", dtype=np.uint8).copy()
+    out = gufunc_translate_lut(seq, sp.AA.codon_lut)
+    assert int(out) == ord("X"), f"NNN -> {chr(int(out))!r} (pre-fix collided to T)"
+
+
+def test_gufunc_translate_lut_mixed_codon_emits_X():
+    """LUT kernel: a single non-canonical byte anywhere in the codon -> 'X'."""
+    from seqpro._numba import gufunc_translate_lut
+
+    for codon in (b"AAN", b"NAA", b"ANA", b"A\x00A", b"\x00AA", b"AA\x00"):
+        seq = np.frombuffer(codon, dtype=np.uint8).copy()
+        out = gufunc_translate_lut(seq, sp.AA.codon_lut)
+        assert int(out) == ord("X"), f"{codon!r} -> {chr(int(out))!r}"
+
+
+def test_gufunc_translate_lut_lowercase_emits_X():
+    """LUT kernel: lowercase ACGT is non-canonical and must resolve to 'X'.
+
+    The LUT is built from uppercase codons; lowercase bytes ('a'=97, 'c'=99,
+    'g'=103, 't'=116) do happen to hash to the same packed indices as
+    uppercase, so without the byte range-check they'd quietly return the
+    *uppercase* translation. We document the fix's strict behavior here:
+    callers should upper-case their input before translation."""
+    from seqpro._numba import gufunc_translate_lut
+
+    for codon in (b"atg", b"aaa", b"taa", b"AtG"):
+        seq = np.frombuffer(codon, dtype=np.uint8).copy()
+        out = gufunc_translate_lut(seq, sp.AA.codon_lut)
+        assert int(out) == ord("X"), f"{codon!r} -> {chr(int(out))!r}"
+
+
+def test_gufunc_translate_canonical_codons_unchanged():
+    """Regression: every canonical codon still translates correctly post-fix
+    (both kernels)."""
+    from seqpro._numba import gufunc_translate_lut
+
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    for codon, expected_aa in zip(sp.AA.codons, sp.AA.amino_acids, strict=True):
+        seq = sp.cast_seqs(codon).view(np.uint8)
+        actual_scan = gufunc_translate(seq, kmer_keys, kmer_values)
+        actual_lut = gufunc_translate_lut(seq, sp.AA.codon_lut)
+        assert chr(int(actual_scan)) == expected_aa, (
+            f"scan: {codon} -> {chr(int(actual_scan))!r}, expected {expected_aa!r}"
+        )
+        assert chr(int(actual_lut)) == expected_aa, (
+            f"lut: {codon} -> {chr(int(actual_lut))!r}, expected {expected_aa!r}"
+        )
+
+
+def test_gufunc_translate_stop_codons_unchanged():
+    """Regression: TAA / TAG / TGA still resolve to '*' in both kernels."""
+    from seqpro._numba import gufunc_translate_lut
+
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    for stop in ("TAA", "TAG", "TGA"):
+        seq = sp.cast_seqs(stop).view(np.uint8)
+        assert chr(int(gufunc_translate(seq, kmer_keys, kmer_values))) == "*"
+        assert chr(int(gufunc_translate_lut(seq, sp.AA.codon_lut))) == "*"
+
+
+def test_translate_dense_with_non_canonical_emits_X():
+    """End-to-end: ``sp.AA.translate`` on bytes containing N produces 'X' in the
+    output, not silent garbage. Caller can scan for 'X' to detect bad input."""
+    out = sp.AA.translate("ATGNNNAAA", length_axis=-1).view("S1")
+    np.testing.assert_array_equal(out, sp.cast_seqs("MXK"))
+
+
+def test_translate_ragged_with_non_canonical_emits_X():
+    """End-to-end Ragged path: N-containing codons become 'X' in the output."""
+    rag = _make_ragged_bytes("ATGNNNAAA", "AAAGGGNNN")
+    out = sp.AA.translate(rag)
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("MXK"))
+    np.testing.assert_array_equal(_rag_bytes_to_array(out[1]), sp.cast_seqs("KGX"))
+
+
+def test_translate_dense_nul_bytes_emits_X():
+    """End-to-end: NUL-byte codons (the original seqlab failure mode) produce
+    'X', not embedded NULs that corrupt downstream string handling."""
+    raw = np.frombuffer(b"ATG\x00\x00\x00AAA", dtype="S1").reshape(1, 9)
+    out = sp.AA.translate(raw, length_axis=-1).view("S1")
+    np.testing.assert_array_equal(out, np.array([[b"M", b"X", b"K"]]))

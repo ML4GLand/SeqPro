@@ -125,6 +125,13 @@ def gufunc_translate(
     ``AminoAlphabet.translate`` automatically uses the O(1)
     :func:`gufunc_translate_lut` path instead.
 
+    A k-mer that does not match any entry in ``kmer_keys`` resolves to the
+    ``'X'`` sentinel (ASCII 88) rather than leaving ``res[0]`` uninitialised.
+    ``guvectorize`` allocates output buffers via ``np.empty``, so without this
+    sentinel a missing-codon match would emit whatever byte happened to be on
+    the page — typically NUL on fresh pages, producing silently corrupt AA
+    sequences downstream.
+
     Parameters
     ----------
     seq_kmers
@@ -136,6 +143,11 @@ def gufunc_translate(
     res
         Array to save the result in, by default None
     """
+    # 'X' (ASCII 88) is the IUPAC sentinel for an unknown amino acid. We seed
+    # res[0] before the scan so a no-match exit (e.g. an N or NUL in the codon)
+    # produces 'X' rather than leaking the uninitialised np.empty buffer that
+    # ``guvectorize`` hands us.
+    res[0] = 88  # type: ignore
     for i in nb.prange(len(kmer_keys)):
         if (seq_kmers == kmer_keys[i]).all():
             res[0] = kmer_values[i]  # type: ignore
@@ -181,6 +193,14 @@ def gufunc_translate_lut(
     64-element ``codon_lut`` (built by ``AminoAlphabet`` at construction) returns
     the amino-acid byte for that index.
 
+    The ``(byte >> 1) & 3`` hash is **not** a bijection outside ``{A, C, G, T}``:
+    e.g. ``N`` (0x4E) and ``NUL`` (0x00) both collide onto valid LUT slots and
+    would silently yield biologically wrong AAs (``NNN → T``, ``\\x00\\x00\\x00 →
+    K``). To prevent that, every codon byte is range-checked against
+    ``{A, C, G, T}`` before the LUT lookup; any non-canonical byte short-circuits
+    to the ``'X'`` (ASCII 88) sentinel — the IUPAC "unknown amino acid" marker —
+    so callers can detect and act on bad input downstream.
+
     Parameters
     ----------
     seq_kmers
@@ -190,7 +210,21 @@ def gufunc_translate_lut(
     res
         Output buffer.
     """
-    res[0] = codon_lut[_pack_codon_index(seq_kmers[0], seq_kmers[1], seq_kmers[2])]
+    # Validate each codon byte is in {'A','C','G','T'} (ASCII 65/67/71/84).
+    # Outside that set, the (byte >> 1) & 3 hash silently collides with
+    # canonical codons (e.g. NNN -> T, \x00\x00\x00 -> K), so we short-circuit
+    # to 'X' (88) without consulting the LUT.
+    b0 = seq_kmers[0]
+    b1 = seq_kmers[1]
+    b2 = seq_kmers[2]
+    if (
+        (b0 == 65 or b0 == 67 or b0 == 71 or b0 == 84)
+        and (b1 == 65 or b1 == 67 or b1 == 71 or b1 == 84)
+        and (b2 == 65 or b2 == 67 or b2 == 71 or b2 == 84)
+    ):
+        res[0] = codon_lut[_pack_codon_index(b0, b1, b2)]
+    else:
+        res[0] = 88  # 'X' — unknown AA sentinel
 
 
 @nb.guvectorize(
