@@ -30,7 +30,7 @@ def test_gufunc_translate(
     kmer_keys = sp.AA.codon_array.view(np.uint8)
     kmer_values = sp.AA.aa_array.view(np.uint8)
 
-    actual = gufunc_translate(seq_kmers, kmer_keys, kmer_values)
+    actual = gufunc_translate(seq_kmers, kmer_keys, kmer_values, np.uint8(ord("X")))
     np.testing.assert_array_equal(actual, desired)
 
 
@@ -50,7 +50,7 @@ def test_lut_translates_every_standard_codon():
 
     for codon, expected_aa in zip(sp.AA.codons, sp.AA.amino_acids, strict=True):
         seq_kmer = sp.cast_seqs(codon).view(np.uint8)
-        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut, np.uint8(ord("X")))
         assert int(actual) == ord(expected_aa), (
             f"codon {codon!r} → {chr(int(actual))!r}, expected {expected_aa!r}"
         )
@@ -62,7 +62,7 @@ def test_lut_translates_stop_codons():
 
     for stop in ("TAA", "TAG", "TGA"):
         seq_kmer = sp.cast_seqs(stop).view(np.uint8)
-        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut, np.uint8(ord("X")))
         assert chr(int(actual)) == "*", f"{stop} → {chr(int(actual))}, expected '*'"
 
 
@@ -71,7 +71,7 @@ def test_lut_translates_start_codon():
     from seqpro._numba import gufunc_translate_lut
 
     seq_kmer = sp.cast_seqs("ATG").view(np.uint8)
-    actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+    actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut, np.uint8(ord("X")))
     assert chr(int(actual)) == "M"
 
 
@@ -88,8 +88,10 @@ def test_lut_and_linear_scan_produce_identical_output():
 
     kmer_keys = sp.AA.codon_array.view(np.uint8)
     kmer_values = sp.AA.aa_array.view(np.uint8)
-    expected = gufunc_translate(codons_bytes, kmer_keys, kmer_values)
-    actual = gufunc_translate_lut(codons_bytes, sp.AA.codon_lut)
+    expected = gufunc_translate(
+        codons_bytes, kmer_keys, kmer_values, np.uint8(ord("X"))
+    )
+    actual = gufunc_translate_lut(codons_bytes, sp.AA.codon_lut, np.uint8(ord("X")))
     np.testing.assert_array_equal(actual, expected)
 
 
