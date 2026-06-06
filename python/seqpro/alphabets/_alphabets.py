@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from types import MethodType
-from typing import cast, overload
+from typing import Literal, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .._numba import (
+    _nb_drop_unknown_codons,
     _nb_find_stop_ends,
     _pack_codon_index,
     gufunc_complement_bytes,
@@ -263,6 +264,22 @@ def _build_translate_lut(
     return lut
 
 
+def _parse_unknown(unknown: str) -> tuple[bool, np.uint8]:
+    """Parse the ``unknown`` policy string for ``AminoAlphabet.translate``.
+
+    Returns ``(is_drop, marker_byte)``. ``"drop"`` -> ``(True, 0)``; a single
+    ASCII char -> ``(False, ord(char))``; anything else raises ``ValueError``.
+    """
+    if unknown == "drop":
+        return True, np.uint8(0)
+    if isinstance(unknown, str) and len(unknown) == 1 and ord(unknown) <= 0xFF:
+        return False, np.uint8(ord(unknown))
+    raise ValueError(
+        f"unknown must be a single ASCII character (pad) or the literal "
+        f'"drop"; got {unknown!r}.'
+    )
+
+
 class AminoAlphabet:
     codons: list[str]
     amino_acids: list[str]
@@ -377,6 +394,18 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
         validate: bool = False,
+        unknown: Literal["drop"],
+    ) -> Ragged[np.bytes_]: ...
+    @overload
+    def translate(
+        self,
+        seqs: StrSeqType,
+        length_axis: int | None = None,
+        *,
+        nuc_alphabet: NucleotideAlphabet | None = None,
+        truncate_stop: bool = False,
+        validate: bool = False,
+        unknown: str = "X",
     ) -> NDArray[np.bytes_]: ...
     @overload
     def translate(
@@ -387,6 +416,7 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
         validate: bool = False,
+        unknown: str = "X",
     ) -> Ragged[np.bytes_]: ...
     @overload
     def translate(
@@ -397,6 +427,7 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet,
         truncate_stop: bool = False,
         validate: bool = False,
+        unknown: str = "X",
     ) -> Ragged[np.uint8]: ...
     def translate(
         self,
@@ -406,6 +437,7 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
         validate: bool = False,
+        unknown: str = "X",
     ) -> NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]:
         """Translate nucleotide sequences to amino acids.
 
@@ -417,21 +449,33 @@ class AminoAlphabet:
         length_axis
             Only used for non-Ragged array input.
         nuc_alphabet
-            Required when seqs is a Ragged OHE (uint8) array, to decode OHE → bytes.
+            Required when seqs is a Ragged OHE (uint8) array, to decode OHE -> bytes.
         truncate_stop
             When True, each output sequence is truncated at the first stop codon
             (inclusive). Only valid for Ragged input. Default False.
         validate
             When True, raise ValueError if any input nucleotide is outside this
-            alphabet (e.g. lowercase, ``N``, or other non-ACGT bytes; for OHE
-            input, any row that is not exactly one-hot). When validation passes,
-            the translation is guaranteed exact. Default False (no checking).
+            alphabet (case-insensitive: lowercase ``acgt`` pass, ``N`` and other
+            non-ACGT bytes raise; for OHE input, any non-one-hot row raises).
+            When validation passes, the translation is guaranteed exact. This is
+            the single fast-fail path — there is no separate ``error`` policy.
+            Default False.
+        unknown
+            Policy for codons containing a byte outside ``{A, C, G, T, a, c, g,
+            t}``. Either a single ASCII character (default ``"X"``) emitted once
+            per non-canonical codon ("pad"), or the literal ``"drop"`` which
+            removes non-canonical codons entirely. Because ``"drop"`` changes
+            per-sequence length, it always returns a ``Ragged`` (even for dense
+            input). Case-insensitivity is unconditional and independent of this
+            parameter.
 
         Returns
         -------
         NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]
-            Translated amino acid sequences in the same container type as the input.
+            Translated amino acids. Dense input returns a dense array unless
+            ``unknown="drop"``, which returns a Ragged.
         """
+        is_drop, marker_byte = _parse_unknown(unknown)
 
         if not isinstance(seqs, Ragged):
             check_axes(seqs, length_axis, False)
@@ -447,8 +491,45 @@ class AminoAlphabet:
                 raise ValueError(
                     "Sequence length is not evenly divisible by codon length."
                 )
-            # sliding_window_view appends the window axis at the end, so the
-            # original length_axis position now holds the stride-able codon axis.
+
+            if is_drop:
+                # Normalize to (n_seq, L): move length axis last, flatten the
+                # rest into the batch dim. Each row becomes one Ragged sequence.
+                norm = np.moveaxis(seqs, length_axis, -1)
+                seq_len = norm.shape[-1]
+                norm = np.ascontiguousarray(norm.reshape(-1, seq_len))
+                n_seq = norm.shape[0]
+                n_codons = seq_len // codon_size
+                codons = np.lib.stride_tricks.sliding_window_view(
+                    norm, window_shape=codon_size, axis=-1
+                )[:, ::codon_size]  # (n_seq, n_codons, codon_size)
+                codons_u1 = np.ascontiguousarray(codons.view(np.uint8))
+                if self.codon_lut is not None:
+                    translated = gufunc_translate_lut(
+                        codons_u1,
+                        self.codon_lut,
+                        marker_byte,
+                        axes=[-1, -1, (), ()],  # type: ignore
+                    )
+                else:
+                    translated = gufunc_translate(
+                        codons_u1,
+                        self.codon_array.view(np.uint8),
+                        self.aa_array.view(np.uint8),
+                        marker_byte,
+                        axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
+                    )
+                translated_flat = np.ascontiguousarray(translated.reshape(-1))
+                codons_flat = codons_u1.reshape(-1, codon_size)
+                offsets = np.arange(n_seq + 1, dtype=np.int64) * n_codons
+                out_u1, new_offsets = _nb_drop_unknown_codons(
+                    translated_flat, codons_flat, offsets, self._valid_upper_bytes
+                )
+                return Ragged.from_offsets(
+                    out_u1.view("S1"), (n_seq, None), new_offsets
+                )
+
+            # pad: shape-preserving dense output
             codons = np.lib.stride_tricks.sliding_window_view(
                 seqs, window_shape=codon_size, axis=length_axis
             )
@@ -457,13 +538,15 @@ class AminoAlphabet:
                 return gufunc_translate_lut(
                     codons.view(np.uint8),
                     self.codon_lut,
-                    axes=[-1, -1, ()],  # type: ignore
+                    marker_byte,
+                    axes=[-1, -1, (), ()],  # type: ignore
                 ).view("S1")
             return gufunc_translate(
                 codons.view(np.uint8),
                 self.codon_array.view(np.uint8),
                 self.aa_array.view(np.uint8),
-                axes=[-1, (-2, -1), (-1), ()],  # type: ignore
+                marker_byte,
+                axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
             ).view("S1")
 
         # --- Ragged path ---
