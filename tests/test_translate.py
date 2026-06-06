@@ -6,7 +6,7 @@ from Bio.Seq import translate
 from hypothesis import given
 from numpy.typing import NDArray
 from pytest_cases import parametrize_with_cases
-from seqpro._numba import gufunc_translate
+from seqpro._numba import gufunc_translate, gufunc_translate_lut
 from seqpro.rag import Ragged
 
 
@@ -273,6 +273,24 @@ def test_gufunc_translate_case_insensitive():
         kmer_keys,
         kmer_values,
         np.uint8(ord("X")),
+    )
+    assert int(upper) == int(lower) == ord("M")
+
+
+def test_gufunc_translate_lut_marker_on_noncanonical():
+    # Pre-fix collisions: NNN -> T, \x00\x00\x00 -> K. Post-fix: marker.
+    for codon in (b"NNN", b"\x00\x00\x00"):
+        seq = np.frombuffer(codon, dtype=np.uint8).copy()
+        out = gufunc_translate_lut(seq, sp.AA.codon_lut, np.uint8(ord("X")))
+        assert int(out) == ord("X"), codon
+
+
+def test_gufunc_translate_lut_case_insensitive():
+    upper = gufunc_translate_lut(
+        np.frombuffer(b"ATG", np.uint8).copy(), sp.AA.codon_lut, np.uint8(ord("X"))
+    )
+    lower = gufunc_translate_lut(
+        np.frombuffer(b"atg", np.uint8).copy(), sp.AA.codon_lut, np.uint8(ord("X"))
     )
     assert int(upper) == int(lower) == ord("M")
 

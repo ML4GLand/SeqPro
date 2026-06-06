@@ -183,14 +183,15 @@ def _pack_codon_index(b0, b1, b2):
 
 
 @nb.guvectorize(
-    ["(u1[:], u1[:], u1[:])"],
-    "(k),(m)->()",
+    ["(u1[:], u1[:], u1, u1[:])"],
+    "(k),(m),()->()",
     target="parallel",
     cache=True,
 )
 def gufunc_translate_lut(
     seq_kmers: NDArray[np.uint8],
     codon_lut: NDArray[np.uint8],
+    marker_byte: np.uint8,
     res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:  # type: ignore
     """Translate a 3-codon to its amino acid via an O(1) lookup table.
@@ -199,11 +200,16 @@ def gufunc_translate_lut(
     genetic code (k=3, ACGT); non-standard alphabets use
     :func:`gufunc_translate` instead.
 
-    The LUT is indexed by ``_pack_codon_index``, which hashes each nucleotide's
-    ASCII byte with ``(byte >> 1) & 3`` — a bijection on ``{A, C, G, T}`` — and
-    packs the three 2-bit codes into a 6-bit index in ``[0, 63]``. The
-    64-element ``codon_lut`` (built by ``AminoAlphabet`` at construction) returns
-    the amino-acid byte for that index.
+    The ``(byte >> 1) & 3`` hash is **not** a bijection outside ``{A, C, G, T}``:
+    e.g. ``N`` (0x4E) and ``NUL`` (0x00) both collide onto valid LUT slots and
+    would silently yield biologically wrong AAs (``NNN -> T``, ``\\x00\\x00\\x00 ->
+    K``). Every codon byte is range-checked against ``{A, C, G, T}`` before the
+    LUT lookup; any non-canonical byte short-circuits to the caller-supplied
+    ``marker_byte`` sentinel.
+
+    Case-insensitivity: each input byte is upper-cased via ``b & 0xDF`` before
+    the range check and the LUT-index hash, so lowercase nucleotides (e.g.
+    soft-masked ``acg``) translate identically to their uppercase forms.
 
     Parameters
     ----------
@@ -211,10 +217,24 @@ def gufunc_translate_lut(
         A 3-codon as ASCII bytes (e.g. ``[65, 84, 71]`` = ``"ATG"``).
     codon_lut
         64-byte LUT, built by ``AminoAlphabet`` at construction time.
+    marker_byte
+        ASCII byte emitted when any codon byte is non-canonical (i.e. not in
+        ``{A, C, G, T, a, c, g, t}``). The Python wrapper validates this is a
+        single byte.
     res
         Output buffer.
     """
-    res[0] = codon_lut[_pack_codon_index(seq_kmers[0], seq_kmers[1], seq_kmers[2])]
+    b0 = seq_kmers[0] & 0xDF
+    b1 = seq_kmers[1] & 0xDF
+    b2 = seq_kmers[2] & 0xDF
+    if (
+        (b0 == 65 or b0 == 67 or b0 == 71 or b0 == 84)
+        and (b1 == 65 or b1 == 67 or b1 == 71 or b1 == 84)
+        and (b2 == 65 or b2 == 67 or b2 == 71 or b2 == 84)
+    ):
+        res[0] = codon_lut[_pack_codon_index(b0, b1, b2)]
+    else:
+        res[0] = marker_byte
 
 
 @nb.guvectorize(
