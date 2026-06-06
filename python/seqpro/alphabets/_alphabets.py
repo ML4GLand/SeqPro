@@ -272,7 +272,7 @@ def _parse_unknown(unknown: str) -> tuple[bool, np.uint8]:
     """
     if unknown == "drop":
         return True, np.uint8(0)
-    if isinstance(unknown, str) and len(unknown) == 1 and ord(unknown) <= 0xFF:
+    if isinstance(unknown, str) and len(unknown) == 1 and ord(unknown) <= 0x7F:
         return False, np.uint8(ord(unknown))
     raise ValueError(
         f"unknown must be a single ASCII character (pad) or the literal "
@@ -522,6 +522,12 @@ class AminoAlphabet:
                 translated_flat = np.ascontiguousarray(translated.reshape(-1))
                 codons_flat = codons_u1.reshape(-1, codon_size)
                 offsets = np.arange(n_seq + 1, dtype=np.int64) * n_codons
+                # The drop criterion is per-nucleotide-byte validity, which
+                # matches the LUT kernel's range-check exactly. For the generic
+                # linear-scan kernel this assumes a dense codon table (every
+                # all-valid-nucleotide codon has a key) — true for the standard
+                # genetic code. A sparse custom alphabet could keep an unkeyed
+                # codon still carrying the marker byte.
                 out_u1, new_offsets = _nb_drop_unknown_codons(
                     translated_flat, codons_flat, offsets, self._valid_upper_bytes
                 )
