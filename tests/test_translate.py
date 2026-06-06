@@ -337,11 +337,6 @@ def test_translate_validate_passes_on_valid_acgt():
     sp.AA.translate("ATGAAA", length_axis=-1, validate=True)
 
 
-def test_translate_validate_raises_on_lowercase():
-    with pytest.raises(ValueError, match="outside the alphabet"):
-        sp.AA.translate("atgAAA", length_axis=-1, validate=True)
-
-
 def test_translate_validate_raises_on_N():
     with pytest.raises(ValueError, match="outside the alphabet"):
         sp.AA.translate("ATGNNN", length_axis=-1, validate=True)
@@ -386,6 +381,26 @@ def test_check_ohe_rows_raises_on_1d_data():
     """A 1-D buffer (not (total, n_nuc)) yields a clear ValueError, not IndexError."""
     with pytest.raises(ValueError, match="must be 2-D"):
         sp.AA._check_ohe_rows(np.zeros(6, dtype=np.uint8), 4)
+
+
+# --- canonical-correctness regression ---
+
+
+def test_all_canonical_codons_unchanged():
+    # codons and codon_to_aa keys are both str
+    codons = sp.AA.codons  # list[str], e.g. "TTT", "TTC", ...
+    joined = "".join(codons)
+    seqs = np.frombuffer(joined.encode(), "S1").reshape(1, -1)
+    out = sp.AA.translate(seqs, length_axis=-1).view("S1").tobytes().decode()
+    expected = "".join(sp.AA.codon_to_aa[c] for c in codons)
+    assert out == expected
+
+
+def test_translate_pad_X_matches_bugfix_behavior():
+    # unknown="X" pads every non-canonical codon with 'X' — the #40 contract.
+    seqs = np.frombuffer(b"ATGNNNaaaXYZ", "S1").reshape(1, -1)  # XYZ non-canonical
+    out = sp.AA.translate(seqs, length_axis=-1, unknown="X").view("S1").tobytes()
+    assert out == b"MXKX"  # ATG=M, NNN=X, aaa=K, XYZ=X
 
 
 def test_translate_ragged_uses_lut_matches_biopython():
