@@ -595,27 +595,50 @@ class AminoAlphabet:
             codons = np.lib.stride_tricks.sliding_window_view(
                 nuc_bytes_flat, codon_size, axis=0
             )
-            # sliding_window_view appends window axis at end → slice axis 0 by codon_size
             codons = codons[::codon_size]
-            # codons shape: (num_codons, *trailing, codon_size); codon axis is last
+            # codons shape: (num_codons, *trailing, codon_size); codon axis last
+            codons_u1 = codons.view(np.uint8)
             translated_flat: NDArray[np.bytes_]
             if self.codon_lut is not None:
                 translated_flat = gufunc_translate_lut(
-                    codons.view(np.uint8),
+                    codons_u1,
                     self.codon_lut,
-                    axes=[-1, -1, ()],  # type: ignore
+                    marker_byte,
+                    axes=[-1, -1, (), ()],  # type: ignore
                 ).view("S1")  # (num_codons, *trailing)
             else:
                 translated_flat = gufunc_translate(
-                    codons.view(np.uint8),
+                    codons_u1,
                     self.codon_array.view(np.uint8),
                     self.aa_array.view(np.uint8),
-                    axes=[-1, (-2, -1), (-1), ()],  # type: ignore
+                    marker_byte,
+                    axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
                 ).view("S1")  # (num_codons, *trailing)
         else:
+            codons_u1 = np.empty((0, codon_size), dtype=np.uint8)
             translated_flat = np.empty((0, *trailing), dtype="S1")
 
-        new_offsets = offsets // codon_size  # (n+1,) position-based in translated_flat
+        new_offsets = offsets // codon_size  # (n+1,) codon-indexed in translated_flat
+
+        if is_drop:
+            # For OHE Ragged the nucleotide-alphabet trailing axis was consumed
+            # by decode_ohe, so translated_flat / codons_u1 are 1-D along the
+            # codon axis. (Dense drop is handled in the non-Ragged branch.)
+            if trailing:
+                raise ValueError(
+                    "unknown='drop' is not supported for dense-trailing Ragged "
+                    "input (e.g. multi-track). Use a single-track Ragged."
+                )
+            if total > 0:
+                out_u1, new_offsets = _nb_drop_unknown_codons(
+                    translated_flat.view(np.uint8),
+                    np.ascontiguousarray(codons_u1),
+                    new_offsets.astype(np.int64),
+                    self._valid_upper_bytes,
+                )
+                translated_flat = out_u1.view("S1")
+            else:
+                translated_flat = np.empty((0,), dtype="S1")
 
         if truncate_stop:
             starts = new_offsets[:-1].astype(np.int64)

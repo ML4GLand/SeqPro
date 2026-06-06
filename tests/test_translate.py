@@ -575,3 +575,35 @@ def test_translate_invalid_unknown_raises(bad):
     seqs = np.frombuffer(b"ATG", "S1").reshape(1, -1)
     with pytest.raises(ValueError):
         sp.AA.translate(seqs, length_axis=-1, unknown=bad)
+
+
+# --- Ragged unknown-codon policy tests ---
+
+
+def _rag_bytes(seq_list):
+    data = np.frombuffer(b"".join(seq_list), "S1")
+    lengths = np.array([len(s) for s in seq_list], dtype=np.int64)
+    return Ragged.from_lengths(data, lengths)
+
+
+def test_translate_ragged_pad():
+    rag = _rag_bytes([b"ATGNNN", b"AAACCC"])
+    out = sp.AA.translate(rag, unknown="X")
+    flat = out.to_packed().data.view("S1").tobytes()
+    assert flat == b"MXKP"  # ATG=M NNN=X AAA=K CCC=P
+
+
+def test_translate_ragged_drop():
+    rag = _rag_bytes([b"ATGNNN", b"AAACCC"])
+    out = sp.AA.translate(rag, unknown="drop")
+    p = out.to_packed()
+    assert p.data.view("S1").tobytes() == b"MKP"  # NNN dropped from seq0
+    assert p.lengths.ravel().tolist() == [1, 2]
+
+
+def test_translate_ragged_drop_lowercase_kept():
+    rag = _rag_bytes([b"atgnnn"])
+    out = sp.AA.translate(rag, unknown="drop")
+    p = out.to_packed()
+    assert p.data.view("S1").tobytes() == b"M"
+    assert p.lengths.ravel().tolist() == [1]
