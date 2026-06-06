@@ -237,6 +237,60 @@ def gufunc_translate_lut(
         res[0] = marker_byte
 
 
+@nb.njit(cache=True)
+def _nb_drop_unknown_codons(translated, codons, offsets, valid_upper):
+    """Compact a flat translated AA buffer, dropping non-canonical codons.
+
+    Single-pass per-sequence stream compaction for ``translate(unknown="drop")``.
+    A codon is dropped iff any of its bytes — after upper-casing via ``& 0xDF``
+    — is not in ``valid_upper``. Offsets are codon-indexed into ``translated``.
+
+    Parameters
+    ----------
+    translated
+        (num_codons,) uint8 AA bytes (S1 viewed as u1).
+    codons
+        (num_codons, k) uint8 input codon bytes.
+    offsets
+        (n+1,) int64 codon-indexed offsets into ``translated``.
+    valid_upper
+        (v,) uint8 upper-cased valid nucleotide bytes (e.g. ord("ACGT")).
+
+    Returns
+    -------
+    (out, new_offsets)
+        ``out`` is (num_kept,) uint8; ``new_offsets`` is (n+1,) int64, monotonic.
+    """
+    n = len(offsets) - 1
+    num_codons = translated.shape[0]
+    k = codons.shape[1]
+    v = len(valid_upper)
+    out = np.empty(num_codons, dtype=np.uint8)
+    new_offsets = np.empty(n + 1, dtype=np.int64)
+    new_offsets[0] = 0
+    w = 0
+    for s in range(n):
+        start = offsets[s]
+        end = offsets[s + 1]
+        for c in range(start, end):
+            keep = True
+            for j in range(k):
+                b = codons[c, j] & 0xDF
+                ok = False
+                for t in range(v):
+                    if b == valid_upper[t]:
+                        ok = True
+                        break
+                if not ok:
+                    keep = False
+                    break
+            if keep:
+                out[w] = translated[c]
+                w += 1
+        new_offsets[s + 1] = w
+    return out[:w].copy(), new_offsets
+
+
 @nb.guvectorize(
     ["(u1, u1[:], u1[:])"],
     "(),(n)->()",

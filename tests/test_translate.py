@@ -6,7 +6,11 @@ from Bio.Seq import translate
 from hypothesis import given
 from numpy.typing import NDArray
 from pytest_cases import parametrize_with_cases
-from seqpro._numba import gufunc_translate, gufunc_translate_lut
+from seqpro._numba import (
+    _nb_drop_unknown_codons,
+    gufunc_translate,
+    gufunc_translate_lut,
+)
 from seqpro.rag import Ragged
 
 
@@ -481,6 +485,45 @@ def test_check_ohe_rows_raises_on_width_mismatch():
     data = np.zeros((6, 5), dtype=np.uint8)  # width 5 != DNA's 4
     with pytest.raises(ValueError, match="width"):
         sp.AA._check_ohe_rows(data, 4)
+
+
+def test_nb_drop_unknown_codons_compacts_per_sequence():
+    # 2 sequences of 3 codons each (codon_size=3).
+    # seq0 codons: ATG (keep), NNN (drop), GGG (keep)
+    # seq1 codons: AAA (keep), CCC (keep), T?T (drop -- '?' non-canonical)
+    codons = np.stack(
+        [
+            np.frombuffer(b"ATG", np.uint8),
+            np.frombuffer(b"NNN", np.uint8),
+            np.frombuffer(b"GGG", np.uint8),
+            np.frombuffer(b"AAA", np.uint8),
+            np.frombuffer(b"CCC", np.uint8),
+            np.frombuffer(b"T?T", np.uint8),
+        ]
+    ).copy()
+    translated = np.frombuffer(b"MXGKPX", np.uint8).copy()  # markers at dropped slots
+    offsets = np.array([0, 3, 6], dtype=np.int64)
+    valid_upper = np.frombuffer(b"ACGT", np.uint8).copy()
+
+    out, new_offsets = _nb_drop_unknown_codons(translated, codons, offsets, valid_upper)
+    assert out.tobytes() == b"MGKP"
+    assert new_offsets.tolist() == [0, 2, 4]
+
+
+def test_nb_drop_unknown_codons_case_insensitive_keep():
+    # lowercase canonical codon must be KEPT (not dropped).
+    codons = np.stack(
+        [
+            np.frombuffer(b"atg", np.uint8),
+            np.frombuffer(b"nnn", np.uint8),
+        ]
+    ).copy()
+    translated = np.frombuffer(b"MX", np.uint8).copy()
+    offsets = np.array([0, 2], dtype=np.int64)
+    valid_upper = np.frombuffer(b"ACGT", np.uint8).copy()
+    out, new_offsets = _nb_drop_unknown_codons(translated, codons, offsets, valid_upper)
+    assert out.tobytes() == b"M"
+    assert new_offsets.tolist() == [0, 1]
 
 
 def test_translate_ragged_multiseq_matches_biopython():
