@@ -538,3 +538,40 @@ def test_translate_ragged_multiseq_matches_biopython():
     for i, s in enumerate(seqs):
         expected = sp.cast_seqs(str(translate(s)))
         np.testing.assert_array_equal(_rag_bytes_to_array(out[i]), expected)
+
+
+def test_validate_accepts_lowercase_rejects_N():
+    # lowercase canonical must pass validate=True (translates exactly now)
+    sp.AA.translate(
+        np.frombuffer(b"atgaaa", "S1").reshape(1, -1), length_axis=-1, validate=True
+    )
+    # N must still raise
+    with pytest.raises(ValueError):
+        sp.AA.translate(
+            np.frombuffer(b"atgNNN", "S1").reshape(1, -1), length_axis=-1, validate=True
+        )
+
+
+def test_translate_pad_default_is_X():
+    seqs = np.frombuffer(b"ATGNNN", "S1").reshape(1, -1)
+    out = sp.AA.translate(seqs, length_axis=-1)  # default unknown="X"
+    assert out.view("S1").tobytes() == b"MX"
+
+
+def test_translate_pad_custom_marker():
+    seqs = np.frombuffer(b"ATGNNN", "S1").reshape(1, -1)
+    out = sp.AA.translate(seqs, length_axis=-1, unknown="-")
+    assert out.view("S1").tobytes() == b"M-"
+
+
+def test_translate_pad_lowercase_translates():
+    seqs = np.frombuffer(b"atgaaa", "S1").reshape(1, -1)
+    out = sp.AA.translate(seqs, length_axis=-1)
+    assert out.view("S1").tobytes() == b"MK"
+
+
+@pytest.mark.parametrize("bad", ["xy", "", "ZZ", "drops"])
+def test_translate_invalid_unknown_raises(bad):
+    seqs = np.frombuffer(b"ATG", "S1").reshape(1, -1)
+    with pytest.raises(ValueError):
+        sp.AA.translate(seqs, length_axis=-1, unknown=bad)

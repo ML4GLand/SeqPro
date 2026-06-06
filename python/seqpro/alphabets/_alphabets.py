@@ -324,10 +324,16 @@ class AminoAlphabet:
         nuc_chars = sorted({c for codon in codons for c in codon})
         self._valid_nuc_bytes = np.array([ord(c) for c in nuc_chars], dtype=np.uint8)
 
+        # Upper-cased view (bit-5 flip) for case-insensitive validation and
+        # drop-codon detection. Identical to _valid_nuc_bytes when the
+        # alphabet's nucleotides are already uppercase (standard DNA case).
+        self._valid_upper_bytes = self._valid_nuc_bytes & np.uint8(0xDF)
+
     def _check_nuc_bytes(self, buf: NDArray[np.uint8]) -> None:
         """Raise ``ValueError`` if any byte in ``buf`` is outside the alphabet's
-        nucleotides. Used by ``translate(validate=True)`` for string input."""
-        ok = np.isin(buf, self._valid_nuc_bytes)
+        nucleotides. Case-insensitive (``& 0xDF``), matching ``translate``'s
+        unconditional case-folding. Used by ``translate(validate=True)``."""
+        ok = np.isin(buf & np.uint8(0xDF), self._valid_upper_bytes)
         if not bool(ok.all()):
             bad = np.unique(buf[~ok]).tobytes().decode("ascii", "replace")
             allowed = self._valid_nuc_bytes.tobytes().decode("ascii")
