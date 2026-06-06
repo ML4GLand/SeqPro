@@ -32,17 +32,17 @@ def _bench(n_codons: int = 1_000_000, n_iters: int = 5) -> tuple[float, float, i
     kmer_values = sp.AA.aa_array.view(np.uint8)
 
     # Warm up (Numba caches compiled signatures across calls)
-    _ = gufunc_translate(codons[:100], kmer_keys, kmer_values)
-    _ = gufunc_translate_lut(codons[:100], sp.AA.codon_lut)
+    _ = gufunc_translate(codons[:100], kmer_keys, kmer_values, np.uint8(ord("X")))
+    _ = gufunc_translate_lut(codons[:100], sp.AA.codon_lut, np.uint8(ord("X")))
 
     times_linear, times_lut = [], []
     for _ in range(n_iters):
         t0 = time.perf_counter()
-        old = gufunc_translate(codons, kmer_keys, kmer_values)
+        old = gufunc_translate(codons, kmer_keys, kmer_values, np.uint8(ord("X")))
         times_linear.append(time.perf_counter() - t0)
 
         t0 = time.perf_counter()
-        new = gufunc_translate_lut(codons, sp.AA.codon_lut)
+        new = gufunc_translate_lut(codons, sp.AA.codon_lut, np.uint8(ord("X")))
         times_lut.append(time.perf_counter() - t0)
 
     n_diff = int((old != new).sum())

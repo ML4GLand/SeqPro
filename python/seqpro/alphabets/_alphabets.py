@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from types import MethodType
-from typing import cast, overload
+from typing import Literal, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .._numba import (
+    _nb_drop_unknown_codons,
     _nb_find_stop_ends,
     _pack_codon_index,
     gufunc_complement_bytes,
@@ -263,6 +264,22 @@ def _build_translate_lut(
     return lut
 
 
+def _parse_unknown(unknown: str) -> tuple[bool, np.uint8]:
+    """Parse the ``unknown`` policy string for ``AminoAlphabet.translate``.
+
+    Returns ``(is_drop, marker_byte)``. ``"drop"`` -> ``(True, 0)``; a single
+    ASCII char -> ``(False, ord(char))``; anything else raises ``ValueError``.
+    """
+    if unknown == "drop":
+        return True, np.uint8(0)
+    if isinstance(unknown, str) and len(unknown) == 1 and ord(unknown) <= 0x7F:
+        return False, np.uint8(ord(unknown))
+    raise ValueError(
+        f"unknown must be a single ASCII character (pad) or the literal "
+        f'"drop"; got {unknown!r}.'
+    )
+
+
 class AminoAlphabet:
     codons: list[str]
     amino_acids: list[str]
@@ -324,10 +341,16 @@ class AminoAlphabet:
         nuc_chars = sorted({c for codon in codons for c in codon})
         self._valid_nuc_bytes = np.array([ord(c) for c in nuc_chars], dtype=np.uint8)
 
+        # Upper-cased view (bit-5 flip) for case-insensitive validation and
+        # drop-codon detection. Identical to _valid_nuc_bytes when the
+        # alphabet's nucleotides are already uppercase (standard DNA case).
+        self._valid_upper_bytes = self._valid_nuc_bytes & np.uint8(0xDF)
+
     def _check_nuc_bytes(self, buf: NDArray[np.uint8]) -> None:
         """Raise ``ValueError`` if any byte in ``buf`` is outside the alphabet's
-        nucleotides. Used by ``translate(validate=True)`` for string input."""
-        ok = np.isin(buf, self._valid_nuc_bytes)
+        nucleotides. Case-insensitive (``& 0xDF``), matching ``translate``'s
+        unconditional case-folding. Used by ``translate(validate=True)``."""
+        ok = np.isin(buf & np.uint8(0xDF), self._valid_upper_bytes)
         if not bool(ok.all()):
             bad = np.unique(buf[~ok]).tobytes().decode("ascii", "replace")
             allowed = self._valid_nuc_bytes.tobytes().decode("ascii")
@@ -371,6 +394,18 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
         validate: bool = False,
+        unknown: Literal["drop"],
+    ) -> Ragged[np.bytes_]: ...
+    @overload
+    def translate(
+        self,
+        seqs: StrSeqType,
+        length_axis: int | None = None,
+        *,
+        nuc_alphabet: NucleotideAlphabet | None = None,
+        truncate_stop: bool = False,
+        validate: bool = False,
+        unknown: str = "X",
     ) -> NDArray[np.bytes_]: ...
     @overload
     def translate(
@@ -381,6 +416,7 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
         validate: bool = False,
+        unknown: str = "X",
     ) -> Ragged[np.bytes_]: ...
     @overload
     def translate(
@@ -391,6 +427,7 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet,
         truncate_stop: bool = False,
         validate: bool = False,
+        unknown: str = "X",
     ) -> Ragged[np.uint8]: ...
     def translate(
         self,
@@ -400,6 +437,7 @@ class AminoAlphabet:
         nuc_alphabet: NucleotideAlphabet | None = None,
         truncate_stop: bool = False,
         validate: bool = False,
+        unknown: str = "X",
     ) -> NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]:
         """Translate nucleotide sequences to amino acids.
 
@@ -411,21 +449,33 @@ class AminoAlphabet:
         length_axis
             Only used for non-Ragged array input.
         nuc_alphabet
-            Required when seqs is a Ragged OHE (uint8) array, to decode OHE → bytes.
+            Required when seqs is a Ragged OHE (uint8) array, to decode OHE -> bytes.
         truncate_stop
             When True, each output sequence is truncated at the first stop codon
             (inclusive). Only valid for Ragged input. Default False.
         validate
             When True, raise ValueError if any input nucleotide is outside this
-            alphabet (e.g. lowercase, ``N``, or other non-ACGT bytes; for OHE
-            input, any row that is not exactly one-hot). When validation passes,
-            the translation is guaranteed exact. Default False (no checking).
+            alphabet (case-insensitive: lowercase ``acgt`` pass, ``N`` and other
+            non-ACGT bytes raise; for OHE input, any non-one-hot row raises).
+            When validation passes, the translation is guaranteed exact. This is
+            the single fast-fail path — there is no separate ``error`` policy.
+            Default False.
+        unknown
+            Policy for codons containing a byte outside ``{A, C, G, T, a, c, g,
+            t}``. Either a single ASCII character (default ``"X"``) emitted once
+            per non-canonical codon ("pad"), or the literal ``"drop"`` which
+            removes non-canonical codons entirely. Because ``"drop"`` changes
+            per-sequence length, it always returns a ``Ragged`` (even for dense
+            input). Case-insensitivity is unconditional and independent of this
+            parameter.
 
         Returns
         -------
         NDArray[np.bytes_] | Ragged[np.bytes_] | Ragged[np.uint8]
-            Translated amino acid sequences in the same container type as the input.
+            Translated amino acids. Dense input returns a dense array unless
+            ``unknown="drop"``, which returns a Ragged.
         """
+        is_drop, marker_byte = _parse_unknown(unknown)
 
         if not isinstance(seqs, Ragged):
             check_axes(seqs, length_axis, False)
@@ -441,8 +491,51 @@ class AminoAlphabet:
                 raise ValueError(
                     "Sequence length is not evenly divisible by codon length."
                 )
-            # sliding_window_view appends the window axis at the end, so the
-            # original length_axis position now holds the stride-able codon axis.
+
+            if is_drop:
+                # Normalize to (n_seq, L): move length axis last, flatten the
+                # rest into the batch dim. Each row becomes one Ragged sequence.
+                norm = np.moveaxis(seqs, length_axis, -1)
+                seq_len = norm.shape[-1]
+                norm = np.ascontiguousarray(norm.reshape(-1, seq_len))
+                n_seq = norm.shape[0]
+                n_codons = seq_len // codon_size
+                codons = np.lib.stride_tricks.sliding_window_view(
+                    norm, window_shape=codon_size, axis=-1
+                )[:, ::codon_size]  # (n_seq, n_codons, codon_size)
+                codons_u1 = np.ascontiguousarray(codons.view(np.uint8))
+                if self.codon_lut is not None:
+                    translated = gufunc_translate_lut(
+                        codons_u1,
+                        self.codon_lut,
+                        marker_byte,
+                        axes=[-1, -1, (), ()],  # type: ignore
+                    )
+                else:
+                    translated = gufunc_translate(
+                        codons_u1,
+                        self.codon_array.view(np.uint8),
+                        self.aa_array.view(np.uint8),
+                        marker_byte,
+                        axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
+                    )
+                translated_flat = np.ascontiguousarray(translated.reshape(-1))
+                codons_flat = codons_u1.reshape(-1, codon_size)
+                offsets = np.arange(n_seq + 1, dtype=np.int64) * n_codons
+                # The drop criterion is per-nucleotide-byte validity, which
+                # matches the LUT kernel's range-check exactly. For the generic
+                # linear-scan kernel this assumes a dense codon table (every
+                # all-valid-nucleotide codon has a key) — true for the standard
+                # genetic code. A sparse custom alphabet could keep an unkeyed
+                # codon still carrying the marker byte.
+                out_u1, new_offsets = _nb_drop_unknown_codons(
+                    translated_flat, codons_flat, offsets, self._valid_upper_bytes
+                )
+                return Ragged.from_offsets(
+                    out_u1.view("S1"), (n_seq, None), new_offsets
+                )
+
+            # pad: shape-preserving dense output
             codons = np.lib.stride_tricks.sliding_window_view(
                 seqs, window_shape=codon_size, axis=length_axis
             )
@@ -451,13 +544,15 @@ class AminoAlphabet:
                 return gufunc_translate_lut(
                     codons.view(np.uint8),
                     self.codon_lut,
-                    axes=[-1, -1, ()],  # type: ignore
+                    marker_byte,
+                    axes=[-1, -1, (), ()],  # type: ignore
                 ).view("S1")
             return gufunc_translate(
                 codons.view(np.uint8),
                 self.codon_array.view(np.uint8),
                 self.aa_array.view(np.uint8),
-                axes=[-1, (-2, -1), (-1), ()],  # type: ignore
+                marker_byte,
+                axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
             ).view("S1")
 
         # --- Ragged path ---
@@ -500,27 +595,50 @@ class AminoAlphabet:
             codons = np.lib.stride_tricks.sliding_window_view(
                 nuc_bytes_flat, codon_size, axis=0
             )
-            # sliding_window_view appends window axis at end → slice axis 0 by codon_size
             codons = codons[::codon_size]
-            # codons shape: (num_codons, *trailing, codon_size); codon axis is last
+            # codons shape: (num_codons, *trailing, codon_size); codon axis last
+            codons_u1 = codons.view(np.uint8)
             translated_flat: NDArray[np.bytes_]
             if self.codon_lut is not None:
                 translated_flat = gufunc_translate_lut(
-                    codons.view(np.uint8),
+                    codons_u1,
                     self.codon_lut,
-                    axes=[-1, -1, ()],  # type: ignore
+                    marker_byte,
+                    axes=[-1, -1, (), ()],  # type: ignore
                 ).view("S1")  # (num_codons, *trailing)
             else:
                 translated_flat = gufunc_translate(
-                    codons.view(np.uint8),
+                    codons_u1,
                     self.codon_array.view(np.uint8),
                     self.aa_array.view(np.uint8),
-                    axes=[-1, (-2, -1), (-1), ()],  # type: ignore
+                    marker_byte,
+                    axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
                 ).view("S1")  # (num_codons, *trailing)
         else:
+            codons_u1 = np.empty((0, codon_size), dtype=np.uint8)
             translated_flat = np.empty((0, *trailing), dtype="S1")
 
-        new_offsets = offsets // codon_size  # (n+1,) position-based in translated_flat
+        new_offsets = offsets // codon_size  # (n+1,) codon-indexed in translated_flat
+
+        if is_drop:
+            # For OHE Ragged the nucleotide-alphabet trailing axis was consumed
+            # by decode_ohe, so translated_flat / codons_u1 are 1-D along the
+            # codon axis. (Dense drop is handled in the non-Ragged branch.)
+            if trailing:
+                raise ValueError(
+                    "unknown='drop' is not supported for dense-trailing Ragged "
+                    "input (e.g. multi-track). Use a single-track Ragged."
+                )
+            if total > 0:
+                out_u1, new_offsets = _nb_drop_unknown_codons(
+                    translated_flat.view(np.uint8),
+                    np.ascontiguousarray(codons_u1),
+                    new_offsets.astype(np.int64),
+                    self._valid_upper_bytes,
+                )
+                translated_flat = out_u1.view("S1")
+            else:
+                translated_flat = np.empty((0,), dtype="S1")
 
         if truncate_stop:
             starts = new_offsets[:-1].astype(np.int64)

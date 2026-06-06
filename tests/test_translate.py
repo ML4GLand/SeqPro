@@ -6,7 +6,11 @@ from Bio.Seq import translate
 from hypothesis import given
 from numpy.typing import NDArray
 from pytest_cases import parametrize_with_cases
-from seqpro._numba import gufunc_translate
+from seqpro._numba import (
+    _nb_drop_unknown_codons,
+    gufunc_translate,
+    gufunc_translate_lut,
+)
 from seqpro.rag import Ragged
 
 
@@ -30,7 +34,7 @@ def test_gufunc_translate(
     kmer_keys = sp.AA.codon_array.view(np.uint8)
     kmer_values = sp.AA.aa_array.view(np.uint8)
 
-    actual = gufunc_translate(seq_kmers, kmer_keys, kmer_values)
+    actual = gufunc_translate(seq_kmers, kmer_keys, kmer_values, np.uint8(ord("X")))
     np.testing.assert_array_equal(actual, desired)
 
 
@@ -50,7 +54,7 @@ def test_lut_translates_every_standard_codon():
 
     for codon, expected_aa in zip(sp.AA.codons, sp.AA.amino_acids, strict=True):
         seq_kmer = sp.cast_seqs(codon).view(np.uint8)
-        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut, np.uint8(ord("X")))
         assert int(actual) == ord(expected_aa), (
             f"codon {codon!r} → {chr(int(actual))!r}, expected {expected_aa!r}"
         )
@@ -62,7 +66,7 @@ def test_lut_translates_stop_codons():
 
     for stop in ("TAA", "TAG", "TGA"):
         seq_kmer = sp.cast_seqs(stop).view(np.uint8)
-        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+        actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut, np.uint8(ord("X")))
         assert chr(int(actual)) == "*", f"{stop} → {chr(int(actual))}, expected '*'"
 
 
@@ -71,7 +75,7 @@ def test_lut_translates_start_codon():
     from seqpro._numba import gufunc_translate_lut
 
     seq_kmer = sp.cast_seqs("ATG").view(np.uint8)
-    actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut)
+    actual = gufunc_translate_lut(seq_kmer, sp.AA.codon_lut, np.uint8(ord("X")))
     assert chr(int(actual)) == "M"
 
 
@@ -88,8 +92,10 @@ def test_lut_and_linear_scan_produce_identical_output():
 
     kmer_keys = sp.AA.codon_array.view(np.uint8)
     kmer_values = sp.AA.aa_array.view(np.uint8)
-    expected = gufunc_translate(codons_bytes, kmer_keys, kmer_values)
-    actual = gufunc_translate_lut(codons_bytes, sp.AA.codon_lut)
+    expected = gufunc_translate(
+        codons_bytes, kmer_keys, kmer_values, np.uint8(ord("X"))
+    )
+    actual = gufunc_translate_lut(codons_bytes, sp.AA.codon_lut, np.uint8(ord("X")))
     np.testing.assert_array_equal(actual, expected)
 
 
@@ -249,6 +255,52 @@ def test_translate_ragged_error_bad_length():
         sp.AA.translate(rag)
 
 
+def test_gufunc_translate_marker_on_no_match():
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    seq = np.frombuffer(b"\x00\x00\x00", dtype=np.uint8).copy()
+    out = gufunc_translate(seq, kmer_keys, kmer_values, np.uint8(ord("X")))
+    assert int(out) == ord("X")
+    out2 = gufunc_translate(seq, kmer_keys, kmer_values, np.uint8(ord("-")))
+    assert int(out2) == ord("-")
+
+
+def test_gufunc_translate_case_insensitive():
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    upper = gufunc_translate(
+        np.frombuffer(b"ATG", np.uint8).copy(),
+        kmer_keys,
+        kmer_values,
+        np.uint8(ord("X")),
+    )
+    lower = gufunc_translate(
+        np.frombuffer(b"atg", np.uint8).copy(),
+        kmer_keys,
+        kmer_values,
+        np.uint8(ord("X")),
+    )
+    assert int(upper) == int(lower) == ord("M")
+
+
+def test_gufunc_translate_lut_marker_on_noncanonical():
+    # Pre-fix collisions: NNN -> T, \x00\x00\x00 -> K. Post-fix: marker.
+    for codon in (b"NNN", b"\x00\x00\x00"):
+        seq = np.frombuffer(codon, dtype=np.uint8).copy()
+        out = gufunc_translate_lut(seq, sp.AA.codon_lut, np.uint8(ord("X")))
+        assert int(out) == ord("X"), codon
+
+
+def test_gufunc_translate_lut_case_insensitive():
+    upper = gufunc_translate_lut(
+        np.frombuffer(b"ATG", np.uint8).copy(), sp.AA.codon_lut, np.uint8(ord("X"))
+    )
+    lower = gufunc_translate_lut(
+        np.frombuffer(b"atg", np.uint8).copy(), sp.AA.codon_lut, np.uint8(ord("X"))
+    )
+    assert int(upper) == int(lower) == ord("M")
+
+
 def test_can_build_lut_predicate():
     from seqpro.alphabets._alphabets import _can_build_lut
 
@@ -283,11 +335,6 @@ def test_partial_acgt_alphabet_fills_unknown_with_X():
 def test_translate_validate_passes_on_valid_acgt():
     # Should not raise.
     sp.AA.translate("ATGAAA", length_axis=-1, validate=True)
-
-
-def test_translate_validate_raises_on_lowercase():
-    with pytest.raises(ValueError, match="outside the alphabet"):
-        sp.AA.translate("atgAAA", length_axis=-1, validate=True)
 
 
 def test_translate_validate_raises_on_N():
@@ -334,6 +381,26 @@ def test_check_ohe_rows_raises_on_1d_data():
     """A 1-D buffer (not (total, n_nuc)) yields a clear ValueError, not IndexError."""
     with pytest.raises(ValueError, match="must be 2-D"):
         sp.AA._check_ohe_rows(np.zeros(6, dtype=np.uint8), 4)
+
+
+# --- canonical-correctness regression ---
+
+
+def test_all_canonical_codons_unchanged():
+    # codons and codon_to_aa keys are both str
+    codons = sp.AA.codons  # list[str], e.g. "TTT", "TTC", ...
+    joined = "".join(codons)
+    seqs = np.frombuffer(joined.encode(), "S1").reshape(1, -1)
+    out = sp.AA.translate(seqs, length_axis=-1).view("S1").tobytes().decode()
+    expected = "".join(sp.AA.codon_to_aa[c] for c in codons)
+    assert out == expected
+
+
+def test_translate_pad_X_matches_bugfix_behavior():
+    # unknown="X" pads every non-canonical codon with 'X' — the #40 contract.
+    seqs = np.frombuffer(b"ATGNNNaaaXYZ", "S1").reshape(1, -1)  # XYZ non-canonical
+    out = sp.AA.translate(seqs, length_axis=-1, unknown="X").view("S1").tobytes()
+    assert out == b"MXKX"  # ATG=M, NNN=X, aaa=K, XYZ=X
 
 
 def test_translate_ragged_uses_lut_matches_biopython():
@@ -435,6 +502,45 @@ def test_check_ohe_rows_raises_on_width_mismatch():
         sp.AA._check_ohe_rows(data, 4)
 
 
+def test_nb_drop_unknown_codons_compacts_per_sequence():
+    # 2 sequences of 3 codons each (codon_size=3).
+    # seq0 codons: ATG (keep), NNN (drop), GGG (keep)
+    # seq1 codons: AAA (keep), CCC (keep), T?T (drop -- '?' non-canonical)
+    codons = np.stack(
+        [
+            np.frombuffer(b"ATG", np.uint8),
+            np.frombuffer(b"NNN", np.uint8),
+            np.frombuffer(b"GGG", np.uint8),
+            np.frombuffer(b"AAA", np.uint8),
+            np.frombuffer(b"CCC", np.uint8),
+            np.frombuffer(b"T?T", np.uint8),
+        ]
+    ).copy()
+    translated = np.frombuffer(b"MXGKPX", np.uint8).copy()  # markers at dropped slots
+    offsets = np.array([0, 3, 6], dtype=np.int64)
+    valid_upper = np.frombuffer(b"ACGT", np.uint8).copy()
+
+    out, new_offsets = _nb_drop_unknown_codons(translated, codons, offsets, valid_upper)
+    assert out.tobytes() == b"MGKP"
+    assert new_offsets.tolist() == [0, 2, 4]
+
+
+def test_nb_drop_unknown_codons_case_insensitive_keep():
+    # lowercase canonical codon must be KEPT (not dropped).
+    codons = np.stack(
+        [
+            np.frombuffer(b"atg", np.uint8),
+            np.frombuffer(b"nnn", np.uint8),
+        ]
+    ).copy()
+    translated = np.frombuffer(b"MX", np.uint8).copy()
+    offsets = np.array([0, 2], dtype=np.int64)
+    valid_upper = np.frombuffer(b"ACGT", np.uint8).copy()
+    out, new_offsets = _nb_drop_unknown_codons(translated, codons, offsets, valid_upper)
+    assert out.tobytes() == b"M"
+    assert new_offsets.tolist() == [0, 1]
+
+
 def test_translate_ragged_multiseq_matches_biopython():
     """Differential check over a multi-sequence, variable-length Ragged batch."""
     rng = np.random.default_rng(11)
@@ -447,3 +553,103 @@ def test_translate_ragged_multiseq_matches_biopython():
     for i, s in enumerate(seqs):
         expected = sp.cast_seqs(str(translate(s)))
         np.testing.assert_array_equal(_rag_bytes_to_array(out[i]), expected)
+
+
+def test_validate_accepts_lowercase_rejects_N():
+    # lowercase canonical must pass validate=True (translates exactly now)
+    sp.AA.translate(
+        np.frombuffer(b"atgaaa", "S1").reshape(1, -1), length_axis=-1, validate=True
+    )
+    # N must still raise
+    with pytest.raises(ValueError):
+        sp.AA.translate(
+            np.frombuffer(b"atgNNN", "S1").reshape(1, -1), length_axis=-1, validate=True
+        )
+
+
+def test_translate_pad_default_is_X():
+    seqs = np.frombuffer(b"ATGNNN", "S1").reshape(1, -1)
+    out = sp.AA.translate(seqs, length_axis=-1)  # default unknown="X"
+    assert out.view("S1").tobytes() == b"MX"
+
+
+def test_translate_pad_custom_marker():
+    seqs = np.frombuffer(b"ATGNNN", "S1").reshape(1, -1)
+    out = sp.AA.translate(seqs, length_axis=-1, unknown="-")
+    assert out.view("S1").tobytes() == b"M-"
+
+
+def test_translate_pad_lowercase_translates():
+    seqs = np.frombuffer(b"atgaaa", "S1").reshape(1, -1)
+    out = sp.AA.translate(seqs, length_axis=-1)
+    assert out.view("S1").tobytes() == b"MK"
+
+
+@pytest.mark.parametrize("bad", ["xy", "", "ZZ", "drops"])
+def test_translate_invalid_unknown_raises(bad):
+    seqs = np.frombuffer(b"ATG", "S1").reshape(1, -1)
+    with pytest.raises(ValueError):
+        sp.AA.translate(seqs, length_axis=-1, unknown=bad)
+
+
+# --- Ragged unknown-codon policy tests ---
+
+
+def _rag_bytes(seq_list):
+    data = np.frombuffer(b"".join(seq_list), "S1")
+    lengths = np.array([len(s) for s in seq_list], dtype=np.int64)
+    return Ragged.from_lengths(data, lengths)
+
+
+def test_translate_ragged_pad():
+    rag = _rag_bytes([b"ATGNNN", b"AAACCC"])
+    out = sp.AA.translate(rag, unknown="X")
+    flat = out.to_packed().data.view("S1").tobytes()
+    assert flat == b"MXKP"  # ATG=M NNN=X AAA=K CCC=P
+
+
+def test_translate_ragged_drop():
+    rag = _rag_bytes([b"ATGNNN", b"AAACCC"])
+    out = sp.AA.translate(rag, unknown="drop")
+    p = out.to_packed()
+    assert p.data.view("S1").tobytes() == b"MKP"  # NNN dropped from seq0
+    assert p.lengths.ravel().tolist() == [1, 2]
+
+
+def test_translate_ragged_drop_lowercase_kept():
+    rag = _rag_bytes([b"atgnnn"])
+    out = sp.AA.translate(rag, unknown="drop")
+    p = out.to_packed()
+    assert p.data.view("S1").tobytes() == b"M"
+    assert p.lengths.ravel().tolist() == [1]
+
+
+def test_translate_dense_drop_returns_ragged_2d():
+    # Batch of 2 dense sequences; one has a non-canonical codon.
+    seqs = np.frombuffer(b"ATGNNNAAACCC", "S1").reshape(2, 6)  # rows: ATGNNN, AAACCC
+    out = sp.AA.translate(seqs, length_axis=-1, unknown="drop")
+    p = out.to_packed()
+    assert p.data.view("S1").tobytes() == b"MKP"
+    assert p.lengths.ravel().tolist() == [1, 2]
+
+
+def test_translate_dense_drop_single_sequence():
+    seqs = np.frombuffer(b"ATGNNN", "S1")  # 1-D
+    out = sp.AA.translate(seqs, length_axis=-1, unknown="drop")
+    p = out.to_packed()
+    assert p.data.view("S1").tobytes() == b"M"
+    assert p.lengths.ravel().tolist() == [1]
+
+
+def test_translate_ohe_ragged_drop():
+    # Build OHE Ragged from a single sequence b"ATGNNN" (6 nucleotides, 2 codons).
+    # This mirrors the pattern in test_translate_ragged_ohe_basic.
+    dna_seq = sp.cast_seqs("ATGNNN")
+    ohe_data = sp.DNA.ohe(dna_seq)  # (6, 4)
+    lengths = np.array([6])
+    rag_ohe = Ragged.from_lengths(ohe_data, lengths)
+
+    out = sp.AA.translate(rag_ohe, nuc_alphabet=sp.DNA, unknown="drop")
+    # OHE in -> OHE out; decode to compare. out[0].to_numpy() shape: (1, n_aa)
+    aa = sp.AA.decode_ohe(out[0].to_numpy(), ohe_axis=-1)
+    assert aa.view("S1").tobytes() == b"M"
