@@ -249,6 +249,34 @@ def test_translate_ragged_error_bad_length():
         sp.AA.translate(rag)
 
 
+def test_gufunc_translate_marker_on_no_match():
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    seq = np.frombuffer(b"\x00\x00\x00", dtype=np.uint8).copy()
+    out = gufunc_translate(seq, kmer_keys, kmer_values, np.uint8(ord("X")))
+    assert int(out) == ord("X")
+    out2 = gufunc_translate(seq, kmer_keys, kmer_values, np.uint8(ord("-")))
+    assert int(out2) == ord("-")
+
+
+def test_gufunc_translate_case_insensitive():
+    kmer_keys = sp.AA.codon_array.view(np.uint8)
+    kmer_values = sp.AA.aa_array.view(np.uint8)
+    upper = gufunc_translate(
+        np.frombuffer(b"ATG", np.uint8).copy(),
+        kmer_keys,
+        kmer_values,
+        np.uint8(ord("X")),
+    )
+    lower = gufunc_translate(
+        np.frombuffer(b"atg", np.uint8).copy(),
+        kmer_keys,
+        kmer_values,
+        np.uint8(ord("X")),
+    )
+    assert int(upper) == int(lower) == ord("M")
+
+
 def test_can_build_lut_predicate():
     from seqpro.alphabets._alphabets import _can_build_lut
 

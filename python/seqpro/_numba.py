@@ -107,8 +107,8 @@ def gufunc_tokenize(
 
 
 @nb.guvectorize(
-    ["(u1[:], u1[:, :], u1[:], u1[:])"],
-    "(k),(j,k),(j)->()",
+    ["(u1[:], u1[:, :], u1[:], u1, u1[:])"],
+    "(k),(j,k),(j),()->()",
     target="parallel",
     cache=True,
 )
@@ -116,6 +116,7 @@ def gufunc_translate(
     seq_kmers: NDArray[np.uint8],
     kmer_keys: NDArray[np.uint8],
     kmer_values: NDArray[np.uint8],
+    marker_byte: np.uint8,
     res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:  # type: ignore
     """Translate k-mers into amino acids via an O(n) linear scan.
@@ -125,6 +126,18 @@ def gufunc_translate(
     ``AminoAlphabet.translate`` automatically uses the O(1)
     :func:`gufunc_translate_lut` path instead.
 
+    A k-mer that does not match any entry in ``kmer_keys`` resolves to the
+    caller-supplied ``marker_byte`` rather than leaving ``res[0]``
+    uninitialised. ``guvectorize`` allocates output buffers via ``np.empty``,
+    so without this sentinel a missing-codon match would emit whatever byte
+    happened to be on the page — typically NUL on fresh pages, producing
+    silently corrupt AA sequences downstream.
+
+    Case-insensitivity: ASCII letters in ``seq_kmers`` and ``kmer_keys`` are
+    upper-cased on the fly via ``b & 0xDF`` (the bit-5 flip is a no-op on
+    uppercase ASCII alphas and turns lowercase into uppercase), so soft-masked
+    / mixed-case input still translates normally.
+
     Parameters
     ----------
     seq_kmers
@@ -133,11 +146,22 @@ def gufunc_translate(
         All unique k-mers as an (n, k) array.
     kmer_values
         Values corresponding to each k-mer, in corresponding order.
+    marker_byte
+        ASCII byte emitted when no kmer in ``kmer_keys`` matches the input
+        (i.e. an unknown codon). The Python wrapper validates this is a
+        single byte.
     res
         Array to save the result in, by default None
     """
-    for i in nb.prange(len(kmer_keys)):
-        if (seq_kmers == kmer_keys[i]).all():
+    res[0] = marker_byte  # type: ignore
+    k = len(seq_kmers)
+    for i in range(len(kmer_keys)):
+        match = True
+        for j in range(k):
+            if (seq_kmers[j] & 0xDF) != (kmer_keys[i, j] & 0xDF):
+                match = False
+                break
+        if match:
             res[0] = kmer_values[i]  # type: ignore
             break
 
