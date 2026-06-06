@@ -607,3 +607,34 @@ def test_translate_ragged_drop_lowercase_kept():
     p = out.to_packed()
     assert p.data.view("S1").tobytes() == b"M"
     assert p.lengths.ravel().tolist() == [1]
+
+
+def test_translate_dense_drop_returns_ragged_2d():
+    # Batch of 2 dense sequences; one has a non-canonical codon.
+    seqs = np.frombuffer(b"ATGNNNAAACCC", "S1").reshape(2, 6)  # rows: ATGNNN, AAACCC
+    out = sp.AA.translate(seqs, length_axis=-1, unknown="drop")
+    p = out.to_packed()
+    assert p.data.view("S1").tobytes() == b"MKP"
+    assert p.lengths.ravel().tolist() == [1, 2]
+
+
+def test_translate_dense_drop_single_sequence():
+    seqs = np.frombuffer(b"ATGNNN", "S1")  # 1-D
+    out = sp.AA.translate(seqs, length_axis=-1, unknown="drop")
+    p = out.to_packed()
+    assert p.data.view("S1").tobytes() == b"M"
+    assert p.lengths.ravel().tolist() == [1]
+
+
+def test_translate_ohe_ragged_drop():
+    # Build OHE Ragged from a single sequence b"ATGNNN" (6 nucleotides, 2 codons).
+    # This mirrors the pattern in test_translate_ragged_ohe_basic.
+    dna_seq = sp.cast_seqs("ATGNNN")
+    ohe_data = sp.DNA.ohe(dna_seq)  # (6, 4)
+    lengths = np.array([6])
+    rag_ohe = Ragged.from_lengths(ohe_data, lengths)
+
+    out = sp.AA.translate(rag_ohe, nuc_alphabet=sp.DNA, unknown="drop")
+    # OHE in -> OHE out; decode to compare. out[0].to_numpy() shape: (1, n_aa)
+    aa = sp.AA.decode_ohe(out[0].to_numpy(), ohe_axis=-1)
+    assert aa.view("S1").tobytes() == b"M"
