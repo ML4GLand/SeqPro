@@ -137,7 +137,8 @@ def translate(
             trimers.view(np.uint8),
             alphabet.codon_array.view(np.uint8),
             alphabet.aa_array.view(np.uint8),
-            axes=[(-1), (-2, -1), (-1), ()],  # type: ignore
+            np.uint8(ord("X")),
+            axes=[(-1), (-2, -1), (-1), (), ()],  # type: ignore
         ).view("S1")
 
     aa_seqs = xr.apply_ufunc(
