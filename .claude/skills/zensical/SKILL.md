@@ -1,5 +1,5 @@
 ---
-name: zensical-setup
+name: zensical
 description: >
   Guide for setting up and configuring Zensical documentation sites.
   Use when: create documentation site, configure zensical.toml, set up
