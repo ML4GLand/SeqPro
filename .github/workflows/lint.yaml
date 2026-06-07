@@ -6,4 +6,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # The `pyrefly` hook's entry is `pixi run typecheck`, so pixi and the
+      # `default` environment must be available to the prek runner.
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@v0.9.5
+        with:
+          pixi-version: v0.67.2
+          cache: true
+          environments: default
+          locked: false
       - uses: j178/prek-action@v2
