@@ -1,12 +1,18 @@
-## Unreleased
+## 0.15.0 (2026-06-07)
 
 ### Feat
 
-- **translate**: `unknown=` parameter on `AminoAlphabet.translate` — single char pads non-canonical codons (default `"X"`), `"drop"` removes them (returns Ragged). Translation is now unconditionally case-insensitive (soft-masked `acgt` translate). `validate=True` is now case-insensitive.
+- **translate**: Ragged pad + drop paths via unknown=
+- **translate**: add unknown= param (pad path) and overloads
+- **translate**: case-insensitive validate=True
+- **translate**: add _nb_drop_unknown_codons compaction kernel
 
 ### Fix
 
-- **translate**: non-canonical codons (e.g. `N`, NUL, symbolic ALT bytes) no longer silently corrupt output in either translate kernel; they resolve to the `unknown` marker. Fixes `np.empty` NUL leak in `gufunc_translate` and `(byte>>1)&3` hash collisions (`NNN→T`, `\x00\x00\x00→K`) in `gufunc_translate_lut`.
+- **translate**: update seqpro.xr translate call for marker_byte arg
+- **translate**: restrict unknown marker to ASCII; document drop dense-table assumption
+- **translate**: marker sentinel + case-folding in gufunc_translate_lut
+- **translate**: marker sentinel + case-folding in gufunc_translate
 
 ## 0.14.0 (2026-06-01)
 
