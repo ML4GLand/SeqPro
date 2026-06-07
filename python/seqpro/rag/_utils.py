@@ -11,7 +11,8 @@ OFFSET_TYPE = np.int64
 
 
 def lengths_to_offsets(
-    lengths: NDArray[np.integer], dtype: type[DTYPE] | DTYPE = OFFSET_TYPE
+    lengths: NDArray[np.integer],
+    dtype: type[DTYPE] | DTYPE = OFFSET_TYPE,  # pyrefly: ignore[bad-function-definition] -- np.int64 satisfies bound np.integer but pyrefly can't verify TypeVar default
 ) -> NDArray[DTYPE]:
     """Convert lengths to offsets.
 

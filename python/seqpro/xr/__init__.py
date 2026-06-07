@@ -1,3 +1,6 @@
+# pyrefly: ignore-errors
+# Opt-in submodule: requires xarray, an optional dependency not installed in the
+# default env, so this module cannot be meaningfully type-checked.
 import numpy as np
 from numpy.typing import NDArray
 

@@ -1,3 +1,8 @@
+# pyrefly: ignore-errors
+# Unmaintained experimental module, not part of the public package surface.
+# NOTE: this module is currently broken at import time — `gc_content_seqs` and
+# `nucleotide_content_seqs` were renamed to `gc_content` / `nucleotide_content`
+# with different signatures. Left as-is per scope; needs porting if revived.
 import matplotlib.pyplot as plt
 
 from .._analyzers import gc_content_seqs, nucleotide_content_seqs

@@ -1,3 +1,5 @@
+from typing import Any
+
 import numba as nb
 import numpy as np
 from numpy.typing import NDArray
@@ -22,11 +24,11 @@ class TMM:
 
     def __init__(
         self,
-        expression_cutoff=-1e10,
-        log_ratio_trim=0.3,
-        expression_trim=0.05,
-        apply_weighting=True,
-        quantile=0.75,
+        expression_cutoff: float = -1e10,
+        log_ratio_trim: float = 0.3,
+        expression_trim: float = 0.05,
+        apply_weighting: bool = True,
+        quantile: float = 0.75,
     ):
         self.expression_cutoff = expression_cutoff
         self.log_ratio_trim = log_ratio_trim
@@ -38,7 +40,7 @@ class TMM:
     def _is_fitted(self):
         return any(v.endswith("_") for v in vars(self))
 
-    def fit(self, counts: NDArray):
+    def fit(self, counts: NDArray[np.floating[Any]]):
         """
         Fit the TMM normalization model to the given counts.
 
@@ -66,7 +68,7 @@ class TMM:
 
         return self
 
-    def transform(self, counts: NDArray, library_size: float = 1e6):
+    def transform(self, counts: NDArray[np.floating[Any]], library_size: float = 1e6):
         """
         Apply the TMM normalization to the given counts.
 
@@ -88,7 +90,7 @@ class TMM:
 
         return counts / (library_sizes * scaling_factors)[:, None] * library_size
 
-    def _scaling_factors(self, counts: NDArray):
+    def _scaling_factors(self, counts: NDArray[np.floating[Any]]):
         """
         Compute the scaling factors for TMM normalization.
 
@@ -169,7 +171,7 @@ def _tmm_helper(
 ):
     n_samples = len(offsets) - 1
     scaling_factors = np.empty(n_samples, np.float64)
-    for i in nb.prange(n_samples):
+    for i in nb.prange(n_samples):  # type: ignore[not-iterable]  # numba prange is iterable at runtime
         log_r = log_ratio[offsets[i] : offsets[i + 1]]
         abs_e = abs_expr[offsets[i] : offsets[i + 1]]
         v = var[offsets[i] : offsets[i + 1]]

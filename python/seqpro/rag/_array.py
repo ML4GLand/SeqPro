@@ -19,7 +19,7 @@ from awkward.index import Index
 from awkward.types.listtype import ListType as _ListType
 from awkward.types.regulartype import RegularType as _RegularType
 from numpy.typing import NDArray
-from typing_extensions import ParamSpec, Self, TypeIs
+from typing_extensions import ParamSpec, Self, TypeIs, override
 
 from ._types import ak_dtypes
 from ._utils import OFFSET_TYPE, lengths_to_offsets
@@ -29,7 +29,9 @@ from ._utils import OFFSET_TYPE, lengths_to_offsets
 _orig_list_get_typestr = _ListType._get_typestr
 
 
-def _callable_list_get_typestr(self, behavior):
+def _callable_list_get_typestr(
+    self: _ListType, behavior: dict[str, Any] | None
+) -> str | None:
     typestr = _orig_list_get_typestr(self, behavior)
     if callable(typestr):
         return typestr(self._content, behavior)
@@ -112,12 +114,14 @@ class _PartsDescriptor:
     """Descriptor for `Ragged.parts` with self-typed overloads."""
 
     @overload
-    def __get__(self, obj: Ragged[np.void], objtype: Any) -> dict[str, RagParts]: ...
+    def __get__(
+        self, obj: Ragged[np.void], objtype: Any
+    ) -> dict[str, RagParts[Any]]: ...
     @overload
     def __get__(self, obj: Ragged[RDTYPE_co], objtype: Any) -> RagParts[RDTYPE_co]: ...
     @overload
     def __get__(self, obj: None, objtype: Any) -> Self: ...
-    def __get__(self, obj: Ragged | None, objtype: Any = None):
+    def __get__(self, obj: Ragged[Any] | None, objtype: Any = None):
         if obj is None:
             return self
         obj._ensure_parts()
@@ -128,12 +132,14 @@ class _DataDescriptor:
     """Descriptor for `Ragged.data` with self-typed overloads."""
 
     @overload
-    def __get__(self, obj: Ragged[np.void], objtype: Any) -> dict[str, NDArray]: ...
+    def __get__(
+        self, obj: Ragged[np.void], objtype: Any
+    ) -> dict[str, NDArray[Any]]: ...
     @overload
     def __get__(self, obj: Ragged[RDTYPE_co], objtype: Any) -> NDArray[RDTYPE_co]: ...
     @overload
     def __get__(self, obj: None, objtype: Any) -> Self: ...
-    def __get__(self, obj: Ragged | None, objtype: Any = None):
+    def __get__(self, obj: Ragged[Any] | None, objtype: Any = None):
         if obj is None:
             return self
         obj._ensure_parts()
@@ -157,7 +163,7 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
 
     """
 
-    _parts: RagParts[RDTYPE_co] | dict[str, RagParts]
+    _parts: RagParts[RDTYPE_co] | dict[str, RagParts[Any]]
 
     def __init__(
         self,
@@ -469,6 +475,7 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
             and self.offsets[-1] == data_size
         )
 
+    @override
     def to_numpy(self, allow_missing: bool = False) -> NDArray[RDTYPE_co]:
         """Convert to a dense NumPy array. Not zero-copy if offsets or data are non-contiguous.
 
@@ -512,7 +519,8 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
 
         return _to_packed(self, copy=copy)
 
-    def __getitem__(self, where):
+    @override
+    def __getitem__(self, where: Any):
         arr = super().__getitem__(where)
         if isinstance(arr, ak.Array):
             if _n_var(arr) == 1:
@@ -648,7 +656,7 @@ ak.behavior["*", Ragged.__name__] = Ragged
 ak.behavior[np.ufunc, Ragged.__name__] = apply_ufunc
 
 
-def _ragged_typestr(content_type, behavior):
+def _ragged_typestr(content_type: Any, behavior: dict[str, Any] | None) -> str:
     # Walk RegularType wrappers to collect fixed dims, then wrap the innermost
     # scalar type: e.g. RegularType(4, NumpyType("int32")) → "var * 4 * Ragged[int32]"
     dims = []
@@ -681,7 +689,7 @@ def _as_ragged(
 @overload
 def _as_ragged(arr: ak.Array | Content, highlevel: Literal[False]) -> Content: ...
 def _as_ragged(arr: ak.Array | Content, highlevel: bool = True) -> ak.Array | Content:
-    def fn(layout: Content, **kwargs):
+    def fn(layout: Content, **kwargs: Any) -> Content | None:
         if isinstance(layout, (ListArray, ListOffsetArray)):
             return ak.with_parameter(
                 layout, "__list__", Ragged.__name__, highlevel=False
@@ -702,7 +710,7 @@ def _as_ak(arr: ak.Array | Ragged[DTYPE_co], highlevel: Literal[False]) -> Conte
 def _as_ak(
     arr: ak.Array | Ragged[DTYPE_co], highlevel: bool = True
 ) -> ak.Array | Content:
-    def fn(layout, **kwargs):
+    def fn(layout: Content, **kwargs: Any) -> Content | None:
         if isinstance(layout, (ListArray, ListOffsetArray)):
             return ak.with_parameter(layout, "__list__", None, highlevel=False)
 
@@ -780,7 +788,7 @@ def unbox(arr: ak.Array | Ragged[DTYPE_co]) -> RagParts[DTYPE_co]:
             if isinstance(node, ListOffsetArray):
                 offsets = node.offsets.data
             else:
-                offsets = np.stack(
+                offsets = np.stack(  # pyrefly: ignore[no-matching-overload]  # awkward .data is ArrayLike, not _ArrayLike
                     [node.starts.data, node.stops.data],  # type: ignore
                     0,
                 )
@@ -794,7 +802,7 @@ def unbox(arr: ak.Array | Ragged[DTYPE_co]) -> RagParts[DTYPE_co]:
         node = node.to_NumpyArray(dtype=np.float64)
 
     if isinstance(node, NumpyArray):
-        data = cast(NDArray, node.data)  # type: ignore
+        data = cast(NDArray[Any], node.data)  # type: ignore
 
         if node.parameter("__array__") == "byte":
             # view uint8 as bytes
@@ -804,7 +812,7 @@ def unbox(arr: ak.Array | Ragged[DTYPE_co]) -> RagParts[DTYPE_co]:
 
         if offsets is None:
             raise ValueError("Did not find offsets.")
-        offsets = cast(NDArray, offsets)
+        offsets = cast(NDArray[Any], offsets)
 
         rag_dim = shape.index(None)
         reshape = cast(tuple[int, ...], (-1, *shape[rag_dim + 1 :]))

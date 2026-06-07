@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -10,22 +10,24 @@ from ..alphabets import DNA
 
 
 class Sequential:
-    def __init__(self, *transforms: Callable):
+    def __init__(self, *transforms: Callable[..., Any]):
         self.transforms = transforms
 
-    def __call__(self, x):
+    def __call__(self, x: Any) -> Any:
         for t in self.transforms:
             x = t(x)
         return x
 
 
 class Random:
-    def __init__(self, p: float, *transforms: Callable, seed=None):
+    def __init__(
+        self, p: float, *transforms: Callable[..., Any], seed: int | None = None
+    ):
         self.p = p
         self.transforms = transforms
         self.rng = np.random.default_rng(seed)
 
-    def __call__(self, x):
+    def __call__(self, x: Any) -> Any:
         if self.rng.random() < self.p:
             for t in self.transforms:
                 x = t(x)
@@ -54,13 +56,13 @@ class ReverseComplement:
         self.length_axis = length_axis
         self.ohe_axis = ohe_axis
 
-    def _rc(self, x: NDArray, type: Literal["dna", "track"]):
+    def _rc(self, x: NDArray[Any], type: Literal["dna", "track"]) -> NDArray[Any]:
         if type == "dna":
             return reverse_complement(x, DNA, self.length_axis, self.ohe_axis)
         elif type == "track":
             return np.flip(x, self.length_axis)
 
-    def __call__(self, *x: NDArray):
+    def __call__(self, *x: NDArray[Any]) -> Any:
         out = tuple(self._rc(_x, t) for _x, t in zip(x, self.types))
         if len(out) == 1:
             out = out[0]
@@ -68,18 +70,18 @@ class ReverseComplement:
 
 
 class KShuffle:
-    def __init__(self, k: int, length_axis: int, seed=None) -> None:
+    def __init__(self, k: int, length_axis: int, seed: int | None = None) -> None:
         self.k = k
         self.rng = np.random.default_rng(seed)
         self.length_axis = length_axis
 
-    def __call__(self, x: NDArray) -> NDArray:
+    def __call__(self, x: NDArray[Any]) -> NDArray[Any]:
         return k_shuffle(
             x,
             self.k,
             DNA,
             length_axis=self.length_axis,
-            seed=self.rng.integers(np.iinfo(np.uint32).max, dtype=np.uint32),
+            seed=int(self.rng.integers(np.iinfo(np.uint32).max, dtype=np.uint32)),
         )
 
 
@@ -89,14 +91,14 @@ class Jitter:
         max_jitter: int,
         length_axis: int,
         jitter_axes: int | tuple[int],
-        seed=None,
+        seed: int | None = None,
     ):
         self.max_jitter = max_jitter
         self.length_axis = length_axis
         self.jitter_axes = jitter_axes
         self.rng = np.random.default_rng(seed)
 
-    def __call__(self, *x: NDArray):
+    def __call__(self, *x: NDArray[Any]) -> Any:
         out = jitter(
             *x,
             max_jitter=self.max_jitter,
@@ -116,5 +118,5 @@ class Tokenize:
         self.target = np.array(list(token_map.values()), dtype=np.int32)
         self.unknown_token = np.int32(unknown_token)
 
-    def __call__(self, x: NDArray):
+    def __call__(self, x: NDArray[Any]) -> NDArray[Any]:
         return gufunc_tokenize(x, self.source, self.target, self.unknown_token)

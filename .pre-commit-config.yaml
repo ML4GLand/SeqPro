@@ -21,6 +21,12 @@ repos:
     stages: [commit-msg]
 - repo: local
   hooks:
+  - id: pyrefly
+    name: Type-check with pyrefly
+    entry: pixi run typecheck
+    language: system
+    types: [python]
+    pass_filenames: false
   - id: pixi lock
     name: Lock pixi environment
     entry: pixi lock

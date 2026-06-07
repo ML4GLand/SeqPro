@@ -59,9 +59,9 @@ _HINT_MSG = (
 
 
 def detect_schema(bed: IntoFrame, hint: SchemaLike | None = None) -> CoordSchema:
-    bed = nw.from_native(bed)
+    _bed = nw.from_native(bed)
 
-    cols = set(bed.columns)
+    cols = set(_bed.columns)
 
     if hint is not None:
         schema = _resolve_schema(hint)
@@ -112,12 +112,12 @@ def set_schema(
     from_
         Source schema hint. Auto-detected if not provided.
     """
-    bed = nw.from_native(bed)
+    _bed = nw.from_native(bed)  # pyrefly: ignore[no-matching-overload]  # narwhals stubs don't cover IntoFrameT TypeVar
 
-    src = detect_schema(bed, hint=from_)
+    src = detect_schema(_bed, hint=from_)
     tgt = _resolve_schema(to)
 
-    cols = bed.columns
+    cols = _bed.columns
     rename_map: dict[str, str] = {}
     for src_col, tgt_col in [
         (src.chrom, tgt.chrom),
@@ -135,7 +135,7 @@ def set_schema(
     ):
         rename_map[src.strand] = tgt.strand
 
-    result = nw.to_native(bed.rename(rename_map))
+    result = nw.to_native(_bed.rename(rename_map))
 
     if isinstance(result, pl.DataFrame):
         result.config_meta.set(coordinate_system_zero_based=tgt.zero_based)  # type: ignore[attr-defined]

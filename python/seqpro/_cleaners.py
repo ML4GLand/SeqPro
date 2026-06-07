@@ -1,9 +1,11 @@
+from collections.abc import Sequence
+
 import numpy as np
 
 from ._utils import StrSeqType, cast_seqs, check_axes
 
 
-def remove_N_seqs(seqs):
+def remove_N_seqs(seqs: Sequence[str]):
     """Removes sequences containing 'N' from a list of sequences.
 
     Parameters
@@ -19,7 +21,7 @@ def remove_N_seqs(seqs):
     return [seq for seq in seqs if "N" not in seq]
 
 
-def remove_only_N_seqs(seqs):
+def remove_only_N_seqs(seqs: Sequence[str]):
     """Removes sequences consisting only of 'N' from a list of sequences.
 
     Parameters
