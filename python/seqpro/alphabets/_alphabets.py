@@ -106,11 +106,17 @@ class NucleotideAlphabet:
         unknown_token: int,
         out: None = None,
     ) -> Ragged[np.int32]: ...
-    def tokenize(self, seqs, token_map, unknown_token, out=None):
+    def tokenize(
+        self,
+        seqs: StrSeqType | Ragged[np.bytes_],
+        token_map: dict[str, int],
+        unknown_token: int,
+        out: NDArray[np.int32] | None = None,
+    ) -> NDArray[np.int32] | Ragged[np.int32]:
         """Tokenize sequences using the given token map. Delegates to sp.tokenize."""
         from .._encoders import tokenize as _tokenize
 
-        return _tokenize(seqs, token_map, unknown_token, out)
+        return _tokenize(seqs, token_map, unknown_token, out)  # pyrefly: ignore[no-matching-overload]  # union call resolved at runtime by overload dispatch
 
     @overload
     def decode_tokens(
@@ -126,7 +132,12 @@ class NucleotideAlphabet:
         token_map: dict[str, int],
         unknown_char: str = "N",
     ) -> Ragged[np.bytes_]: ...
-    def decode_tokens(self, seqs, token_map, unknown_char="N"):
+    def decode_tokens(
+        self,
+        seqs: NDArray[np.int32] | Ragged[np.int32],
+        token_map: dict[str, int],
+        unknown_char: str = "N",
+    ) -> NDArray[np.bytes_] | Ragged[np.bytes_]:
         """Decode token IDs back to sequences. Delegates to sp.decode_tokens."""
         from .._encoders import decode_tokens as _decode_tokens
 
@@ -529,7 +540,10 @@ class AminoAlphabet:
                 # genetic code. A sparse custom alphabet could keep an unkeyed
                 # codon still carrying the marker byte.
                 out_u1, new_offsets = _nb_drop_unknown_codons(
-                    translated_flat, codons_flat, offsets, self._valid_upper_bytes
+                    translated_flat,  # pyrefly: ignore[bad-argument-type]  # gufunc returns uint8 at runtime despite bytes_ inferred type
+                    codons_flat,
+                    offsets,
+                    self._valid_upper_bytes,
                 )
                 return Ragged.from_offsets(
                     out_u1.view("S1"), (n_seq, None), new_offsets

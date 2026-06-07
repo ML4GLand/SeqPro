@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
 from ._utils import DTYPE, SeqType, cast_seqs, check_axes
 from .alphabets._alphabets import NucleotideAlphabet
-from .seqpro import _k_shuffle
+from .seqpro import _k_shuffle  # type: ignore[missing-import]  # compiled Rust extension (.abi3.so), no stubs
 
 
 def reverse_complement(
@@ -77,24 +77,24 @@ def k_shuffle(
     if isinstance(seed, np.random.Generator):
         seed = seed.integers(0, np.iinfo(np.int32).max)  # type: ignore
 
-    seqs = cast_seqs(seqs)
+    arr = cast_seqs(seqs)
 
     # only get here if seqs was str or list[str]
     if length_axis is None:
-        length_axis = seqs.ndim - 1
+        length_axis = arr.ndim - 1
 
-    if seqs.dtype == np.uint8:
+    if arr.dtype == np.uint8:
         assert ohe_axis is not None
-        seqs = cast(NDArray[np.uint8], seqs)
+        arr_u8 = cast(NDArray[np.uint8], arr)
         ohe = True
-        seqs = alphabet.decode_ohe(seqs, ohe_axis=ohe_axis)
+        arr = alphabet.decode_ohe(arr_u8, ohe_axis=ohe_axis)
     else:
         ohe = False
 
-    seqs = np.moveaxis(seqs, length_axis, -1)  # length must be final
+    arr = np.moveaxis(arr, length_axis, -1)  # length must be final
 
     shuffled = _k_shuffle(
-        seqs.view("u1"), k, len(alphabet), alphabet.array.tobytes(), seed
+        arr.view("u1"), k, len(alphabet), alphabet.array.tobytes(), seed
     ).view("S1")
 
     shuffled = np.moveaxis(shuffled, -1, length_axis)  # put length back where it was
@@ -109,11 +109,11 @@ def k_shuffle(
 
 
 def bin_coverage(
-    coverage: NDArray[np.number],
+    coverage: NDArray[np.number[Any]],
     bin_width: int,
     length_axis: int,
-    normalize=False,
-) -> NDArray[np.number]:
+    normalize: bool = False,
+) -> NDArray[np.number[Any]]:
     """Bin coverage by summing over non-overlapping windows.
 
     Parameters
@@ -134,9 +134,8 @@ def bin_coverage(
     length = coverage.shape[length_axis]
     if length % bin_width != 0:
         raise ValueError("Bin width must evenly divide length.")
-    binned_coverage = np.add.reduceat(
-        coverage, np.arange(0, length, bin_width), axis=length_axis
-    )
+    indices = np.arange(0, length, bin_width, dtype=np.intp)
+    binned_coverage = np.add.reduceat(coverage, indices, axis=length_axis)
     if normalize:
         binned_coverage /= bin_width
     return binned_coverage
@@ -182,7 +181,7 @@ def jitter(
 
     # move jitter axes and length axis to back such that shape = (..., jitter, length)
     arrays, destination_axes = _align_axes(*arrays, axes=(*jitter_axes, length_axis))
-    short_arrays = []
+    short_arrays: list[int] = []
     for i, arr in enumerate(arrays):
         if arr.shape[-1] - 2 * max_jitter <= 0:
             short_arrays.append(i)
@@ -198,7 +197,7 @@ def jitter(
         rng = seed
     starts = rng.integers(0, 2 * max_jitter + 1, jitter_axes_shape)
 
-    sliced_arrs: list[NDArray] = []
+    sliced_arrs: list[NDArray[Any]] = []
     for arr in arrays:
         jittered_length = arr.shape[-1] - 2 * max_jitter
         sliced = _slice_kmers(arr, starts, jittered_length)
@@ -208,7 +207,9 @@ def jitter(
     return tuple(sliced_arrs)
 
 
-def _align_axes(*arrays: NDArray, axes: int | tuple[int, ...]):
+def _align_axes(
+    *arrays: NDArray[Any], axes: int | tuple[int, ...]
+) -> tuple[tuple[NDArray[Any], ...], tuple[int, ...]]:
     """Align axes of arrays, moving them to the back while preserving order.
 
     Parameters
@@ -246,7 +247,7 @@ def _align_axes(*arrays: NDArray, axes: int | tuple[int, ...]):
     return arrays, destination_axes
 
 
-def _slice_kmers(array: NDArray, starts: NDArray, k: int):
+def _slice_kmers(array: NDArray[Any], starts: NDArray[Any], k: int) -> NDArray[Any]:
     """Get a view of an array sliced into k-mers, assuming starts align with the penultimate axes and length is the final axis.
 
     Parameters
@@ -265,7 +266,7 @@ def _slice_kmers(array: NDArray, starts: NDArray, k: int):
     """
     n_axes_sliced = starts.ndim
     n_axes_not_sliced = array.ndim - n_axes_sliced - 1  # - 1 for length axis
-    idx: list[slice | NDArray] = [slice(None)] * n_axes_not_sliced
+    idx: list[slice | NDArray[Any]] = [slice(None)] * n_axes_not_sliced
     for i, size in enumerate(array.shape[-starts.ndim - 1 : -1]):
         shape = np.ones(starts.ndim, dtype=np.uint32)
         shape[i] = size
@@ -309,11 +310,11 @@ class NormalizationMethod(str, Enum):
 
 
 def normalize_coverage(
-    coverage: NDArray,
+    coverage: NDArray[Any],
     method: Literal["CPM", "CPKM"],
-    total_counts: int | NDArray,
+    total_counts: int | NDArray[Any],
     length_axis: int,
-) -> NDArray:
+) -> NDArray[Any]:
     """Normalize an array of coverage. Note that whether this corresponds to the
     conventional definitions of CPM, RPKM, and FPKM depends on how the underlying
     coverage was quantified. If the coverage is for reads, then CPKM = RPKM. If it is

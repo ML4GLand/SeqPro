@@ -1,3 +1,5 @@
+# pyrefly: ignore-errors
+# Unmaintained experimental module, not part of the public package surface.
 # helper
 def _find_distance(seq1, seq2) -> int:
     edits = 0

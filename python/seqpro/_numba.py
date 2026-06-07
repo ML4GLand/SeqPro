@@ -12,7 +12,7 @@ def gufunc_pad_left(
     seq: NDArray[np.uint8], res: NDArray[np.uint8] | None = None
 ) -> NDArray[np.uint8]:  # type: ignore
     shift = (seq == 0).sum()
-    for i in nb.prange(len(seq)):
+    for i in nb.prange(len(seq)):  # type: ignore[not-iterable]
         res[(i + shift) % len(seq)] = seq[i]  # type: ignore
 
 
@@ -21,7 +21,7 @@ def gufunc_pad_both(
     seq: NDArray[np.uint8], res: NDArray[np.uint8] | None = None
 ) -> NDArray[np.uint8]:  # type: ignore
     shift = (seq == 0).sum() // 2
-    for i in nb.prange(len(seq)):
+    for i in nb.prange(len(seq)):  # type: ignore[not-iterable]
         res[(i + shift) % len(seq)] = seq[i]  # type: ignore
 
 
@@ -31,7 +31,7 @@ def gufunc_ohe(
     alphabet: NDArray[np.uint8],
     res: NDArray[np.uint8] | None = None,
 ) -> NDArray[np.uint8]:  # type: ignore
-    for i in nb.prange(len(alphabet)):
+    for i in nb.prange(len(alphabet)):  # type: ignore[not-iterable]
         res[i] = np.uint8(alphabet[i] == char)  # type: ignore
 
 
@@ -57,7 +57,7 @@ def gufunc_ohe_char_idx(
         Index of the set bit in each OHE vector, or -1 for unknown characters.
     """
     res[0] = np.intp(-1)  # type: ignore
-    for i in nb.prange(len(seq)):
+    for i in nb.prange(len(seq)):  # type: ignore[not-iterable]
         if seq[i] == 1:
             res[0] = i  # type: ignore
 
@@ -100,7 +100,7 @@ def gufunc_tokenize(
     Note: np.int32 is returned since token IDs are generally used as indices into an array of embeddings
     (a la torch.nn.Embedding)."""
     res[0] = unknown_token  # type: ignore
-    for i in nb.prange(len(source)):
+    for i in nb.prange(len(source)):  # type: ignore[not-iterable]
         if seq == source[i]:
             res[0] = target[i]  # type: ignore
             break
@@ -167,7 +167,7 @@ def gufunc_translate(
 
 
 @nb.njit(cache=True)
-def _pack_codon_index(b0, b1, b2):
+def _pack_codon_index(b0: int, b1: int, b2: int) -> int:
     """Pack a 3-codon's ASCII bytes into a 6-bit LUT index in ``[0, 63]``.
 
     Uses the 2-bit-per-nucleotide hash ``(byte >> 1) & 3``, a bijection on
@@ -232,13 +232,18 @@ def gufunc_translate_lut(
         and (b1 == 65 or b1 == 67 or b1 == 71 or b1 == 84)
         and (b2 == 65 or b2 == 67 or b2 == 71 or b2 == 84)
     ):
-        res[0] = codon_lut[_pack_codon_index(b0, b1, b2)]
+        res[0] = codon_lut[_pack_codon_index(b0, b1, b2)]  # type: ignore[unsupported-operation]
     else:
-        res[0] = marker_byte
+        res[0] = marker_byte  # type: ignore[unsupported-operation]
 
 
 @nb.njit(cache=True)
-def _nb_drop_unknown_codons(translated, codons, offsets, valid_upper):
+def _nb_drop_unknown_codons(
+    translated: NDArray[np.uint8],
+    codons: NDArray[np.uint8],
+    offsets: NDArray[np.int64],
+    valid_upper: NDArray[np.uint8],
+):
     """Compact a flat translated AA buffer, dropping non-canonical codons.
 
     Single-pass per-sequence stream compaction for ``translate(unknown="drop")``.
@@ -341,7 +346,7 @@ def _nb_find_stop_ends(
     """
     n = len(starts)
     ends = np.empty(n, dtype=np.int64)
-    for i in nb.prange(n):
+    for i in nb.prange(n):  # type: ignore[not-iterable]
         end = full_ends[i]
         for j in range(starts[i], full_ends[i]):
             if data[j] == stop_char:

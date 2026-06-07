@@ -54,63 +54,66 @@ def pad_seqs(
         or (isinstance(seqs, np.ndarray) and seqs.dtype.type == np.object_)
     )
 
-    seqs = cast_seqs(seqs)
+    arr = cast_seqs(seqs)
 
     if length_axis is None:
-        length_axis = seqs.ndim - 1
+        length_axis = arr.ndim - 1
     elif length_axis < 0:
-        length_axis = seqs.ndim + length_axis
+        length_axis = arr.ndim + length_axis
 
     if string_input:
         if pad_value is None:
             raise ValueError("Need a pad value for plain string input.")
 
         if length is not None:
-            seqs = seqs[..., :length]
+            arr = arr[..., :length]
 
-        seqs = seqs.view(np.uint8)
+        arr_u8 = arr.view(np.uint8)
 
         if pad == "left":
-            seqs = gufunc_pad_left(seqs)
+            arr_u8 = gufunc_pad_left(arr_u8)
         elif pad == "both":
-            seqs = gufunc_pad_both(seqs)
+            arr_u8 = gufunc_pad_both(arr_u8)
 
         # convert empty character '' to pad_val
-        seqs[seqs == 0] = ord(pad_value)
+        arr_u8[arr_u8 == 0] = ord(pad_value)
 
-        seqs = cast(NDArray[np.bytes_], seqs.view("S1"))
+        result: NDArray[np.bytes_ | np.uint8] = cast(
+            NDArray[np.bytes_], arr_u8.view("S1")
+        )
     else:
         if length is None:
             raise ValueError("Need a length for array input.")
 
-        length_diff = seqs.shape[length_axis] - length
+        length_diff = arr.shape[length_axis] - length
 
         if length_diff == 0:
-            return seqs
+            return arr
         elif length_diff > 0:  # longer than needed, truncate
             if pad == "left":
-                seqs = array_slice(seqs, length_axis, slice(-length))
+                arr = array_slice(arr, length_axis, slice(-length))
             elif pad == "both":
-                seqs = array_slice(
-                    seqs, length_axis, slice(length_diff // 2, -length_diff // 2)
+                arr = array_slice(
+                    arr, length_axis, slice(length_diff // 2, -length_diff // 2)
                 )
             else:
-                seqs = array_slice(seqs, length_axis, slice(None, length))
+                arr = array_slice(arr, length_axis, slice(None, length))
         else:  # shorter than needed, pad
             pad_arr_shape = (
-                *seqs.shape[:length_axis],
+                *arr.shape[:length_axis],
                 -length_diff,
-                *seqs.shape[length_axis + 1 :],
+                *arr.shape[length_axis + 1 :],
             )
-            if seqs.dtype == np.uint8:
+            if arr.dtype == np.uint8:
                 pad_arr = np.zeros(pad_arr_shape, np.uint8)
             else:
                 if pad_value is None:
                     raise ValueError("Need a pad value for byte array input.")
                 pad_arr = np.full(pad_arr_shape, pad_value.encode("ascii"), dtype="S1")
-            seqs = np.concatenate([seqs, pad_arr], axis=length_axis)
+            arr = np.concatenate([arr, pad_arr], axis=length_axis)
+        result = arr
 
-    return seqs
+    return result
 
 
 @overload

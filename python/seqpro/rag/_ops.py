@@ -8,6 +8,8 @@ downstream loaders.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numba as nb
 import numpy as np
 from numpy.typing import NDArray
@@ -35,7 +37,7 @@ def _reverse_complement_ragged(
     read and written exactly once) and parallel across rows.
     """
     n = mask.shape[0]
-    for i in nb.prange(n):
+    for i in nb.prange(n):  # type: ignore[not-iterable]
         if not mask[i]:
             continue
         lo = offsets[i]
@@ -146,7 +148,7 @@ def _pack(
     One contiguous read + write per row, parallel across rows.
     """
     n = in_starts.shape[0]
-    for i in nb.prange(n):
+    for i in nb.prange(n):  # type: ignore[not-iterable]
         length = in_stops[i] - in_starts[i]
         out_bytes[out_starts[i] : out_starts[i] + length] = src_bytes[
             in_starts[i] : in_stops[i]
@@ -154,15 +156,19 @@ def _pack(
 
 
 def _pack_parts(
-    data: NDArray, shape: tuple, offsets: NDArray, copy: bool
-) -> tuple[NDArray, NDArray]:
+    data: NDArray[Any], shape: tuple[int | None, ...], offsets: NDArray[Any], copy: bool
+) -> tuple[NDArray[Any], NDArray[Any]]:
     """Pack one flat (data, offsets) pair. Returns (packed_data, packed_offsets_1d).
 
     Raises ValueError if ``copy=False`` and the input is not already packed.
     """
     rag_dim = shape.index(None)
     trailing = shape[rag_dim + 1 :]
-    elem = int(np.prod(trailing, dtype=np.int64)) * data.dtype.itemsize
+    # trailing dims are all int (only the ragged dim is None); cast away int|None for np.prod
+    elem = (
+        int(np.prod([d for d in trailing if d is not None], dtype=np.int64))
+        * data.dtype.itemsize
+    )
 
     if offsets.ndim == 1:
         starts = offsets[:-1]
@@ -213,7 +219,7 @@ def _pack_parts(
     return out_data, out_offsets
 
 
-def to_packed(rag: Ragged, *, copy: bool = True) -> Ragged:
+def to_packed(rag: Ragged[Any], *, copy: bool = True) -> Ragged[Any]:
     """Pack a Ragged array's data into a fresh contiguous, zero-based buffer.
 
     A Numba-parallelized replacement for ``Ragged(ak.to_packed(rag))``: it
@@ -291,7 +297,7 @@ def _to_padded_copy(
     """
     n = offsets.shape[0] - 1
     row_stride = out_len * itemsize
-    for i in nb.prange(n):
+    for i in nb.prange(n):  # type: ignore[not-iterable]
         row_len = offsets[i + 1] - offsets[i]
         ncopy = row_len if row_len < out_len else out_len
         nbytes = ncopy * itemsize
@@ -302,11 +308,11 @@ def _to_padded_copy(
 
 
 def to_padded(
-    rag: Ragged,
-    pad_value,
+    rag: Ragged[Any],
+    pad_value: Any,
     *,
     length: int | None = None,
-) -> NDArray:
+) -> NDArray[Any]:
     """Densify a Ragged into a right-padded rectilinear array via a flat-buffer kernel.
 
     Flat-buffer alternative to the awkward idiom
@@ -362,16 +368,18 @@ def to_padded(
     else:
         out_len = 0
 
-    dtype = rag.data.dtype
+    # rag.data is NDArray here (record layout already rejected above)
+    rag_data: NDArray[Any] = rag.data  # type: ignore[assignment]
+    dtype = rag_data.dtype
     itemsize = dtype.itemsize
 
     out = np.full((n_rows, out_len), pad_value, dtype=dtype)
     if n_rows and out_len:
-        data_u1 = np.ascontiguousarray(rag.data).reshape(-1).view(np.uint8)
+        data_u1 = np.ascontiguousarray(rag_data).reshape(-1).view(np.uint8)
         out_u1 = out.reshape(-1).view(np.uint8)
         _to_padded_copy(data_u1, offsets, out_u1, itemsize, out_len)
 
     leading = rag.shape[:rag_dim]
     if leading:
-        out = out.reshape(*leading, out_len)
+        out = out.reshape((*leading, out_len))  # pyrefly: ignore[no-matching-overload] -- leading contains int|None but dims before rag_dim are always int; numpy stub can't verify this
     return out

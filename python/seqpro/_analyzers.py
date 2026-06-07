@@ -31,7 +31,7 @@ def length(seqs: SeqType, length_axis: int | None = None) -> NDArray[np.integer]
 
 def gc_content(
     seqs: SeqType,
-    normalize=True,
+    normalize: bool = True,
     length_axis: int | None = None,
     alphabet: NucleotideAlphabet | None = None,
     ohe_axis: int | None = None,
@@ -58,14 +58,14 @@ def gc_content(
     """
     check_axes(seqs, length_axis, ohe_axis)
 
-    seqs = cast_seqs(seqs)
+    arr = cast_seqs(seqs)
 
     if length_axis is None:  # length axis after casting strings
-        length_axis = seqs.ndim - 1
+        length_axis = arr.ndim - 1
     elif length_axis < 0:
-        length_axis = seqs.ndim + length_axis
+        length_axis = arr.ndim + length_axis
 
-    if seqs.dtype == np.uint8:  # OHE
+    if arr.dtype == np.uint8:  # OHE
         if alphabet is None:
             raise ValueError("Need an alphabet to analyze OHE sequences.")
         assert ohe_axis is not None
@@ -73,22 +73,22 @@ def gc_content(
         gc_idx = np.flatnonzero(np.isin(alphabet.array, np.array([b"C", b"G"])))
         gc_content = cast(
             NDArray[np.integer],
-            np.take(seqs, gc_idx, ohe_axis).sum((length_axis, ohe_axis)),
+            np.take(arr, gc_idx, ohe_axis).sum((length_axis, ohe_axis)),
         )
     else:
         gc_content = cast(
-            NDArray[np.integer], np.isin(seqs, np.array([b"C", b"G"])).sum(length_axis)
+            NDArray[np.integer], np.isin(arr, np.array([b"C", b"G"])).sum(length_axis)
         )
 
     if normalize:
-        gc_content = gc_content / seqs.shape[length_axis]
+        gc_content = gc_content / arr.shape[length_axis]
 
     return gc_content
 
 
 def nucleotide_content(
     seqs: SeqType,
-    normalize=True,
+    normalize: bool = True,
     length_axis: int | None = None,
     alphabet: NucleotideAlphabet | None = None,
 ) -> NDArray[np.integer | np.floating]:
@@ -110,32 +110,32 @@ def nucleotide_content(
     """
     check_axes(seqs, length_axis, False)
 
-    seqs = cast_seqs(seqs)
+    arr = cast_seqs(seqs)
 
     if length_axis is None:
-        length_axis = seqs.ndim - 1
+        length_axis = arr.ndim - 1
     elif length_axis < 0:
-        length_axis = seqs.ndim + length_axis
+        length_axis = arr.ndim + length_axis
 
-    if seqs.dtype == np.uint8:  # OHE
-        nuc_content = cast(NDArray[np.integer], seqs.sum(length_axis))
+    if arr.dtype == np.uint8:  # OHE
+        nuc_content = cast(NDArray[np.integer], arr.sum(length_axis))
     else:
         if alphabet is None:
             raise ValueError("Need an alphabet to analyze string nucleotide content.")
         nuc_content = np.zeros(
-            (*seqs.shape[:length_axis], *seqs.shape[length_axis + 1 :], len(alphabet)),
+            (*arr.shape[:length_axis], *arr.shape[length_axis + 1 :], len(alphabet)),
             dtype=np.int64,
         )
         for i, nuc in enumerate(alphabet.array):
-            nuc_content[..., i] = (seqs == nuc).sum(length_axis)
+            nuc_content[..., i] = (arr == nuc).sum(length_axis)
 
     if normalize:
-        nuc_content = nuc_content / seqs.shape[length_axis]
+        nuc_content = nuc_content / arr.shape[length_axis]
 
     return nuc_content
 
 
-def count_kmers_seq(seq: str, k: int) -> dict:
+def count_kmers_seq(seq: str, k: int) -> dict[str, int]:
     """
     Count unique k-mers.
 
@@ -188,20 +188,20 @@ def _count_kmers(
 
     check_axes(seqs, length_axis, False)
 
-    seqs = cast_seqs(seqs)
+    arr = cast_seqs(seqs)
 
     if length_axis is None:
         length_axis = -1
 
-    length = seqs.shape[length_axis]
+    length = arr.shape[length_axis]
 
     if length >= k:
         raise ValueError("k is larger than sequence length")
 
-    if seqs.dtype == np.uint8:
+    if arr.dtype == np.uint8:
         raise NotImplementedError
     else:
-        kmers = np.lib.stride_tricks.sliding_window_view(seqs, k, -1)
+        kmers = np.lib.stride_tricks.sliding_window_view(arr, k, -1)
         # can't use np.unique here because each sequence would return a potentially
         # different number of kmers -> ragged array
         uniq, counts = np.unique(kmers, axis=-2)

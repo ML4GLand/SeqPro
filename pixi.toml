@@ -22,6 +22,7 @@ test = "pytest tests"
 lint = "prek run --all-files --stage pre-commit"
 prek-install = "prek install -t commit-msg -t pre-commit -t pre-push"
 generate-publish = "maturin generate-ci -o .github/workflows/publish.yaml github"
+typecheck = "pyrefly check python"
 
 [dependencies]
 python = "<3.14"
@@ -36,6 +37,7 @@ ipykernel = ">=7.2.0,<8"
 basedpyright = ">=1.39.3,<2"
 seaborn = ">=0.13.2,<0.14"
 statsmodels = ">=0.14.6,<0.15"
+pyrefly = ">=1.0.0,<2"
 
 [pypi-dependencies]
 seqpro = { path = ".", editable = true }

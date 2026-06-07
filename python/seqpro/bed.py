@@ -2,13 +2,14 @@ import gzip
 import warnings
 from functools import partial
 from pathlib import Path
+from typing import IO, cast
 
 import narwhals as nw
 import pandera.dtypes as pat
 import pandera.polars as pa
 import polars as pl
 import polars_config_meta  # noqa: F401
-from narwhals.typing import FrameT
+from narwhals.typing import FrameT, IntoDataFrame
 from natsort import natsorted
 
 from ._coords import CoordSchema, detect_schema, set_schema
@@ -49,7 +50,7 @@ def sort(bed: FrameT) -> FrameT:
     FrameT
         Sorted DataFrame of the same type as the input.
     """
-    bed = nw.from_native(bed)
+    bed = nw.from_native(bed)  # pyrefly: ignore[no-matching-overload]  # narwhals stubs don't cover FrameT TypeVar
     order = natsorted(bed["chrom"].unique().to_list())
     bed = (
         bed.with_columns(_seqpro_chrom_sort_key_=nw.col("chrom").cast(nw.Enum(order)))
@@ -76,7 +77,7 @@ def with_len(bed: FrameT, length: int) -> FrameT:
     FrameT
         DataFrame of the same type as the input with updated "chromStart" and "chromEnd" columns.
     """
-    bed = nw.from_native(bed)
+    bed = nw.from_native(bed)  # pyrefly: ignore[no-matching-overload]  # narwhals stubs don't cover FrameT TypeVar
 
     if length < 0:
         raise ValueError("Length must be non-negative.")
@@ -97,7 +98,7 @@ def with_len(bed: FrameT, length: int) -> FrameT:
     return nw.to_native(bed)
 
 
-def to_pyr(bedlike) -> pr.PyRanges:
+def to_pyr(bedlike: IntoDataFrame) -> pr.PyRanges:
     """Convert a BED-like DataFrame to a PyRanges object.
 
     !!! warning
@@ -225,7 +226,8 @@ def _read_bed(path: PathLike) -> pl.DataFrame:
     else:
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
-    with opener(path) as f:
+    with opener(path) as _f:
+        f = cast(IO[str], _f)
         skip_rows = 0
         while (line := f.readline()).startswith(("track", "browser")):
             skip_rows += 1
@@ -275,7 +277,8 @@ def _read_narrowpeak(path: PathLike) -> pl.DataFrame:
     else:
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
-    with opener(path) as f:
+    with opener(path) as _f:
+        f = cast(IO[str], _f)
         skip_rows = 0
         while f.readline().startswith(("track", "browser")):
             skip_rows += 1
@@ -343,7 +346,8 @@ def _read_broadpeak(path: PathLike) -> pl.DataFrame:
     else:
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
-    with opener(path) as f:
+    with opener(path) as _f:
+        f = cast(IO[str], _f)
         skip_rows = 0
         while f.readline().startswith(("track", "browser")):
             skip_rows += 1
