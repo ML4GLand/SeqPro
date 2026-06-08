@@ -9,6 +9,8 @@ from attrs import define
 from awkward.contents import (
     Content,
     EmptyArray,
+    IndexedArray,
+    IndexedOptionArray,
     ListArray,
     ListOffsetArray,
     NumpyArray,
@@ -82,6 +84,13 @@ def _is_record_layout(layout: Content) -> bool:
     return has_list and isinstance(node, RecordArray)
 
 
+def _is_indexed_record(layout: Content) -> bool:
+    """Return True if layout is an IndexedArray/IndexedOptionArray whose projected content is a RecordArray."""
+    return isinstance(layout, (IndexedArray, IndexedOptionArray)) and isinstance(
+        layout.project(), RecordArray
+    )
+
+
 def _extract_list_offsets(layout: Content) -> NDArray[OFFSET_TYPE]:
     """Extract offsets from the (single) list layer in a record-layout Ragged.
 
@@ -96,11 +105,15 @@ def _extract_list_offsets(layout: Content) -> NDArray[OFFSET_TYPE]:
     """
     node = layout
     while True:
-        if isinstance(node, ListOffsetArray):
+        if isinstance(node, (IndexedArray, IndexedOptionArray)):
+            # Ragged carries no missing values; project() collapses the index.
+            # (An option array with real None would drop rows and desync shape[0].)
+            node = node.project()
+        elif isinstance(node, ListOffsetArray):
             return np.asarray(node.offsets.data)
-        if isinstance(node, ListArray):
+        elif isinstance(node, ListArray):
             return np.stack([node.starts.data, node.stops.data], 0)  # type: ignore
-        if isinstance(node, RegularArray):
+        elif isinstance(node, RegularArray):
             node = node.content
         elif isinstance(node, RecordArray):
             node = node.content(0)
@@ -174,7 +187,11 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         else:
             content = _as_ragged(data, highlevel=False)
         super().__init__(content, behavior=deepcopy(ak.behavior))
-        if isinstance(content, RecordArray) or _is_record_layout(content):
+        if (
+            isinstance(content, RecordArray)
+            or _is_record_layout(content)
+            or _is_indexed_record(content)
+        ):
             # ak._update_class() demotes RecordArray layouts to plain ak.Array
             # because there is no "__list__" parameter at the record level.
             # Restore the Ragged subclass and cache per-field RagParts.
@@ -196,7 +213,11 @@ class Ragged(ak.Array, Generic[RDTYPE_co]):
         if hasattr(self, "_parts"):
             return
         layout = cast(Content, ak.to_layout(self))
-        if isinstance(layout, RecordArray) or _is_record_layout(layout):
+        if (
+            isinstance(layout, RecordArray)
+            or _is_record_layout(layout)
+            or _is_indexed_record(layout)
+        ):
             # Set sentinel first to break the self[f] -> _ensure_parts cycle.
             object.__setattr__(self, "_parts", {})
             shared_offsets = _extract_list_offsets(layout)
@@ -758,7 +779,11 @@ class RagParts(Generic[DTYPE_co]):
 
 def unbox(arr: ak.Array | Ragged[DTYPE_co]) -> RagParts[DTYPE_co]:
     """Unbox an awkward array with a single ragged dimension into data, offsets, and shape.
-    Always zero-copy: the returned data is a view of the original array.
+    Always a view: the returned data references the original flat buffer. Indexed
+    layouts (e.g. from fancy-indexing a record then extracting a field) are collapsed
+    via ``project()``, which only reorders the list pointers into ``starts``/``stops``
+    (the flat data is still shared), so callers needing contiguous, row-ordered data
+    must pack afterwards (e.g. ``to_packed``).
 
     Parameters
     ----------
@@ -775,7 +800,22 @@ def unbox(arr: ak.Array | Ragged[DTYPE_co]) -> RagParts[DTYPE_co]:
     n_ragged = 0
     offsets = None
 
-    while isinstance(node, (ListArray, ListOffsetArray, RegularArray, RecordArray)):
+    while isinstance(
+        node,
+        (
+            ListArray,
+            ListOffsetArray,
+            RegularArray,
+            RecordArray,
+            IndexedArray,
+            IndexedOptionArray,
+        ),
+    ):
+        if isinstance(node, (IndexedArray, IndexedOptionArray)):
+            # Ragged carries no missing values; project() collapses the index.
+            # (An option array with real None would drop rows and desync shape[0].)
+            node = node.project()
+            continue
         if isinstance(node, RecordArray):
             raise ValueError(  # noqa: TRY004
                 "Must extract a single field before unboxing a Ragged array of records."
