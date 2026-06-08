@@ -145,3 +145,45 @@ class TestToPackedMethod:
         import seqpro.rag as rag_mod
 
         assert hasattr(rag_mod, "to_packed")
+
+
+class TestIndexedLayouts:
+    """An IndexedArray wrapper arises from indexing a *record* then pulling a
+    field (e.g. ak.zip(...)[perm]["x"]). seqpro's layout walkers must traverse
+    it. Plain Ragged[perm] yields a ListArray (already covered elsewhere)."""
+
+    def test_indexed_field_unbox_and_to_packed(self):
+        lengths = np.array([3, 0, 2, 4])
+        perm = np.array([2, 0, 3, 1])
+        data = np.arange(int(lengths.sum()), dtype=np.float64)
+        r = Ragged.from_lengths(data, lengths)
+        field = ak.zip({"x": r}, depth_limit=1)[perm]["x"]
+
+        from awkward.contents import IndexedArray
+
+        assert isinstance(field.layout, IndexedArray)
+
+        rag = Ragged(field)  # used to raise: Expected 1 ragged dimension, got 0
+        # accessors that route through unbox() must all work
+        assert rag.offsets is not None
+        assert rag.data is not None
+        out = to_packed(rag)
+        assert out.offsets.ndim == 1 and out.offsets[0] == 0
+        assert out.is_contiguous
+        assert ak.to_list(out) == ak.to_list(field)
+        assert ak.to_list(out) == ak.to_list(ak.to_packed(field))
+
+    def test_indexed_record_layout_offsets(self):
+        # ak.zip(..., depth_limit=1) -> RecordArray; indexing it ->
+        # IndexedArray(RecordArray(...)), which _extract_list_offsets must walk.
+        r = Ragged.from_lengths(np.arange(9, dtype=np.float64), np.array([3, 2, 4]))
+        rec = ak.zip({"a": r, "b": r}, depth_limit=1)[np.array([2, 0, 1])]
+
+        from awkward.contents import IndexedArray
+
+        assert isinstance(rec.layout, IndexedArray)
+
+        rag = Ragged(rec)  # record-layout Ragged over an indexed layout
+        # offsets extraction (via _extract_list_offsets) must not crash
+        assert rag.offsets is not None
+        assert ak.to_list(rag["a"]) == ak.to_list(rec["a"])
