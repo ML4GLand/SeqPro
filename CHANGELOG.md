@@ -1,3 +1,9 @@
+## 0.15.1 (2026-06-08)
+
+### Fix
+
+- **rag**: traverse IndexedArray in unbox/_extract_list_offsets
+
 ## 0.15.0 (2026-06-07)
 
 ### Feat
