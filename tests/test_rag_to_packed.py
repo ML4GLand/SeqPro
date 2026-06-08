@@ -29,6 +29,23 @@ class TestToPackedFlat:
         # matches awkward's packing exactly
         assert ak.to_list(out) == ak.to_list(ak.to_packed(rag))
 
+    def test_1d_offsets_unpacked_rebases(self):
+        # A contiguous slice keeps a 1-D ListOffsetArray but with a non-zero
+        # base (offsets[0] != 0) and untrimmed content -> exercises the
+        # offsets.ndim == 1 gather path (starts = offsets[:-1]) in _pack_parts.
+        full = Ragged.from_lengths(np.arange(9, dtype=np.float64), np.array([3, 2, 4]))
+        rag = full[1:]
+        assert rag.offsets.ndim == 1
+        assert rag.offsets[0] != 0  # not zero-based -> unpacked
+        out = to_packed(rag)
+        assert out.offsets.ndim == 1
+        assert out.offsets[0] == 0
+        assert out.is_contiguous
+        assert out.data.shape[0] == 6  # content trimmed to packed extent
+        assert not np.shares_memory(out.data, rag.data)  # rebased into fresh buffer
+        assert ak.to_list(out) == ak.to_list(rag)
+        assert ak.to_list(out) == ak.to_list(ak.to_packed(rag))
+
     def test_bytes_dtype(self):
         seqs = ["ATG", "C", "GGGG"]
         data = np.frombuffer("".join(seqs).encode("ascii"), dtype="S1").copy()
