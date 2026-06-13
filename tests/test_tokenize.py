@@ -145,3 +145,44 @@ def test_decode_tokens_ragged_module_level():
 
     assert isinstance(result, Ragged)
     np.testing.assert_array_equal(result.data, rag.data)
+
+
+def test_tokenize_matches_gufunc_reference():
+    """LUT output must be byte-for-byte identical to the linear-scan gufunc."""
+    from seqpro._numba import gufunc_tokenize
+
+    token_map = {"A": 0, "C": 1, "G": 2, "T": 3}
+    unknown_token = 4
+
+    def reference(cast_seq):
+        source = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
+        target = np.array(list(token_map.values()), dtype=np.int32)
+        return gufunc_tokenize(
+            cast_seq.view(np.uint8), source, target, np.int32(unknown_token)
+        )
+
+    # Dense 2-D, with known + unknown ("N", "x") characters.
+    seqs = ["ACGTN", "TTxAC", "GGGGG"]
+    cast = sp.cast_seqs(seqs)  # (3, 5) S1
+    expected = reference(cast)
+    result = sp.tokenize(cast, token_map, unknown_token=unknown_token)
+    np.testing.assert_array_equal(result, expected)
+    assert result.dtype == np.int32
+
+    # out= path: result written in place, equals expected, returns same buffer.
+    out = np.empty(cast.shape, dtype=np.int32)
+    returned = sp.tokenize(cast, token_map, unknown_token=unknown_token, out=out)
+    np.testing.assert_array_equal(out, expected)
+    np.testing.assert_array_equal(returned, expected)
+
+    # Ragged path.
+    rag_seqs = ["ACGTN", "TTxAC", "GGGGG"]
+    data = np.frombuffer("".join(rag_seqs).encode("ascii"), dtype="S1")
+    lengths = np.array([len(s) for s in rag_seqs])
+    rag = Ragged.from_lengths(data, lengths)
+    rag_result = sp.tokenize(rag, token_map, unknown_token=unknown_token)
+    flat_expected = reference(
+        np.frombuffer(b"".join(s.encode() for s in rag_seqs), dtype="S1")
+    )
+    np.testing.assert_array_equal(rag_result.data, flat_expected)
+    np.testing.assert_array_equal(rag_result.lengths.ravel(), lengths)
