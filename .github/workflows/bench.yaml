@@ -1,15 +1,22 @@
 name: Benchmarks
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write # for OpenID Connect authentication with CodSpeed
+
 jobs:
-  benchmarks:
+  python-benchmarks:
     runs-on: ubuntu-latest
-    name: "Run CodSpeed microbenchmarks"
+    name: "Run Python CodSpeed benchmarks"
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -25,7 +32,29 @@ jobs:
       - name: Build extension
         run: pixi run -e bench maturin develop
       - name: Run benchmarks
-        uses: CodSpeedHQ/action@v3
+        uses: CodSpeedHQ/action@v4
         with:
-          token: ${{ secrets.CODSPEED_TOKEN }}
+          mode: simulation
           run: pixi run -e bench bench
+
+  rust-benchmarks:
+    runs-on: ubuntu-latest
+    name: "Run Rust CodSpeed benchmarks"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup rust toolchain, cache and cargo-codspeed binary
+        uses: moonrepo/setup-rust@v0
+        with:
+          channel: stable
+          cache-target: release
+          bins: cargo-codspeed
+      - name: Build the benchmark target(s)
+        run: cargo codspeed build
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@v4
+        with:
+          mode: simulation
+          run: cargo codspeed run
