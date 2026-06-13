@@ -1,3 +1,14 @@
+## 0.15.2 (2026-06-13)
+
+### Fix
+
+- **tokenize**: accept readonly input on parallel path; guard int32 out=
+
+### Perf
+
+- **tokenize**: parallel Numba LUT gather with small-input np.take fast path
+- **tokenize**: use 256-entry LUT gather instead of linear scan
+
 ## 0.15.1 (2026-06-08)
 
 ### Fix
