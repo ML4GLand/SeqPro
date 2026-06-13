@@ -166,6 +166,21 @@ def gufunc_translate(
             break
 
 
+@nb.njit("void(u1[::1], i4[::1], i4[::1])", parallel=True, cache=True)
+def lut_gather(
+    seq: NDArray[np.uint8],
+    lut: NDArray[np.int32],
+    out: NDArray[np.int32],
+) -> None:
+    """Parallel LUT gather over a flat buffer: ``out[i] = lut[seq[i]]``.
+
+    All three arrays must be 1-D and C-contiguous. Used by ``tokenize`` for
+    inputs large enough to amortize thread-launch overhead.
+    """
+    for i in nb.prange(seq.shape[0]):  # type: ignore[not-iterable]
+        out[i] = lut[seq[i]]
+
+
 @nb.njit(cache=True)
 def _pack_codon_index(b0: int, b1: int, b2: int) -> int:
     """Pack a 3-codon's ASCII bytes into a 6-bit LUT index in ``[0, 63]``.
