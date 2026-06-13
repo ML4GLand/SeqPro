@@ -9,10 +9,16 @@ from ._numba import (
     gufunc_pad_both,
     gufunc_pad_left,
     gufunc_tokenize,
+    lut_gather,
 )
 from ._utils import SeqType, StrSeqType, array_slice, cast_seqs, check_axes
 from .alphabets._alphabets import AminoAlphabet, NucleotideAlphabet
 from .rag import Ragged
+
+# Element-count crossover where the parallel LUT gather (~96µs thread-launch
+# floor) overtakes single-threaded np.take. Measured ~40k on a 14-core machine;
+# the curve is flat near the crossover so the exact value is not sensitive.
+_TOKENIZE_PARALLEL_THRESHOLD = 40_000
 
 
 def pad_seqs(
@@ -255,25 +261,46 @@ def tokenize(
         Token to use for unknown values.
     out
         Output array to store the result in. Only valid for non-Ragged input.
+        Must have dtype ``np.int32``; any other dtype raises ``TypeError``.
 
     Returns
     -------
     NDArray[np.int32] | Ragged[np.int32]
         Integer token IDs with the same shape/layout as the input.
     """
-    source = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
-    target = np.array(list(token_map.values()), dtype=np.int32)
-    _unknown_token = np.int32(unknown_token)
+    if out is not None and out.dtype != np.int32:
+        raise TypeError(f"out must have dtype int32, got {out.dtype}.")
+    # Build a 256-entry lookup table: lut[byte] -> token. Tokenizing is then a
+    # gather, lut[seqs]. Small inputs use single-threaded np.take; larger inputs
+    # use a parallel Numba gather that overtakes it past _TOKENIZE_PARALLEL_THRESHOLD.
+    keys = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
+    vals = np.array(list(token_map.values()), dtype=np.int32)
+    lut = np.full(256, np.int32(unknown_token), dtype=np.int32)
+    lut[keys] = vals
 
     if isinstance(seqs, Ragged):
         seqs = seqs.to_packed()
         n = len(seqs.lengths.ravel())
         trailing = seqs.data.shape[1:]
-        flat = gufunc_tokenize(seqs.data.view(np.uint8), source, target, _unknown_token)
+        u8 = seqs.data.view(np.uint8)
+        if u8.size < _TOKENIZE_PARALLEL_THRESHOLD:
+            flat = np.take(lut, u8)
+        else:
+            flat = np.empty(u8.shape, dtype=np.int32)
+            lut_gather(np.ascontiguousarray(u8).reshape(-1), lut, flat.reshape(-1))
         return Ragged.from_offsets(flat, (n, None, *trailing), seqs.offsets)
 
     _seqs = cast_seqs(seqs)
-    return gufunc_tokenize(_seqs.view(np.uint8), source, target, _unknown_token, out)
+    u8 = _seqs.view(np.uint8)
+    # A strided out= can't be flattened to a writable view, so it takes the
+    # np.take path (which handles arbitrary strides) regardless of size.
+    if u8.size < _TOKENIZE_PARALLEL_THRESHOLD or (
+        out is not None and not out.flags.c_contiguous
+    ):
+        return np.take(lut, u8, out=out)
+    result = out if out is not None else np.empty(u8.shape, dtype=np.int32)
+    lut_gather(np.ascontiguousarray(u8).reshape(-1), lut, result.reshape(-1))
+    return result
 
 
 @overload
