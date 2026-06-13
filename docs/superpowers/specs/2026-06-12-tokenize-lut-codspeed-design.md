@@ -33,28 +33,41 @@ in CI.
 
 ## Approach
 
-**Pure-NumPy LUT gather** (chosen over a Numba LUT gufunc).
+**256-entry int32 LUT with dual dispatch** (small inputs: `np.take`; large inputs: parallel
+Numba `lut_gather`).
 
-Build a 256-entry int32 table once per call and gather:
+Build a 256-entry int32 table once per call, then dispatch on element count:
 
 ```python
 lut = np.full(256, unknown_token, dtype=np.int32)
 lut[source_bytes] = target          # source_bytes: uint8 ASCII codes of token_map keys
-out = np.take(lut, seqs.view(np.uint8), out=out)
+
+if u8.size < _TOKENIZE_PARALLEL_THRESHOLD:   # ~40k elements
+    out = np.take(lut, u8, out=out)          # single-threaded, zero dispatch overhead
+else:
+    lut_gather(u8.reshape(-1), lut, out.reshape(-1))  # parallel Numba kernel
 ```
 
-- Single vectorized, branchless gather — memory-bandwidth bound; the 1 KB table sits in L1.
-- Eliminates a Numba kernel from `tokenize`'s path (faster import, less compiled `.so`/cache
-  surface to maintain).
-- `np.take` natively supports the `out=` argument, preserving the zero-alloc training path.
-- This is **not** "naive NumPy" under CLAUDE.md — a LUT gather is the canonical optimal
-  primitive for byte→int mapping, not a Python loop or per-segment concatenate. The benchmark
-  verifies it beats the alternative.
+- The 1 KB LUT sits in L1; the gather itself is memory-bandwidth bound for large inputs.
+- `np.take` wins for small inputs: its zero thread-dispatch overhead beats the parallel
+  kernel's ~96 µs launch floor below ~40k elements.
+- For large inputs (`_TOKENIZE_PARALLEL_THRESHOLD ≈ 40_000`), a single-threaded `np.take`
+  was measured ~20–28% **slower** than the original `gufunc_tokenize` (parallel gufunc) on
+  dense (512×1024) and flanked-allele profiles. A pure `np.take` implementation therefore
+  **regressed** vs the original kernel on the inputs that matter most for training.
+- `lut_gather` (`@nb.njit(parallel=True)` over a flat 1-D buffer) restores and improves on
+  the original: measured ~2.2–5.7× faster than `gufunc_tokenize` across dense and ragged
+  profiles, while the small-input `np.take` path retains its win where thread overhead
+  dominates.
+- `np.take` natively supports `out=`, preserving the zero-alloc dense training path for
+  small inputs; the parallel path allocates its own output buffer.
+- The crossover (`_TOKENIZE_PARALLEL_THRESHOLD = 40_000`) is measured on a 14-core machine;
+  the performance curve is flat near the crossover so the exact value is not sensitive.
 
-Rejected alternative — **Numba LUT gufunc** (`res[0] = lut[seq]`, `target="parallel"`): keeps
-the gufunc shape but adds thread-dispatch overhead to a trivial, already-bandwidth-bound op,
-which typically loses to a single `np.take` at these input sizes. Revisit only if a future
-input profile demonstrates otherwise.
+Note on the earlier rejected alternative: an initial prototype used **only** `np.take` (no
+parallel fallback), described here as "pure-NumPy LUT gather". That prototype was correct and
+beat the old gufunc on small inputs, but was measured ~20–28% slower on large inputs. The
+dual-dispatch design above supersedes it.
 
 ### DNA-specific fast path (benchmarked, adopted only if faster)
 
@@ -138,6 +151,11 @@ Each benchmark calls `sp.tokenize(...)` with a DNA token map and a fixed `unknow
 candidate DNA-specific path on the same inputs, so the data decides whether the specialized
 path is worth keeping (see "DNA-specific fast path" above). Only the winning implementation
 ships in `tokenize`.
+
+**gufunc baseline:** four additional `test_bench_baseline_*` benchmarks time the old
+`gufunc_tokenize` kernel directly on the same inputs (dense (512×1024) and the three ragged
+profiles). This gives CodSpeed a head-to-head baseline so any future regression of the
+LUT-gather impl vs the original kernel surfaces automatically in CI.
 
 ### 4. Tooling — `pixi.toml`
 

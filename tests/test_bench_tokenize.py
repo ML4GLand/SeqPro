@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import seqpro as sp
+from seqpro._numba import gufunc_tokenize
 from seqpro.rag import Ragged
 
 pytest.importorskip("pytest_codspeed")
@@ -85,3 +86,34 @@ def test_bench_dna_generic_lut(benchmark):
 def test_bench_dna_precomputed_lut(benchmark):
     u8 = _dense(512, 1024).view(np.uint8)
     benchmark(lambda: np.take(_DNA_LUT, u8))
+
+
+# --- Baseline: the original parallel gufunc kernel, timed on the same inputs so
+# CodSpeed flags any regression of the LUT-gather impl vs the old kernel. ---
+_SOURCE = np.array([c.encode("ascii") for c in DNA_TOKEN_MAP]).view(np.uint8)
+_TARGET = np.array(list(DNA_TOKEN_MAP.values()), dtype=np.int32)
+
+
+def _gufunc(u8: np.ndarray) -> np.ndarray:
+    return gufunc_tokenize(u8, _SOURCE, _TARGET, np.int32(UNKNOWN_TOKEN))
+
+
+def test_bench_baseline_dense_batch(benchmark):
+    """Old gufunc kernel on the dense (512, 1024) batch (baseline)."""
+    u8 = _dense(512, 1024).view(np.uint8)
+    benchmark(lambda: _gufunc(u8))
+
+
+def test_bench_baseline_ragged_short_alleles(benchmark):
+    u8 = _ragged(8000, 1, 4).to_packed().data.view(np.uint8)
+    benchmark(lambda: _gufunc(u8))
+
+
+def test_bench_baseline_ragged_flanked_alleles(benchmark):
+    u8 = _ragged(8000, 11, 60).to_packed().data.view(np.uint8)
+    benchmark(lambda: _gufunc(u8))
+
+
+def test_bench_baseline_ragged_cres(benchmark):
+    u8 = _ragged(500, 100, 200).to_packed().data.view(np.uint8)
+    benchmark(lambda: _gufunc(u8))
