@@ -166,7 +166,7 @@ def gufunc_translate(
             break
 
 
-@nb.njit("void(u1[::1], i4[::1], i4[::1])", parallel=True, cache=True)
+@nb.njit(parallel=True, cache=True)
 def lut_gather(
     seq: NDArray[np.uint8],
     lut: NDArray[np.int32],

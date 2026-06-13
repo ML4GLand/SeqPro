@@ -268,6 +268,8 @@ def tokenize(
     NDArray[np.int32] | Ragged[np.int32]
         Integer token IDs with the same shape/layout as the input.
     """
+    if out is not None and out.dtype != np.int32:
+        raise TypeError(f"out must have dtype int32, got {out.dtype}.")
     # Build a 256-entry lookup table: lut[byte] -> token. Tokenizing is then a
     # gather, lut[seqs]. Small inputs use single-threaded np.take; larger inputs
     # use a parallel Numba gather that overtakes it past _TOKENIZE_PARALLEL_THRESHOLD.
