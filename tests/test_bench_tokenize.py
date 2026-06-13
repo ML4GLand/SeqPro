@@ -105,15 +105,17 @@ def test_bench_baseline_dense_batch(benchmark):
 
 
 def test_bench_baseline_ragged_short_alleles(benchmark):
-    u8 = _ragged(8000, 1, 4).to_packed().data.view(np.uint8)
-    benchmark(lambda: _gufunc(u8))
+    # Pack inside the timed callable so the baseline pays the same to_packed()
+    # copy the real ragged tokenize path does (fair head-to-head).
+    seqs = _ragged(8000, 1, 4)
+    benchmark(lambda: _gufunc(seqs.to_packed().data.view(np.uint8)))
 
 
 def test_bench_baseline_ragged_flanked_alleles(benchmark):
-    u8 = _ragged(8000, 11, 60).to_packed().data.view(np.uint8)
-    benchmark(lambda: _gufunc(u8))
+    seqs = _ragged(8000, 11, 60)
+    benchmark(lambda: _gufunc(seqs.to_packed().data.view(np.uint8)))
 
 
 def test_bench_baseline_ragged_cres(benchmark):
-    u8 = _ragged(500, 100, 200).to_packed().data.view(np.uint8)
-    benchmark(lambda: _gufunc(u8))
+    seqs = _ragged(500, 100, 200)
+    benchmark(lambda: _gufunc(seqs.to_packed().data.view(np.uint8)))
