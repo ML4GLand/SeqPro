@@ -59,3 +59,29 @@ def test_bench_ragged_cres(benchmark):
     """Hundreds of 100-200 bp sequences (CREs)."""
     seqs = _ragged(500, 100, 200)
     benchmark(lambda: sp.tokenize(seqs, DNA_TOKEN_MAP, unknown_token=UNKNOWN_TOKEN))
+
+
+# Candidate DNA fast path: a LUT built once at import, reused across calls,
+# avoiding the per-call np.full(256)+scatter. Compared head-to-head below.
+_DNA_LUT = np.full(256, np.int32(UNKNOWN_TOKEN), dtype=np.int32)
+_DNA_LUT[np.frombuffer(b"ACGT", dtype="S1").view(np.uint8)] = np.arange(
+    4, dtype=np.int32
+)
+
+
+def _generic_tokenize(u8: np.ndarray) -> np.ndarray:
+    keys = np.array([c.encode("ascii") for c in DNA_TOKEN_MAP]).view(np.uint8)
+    vals = np.array(list(DNA_TOKEN_MAP.values()), dtype=np.int32)
+    lut = np.full(256, np.int32(UNKNOWN_TOKEN), dtype=np.int32)
+    lut[keys] = vals
+    return np.take(lut, u8)
+
+
+def test_bench_dna_generic_lut(benchmark):
+    u8 = _dense(512, 1024).view(np.uint8)
+    benchmark(lambda: _generic_tokenize(u8))
+
+
+def test_bench_dna_precomputed_lut(benchmark):
+    u8 = _dense(512, 1024).view(np.uint8)
+    benchmark(lambda: np.take(_DNA_LUT, u8))

@@ -73,6 +73,13 @@ win, the DNA path is selected automatically when `token_map` matches the canonic
 otherwise; the public signature is unchanged either way. If it does not win, the generic LUT
 stands alone and the comparison benchmark is dropped or left as a documented non-win.
 
+**Measured result (2026-06-12, macOS, dense (512,1024) input):** No meaningful win. Over 3
+runs the "best time" was 38–41µs for both paths and the winner flipped between runs (run 1:
+generic=41.16µs, precomputed=38.09µs; run 2: generic=38.97µs, precomputed=40.49µs; run 3:
+generic=40.36µs, precomputed=38.87µs). The 2–7% swings are within the reported 5–8% relative
+StdDev — entirely noise. The gather dominates; skipping the O(256) LUT build saves nothing
+measurable. **Decision: generic LUT stands; DNA fast path not integrated.**
+
 ### Preserved assumptions & semantics
 
 - **Single-character ASCII keys** in `token_map`. The existing code already assumes this
