@@ -174,6 +174,7 @@ def test_tokenize_matches_gufunc_reference():
     returned = sp.tokenize(cast, token_map, unknown_token=unknown_token, out=out)
     np.testing.assert_array_equal(out, expected)
     np.testing.assert_array_equal(returned, expected)
+    assert returned is out  # out= must return the same buffer
 
     # Ragged path.
     rag_seqs = ["ACGTN", "TTxAC", "GGGGG"]
@@ -182,7 +183,7 @@ def test_tokenize_matches_gufunc_reference():
     rag = Ragged.from_lengths(data, lengths)
     rag_result = sp.tokenize(rag, token_map, unknown_token=unknown_token)
     flat_expected = reference(
-        np.frombuffer(b"".join(s.encode() for s in rag_seqs), dtype="S1")
+        np.frombuffer(b"".join(s.encode("ascii") for s in rag_seqs), dtype="S1")
     )
     np.testing.assert_array_equal(rag_result.data, flat_expected)
     np.testing.assert_array_equal(rag_result.lengths.ravel(), lengths)
