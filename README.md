@@ -1,5 +1,6 @@
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/seqpro)
 ![GitHub stars](https://img.shields.io/github/stars/ML4GLand/SeqPro)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/ML4GLand/SeqPro?utm_source=badge)
 
 # SeqPro (Sequence processing toolkit)
 ```python
