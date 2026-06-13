@@ -261,19 +261,22 @@ def tokenize(
     NDArray[np.int32] | Ragged[np.int32]
         Integer token IDs with the same shape/layout as the input.
     """
-    source = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
-    target = np.array(list(token_map.values()), dtype=np.int32)
-    _unknown_token = np.int32(unknown_token)
+    # Build a 256-entry lookup table: lut[byte] -> token. Input is uint8 (0-255)
+    # after cast_seqs, so a single gather replaces a per-character linear scan.
+    keys = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
+    vals = np.array(list(token_map.values()), dtype=np.int32)
+    lut = np.full(256, np.int32(unknown_token), dtype=np.int32)
+    lut[keys] = vals
 
     if isinstance(seqs, Ragged):
         seqs = seqs.to_packed()
         n = len(seqs.lengths.ravel())
         trailing = seqs.data.shape[1:]
-        flat = gufunc_tokenize(seqs.data.view(np.uint8), source, target, _unknown_token)
+        flat = np.take(lut, seqs.data.view(np.uint8))
         return Ragged.from_offsets(flat, (n, None, *trailing), seqs.offsets)
 
     _seqs = cast_seqs(seqs)
-    return gufunc_tokenize(_seqs.view(np.uint8), source, target, _unknown_token, out)
+    return np.take(lut, _seqs.view(np.uint8), out=out)
 
 
 @overload
