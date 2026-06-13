@@ -255,6 +255,7 @@ def tokenize(
         Token to use for unknown values.
     out
         Output array to store the result in. Only valid for non-Ragged input.
+        Must have dtype ``np.int32``; any other dtype raises ``TypeError``.
 
     Returns
     -------

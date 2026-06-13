@@ -1,6 +1,7 @@
 from typing import List
 
 import numpy as np
+import pytest
 import seqpro as sp
 from hypothesis import given, note
 from seqpro.rag import Ragged
@@ -187,3 +188,20 @@ def test_tokenize_matches_gufunc_reference():
     )
     np.testing.assert_array_equal(rag_result.data, flat_expected)
     np.testing.assert_array_equal(rag_result.lengths.ravel(), lengths)
+
+
+def test_tokenize_out_requires_int32():
+    """out= must be dtype int32; any other dtype raises TypeError."""
+    token_map = {"A": 0, "C": 1, "G": 2, "T": 3}
+    cast = sp.cast_seqs(["ACGT"])
+
+    # int32 out: should write into the buffer and return the same object.
+    out_i32 = np.empty(cast.shape, dtype=np.int32)
+    returned = sp.tokenize(cast, token_map, unknown_token=-1, out=out_i32)
+    np.testing.assert_array_equal(returned, [[0, 1, 2, 3]])
+    assert returned is out_i32
+
+    # non-int32 out: np.take enforces safe casting, so this must raise TypeError.
+    out_i64 = np.empty(cast.shape, dtype=np.int64)
+    with pytest.raises(TypeError):
+        sp.tokenize(cast, token_map, unknown_token=-1, out=out_i64)
