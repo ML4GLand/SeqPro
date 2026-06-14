@@ -234,6 +234,8 @@ def tokenize(
     token_map: dict[str, int],
     unknown_token: int,
     out: NDArray[np.int32] | None = None,
+    *,
+    parallel: bool | None = None,
 ) -> NDArray[np.int32]: ...
 @overload
 def tokenize(
@@ -241,12 +243,16 @@ def tokenize(
     token_map: dict[str, int],
     unknown_token: int,
     out: None = None,
+    *,
+    parallel: bool | None = None,
 ) -> Ragged[np.int32]: ...
 def tokenize(
     seqs: StrSeqType | Ragged[np.bytes_],
     token_map: dict[str, int],
     unknown_token: int,
     out: NDArray[np.int32] | None = None,
+    *,
+    parallel: bool | None = None,
 ) -> NDArray[np.int32] | Ragged[np.int32]:
     """Tokenize sequences. Maps each character to its integer token.
     Characters absent from token_map are replaced with unknown_token.
@@ -262,6 +268,13 @@ def tokenize(
     out
         Output array to store the result in. Only valid for non-Ragged input.
         Must have dtype ``np.int32``; any other dtype raises ``TypeError``.
+    parallel
+        Escape hatch overriding the size-based heuristic for choosing between the
+        single-threaded ``np.take`` and the parallel Numba LUT gather. ``None``
+        (default) uses the heuristic (parallel past
+        ``_TOKENIZE_PARALLEL_THRESHOLD`` elements); ``True`` forces the parallel
+        kernel; ``False`` forces single-threaded. ``parallel=True`` is
+        incompatible with a non-C-contiguous ``out`` and raises ``ValueError``.
 
     Returns
     -------
@@ -283,20 +296,32 @@ def tokenize(
         n = len(seqs.lengths.ravel())
         trailing = seqs.data.shape[1:]
         u8 = seqs.data.view(np.uint8)
-        if u8.size < _TOKENIZE_PARALLEL_THRESHOLD:
-            flat = np.take(lut, u8)
-        else:
+        use_parallel = (
+            u8.size >= _TOKENIZE_PARALLEL_THRESHOLD if parallel is None else parallel
+        )
+        if use_parallel:
             flat = np.empty(u8.shape, dtype=np.int32)
             lut_gather(np.ascontiguousarray(u8).reshape(-1), lut, flat.reshape(-1))
+        else:
+            flat = np.take(lut, u8)
         return Ragged.from_offsets(flat, (n, None, *trailing), seqs.offsets)
 
     _seqs = cast_seqs(seqs)
     u8 = _seqs.view(np.uint8)
-    # A strided out= can't be flattened to a writable view, so it takes the
-    # np.take path (which handles arbitrary strides) regardless of size.
-    if u8.size < _TOKENIZE_PARALLEL_THRESHOLD or (
-        out is not None and not out.flags.c_contiguous
-    ):
+    # A strided out= can't be flattened to a writable view, so the parallel
+    # kernel can't write through it; such out= always takes the np.take path
+    # (which handles arbitrary strides). parallel=True can't honor it -> error.
+    out_blocks_parallel = out is not None and not out.flags.c_contiguous
+    if parallel is True and out_blocks_parallel:
+        raise ValueError(
+            "parallel=True requires a C-contiguous out array, got a "
+            "non-contiguous out. Use parallel=None/False or a contiguous out."
+        )
+    if parallel is None:
+        use_parallel = u8.size >= _TOKENIZE_PARALLEL_THRESHOLD
+    else:
+        use_parallel = parallel
+    if not use_parallel or out_blocks_parallel:
         return np.take(lut, u8, out=out)
     result = out if out is not None else np.empty(u8.shape, dtype=np.int32)
     lut_gather(np.ascontiguousarray(u8).reshape(-1), lut, result.reshape(-1))

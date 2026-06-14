@@ -260,3 +260,53 @@ def test_tokenize_parallel_branch_matches_reference():
     rag = Ragged.from_lengths(data, lengths)
     rag_got = sp.tokenize(rag, token_map, unknown_token=4)
     np.testing.assert_array_equal(rag_got.data, ref(data.view(np.uint8)))
+
+
+def test_tokenize_parallel_override_forces_path(monkeypatch):
+    """parallel= overrides the size heuristic in both directions, while staying
+    correct. Spying on the parallel kernel reveals which branch ran."""
+    import seqpro._encoders as enc
+    from seqpro._encoders import _TOKENIZE_PARALLEL_THRESHOLD as THRESH
+
+    token_map = {"A": 0, "C": 1, "G": 2, "T": 3}
+    bases = np.frombuffer(b"ACGT", dtype="S1")
+
+    calls = {"n": 0}
+    real_lut = enc.lut_gather
+
+    def spy(*args, **kwargs):
+        calls["n"] += 1
+        return real_lut(*args, **kwargs)
+
+    monkeypatch.setattr(enc, "lut_gather", spy)
+
+    # small input, parallel=True -> parallel kernel used despite being below thresh
+    small = bases[np.zeros(8, dtype=int)]
+    assert small.size < THRESH
+    res = sp.tokenize(small, token_map, unknown_token=-1, parallel=True)
+    assert calls["n"] == 1
+    np.testing.assert_array_equal(res, np.zeros(8, dtype=np.int32))
+
+    # large input, parallel=False -> single-threaded np.take, kernel not used
+    calls["n"] = 0
+    large = bases[np.zeros(THRESH + 1000, dtype=int)]
+    res = sp.tokenize(large, token_map, unknown_token=-1, parallel=False)
+    assert calls["n"] == 0
+    np.testing.assert_array_equal(res, np.zeros(THRESH + 1000, dtype=np.int32))
+
+    # ragged honors the override too: small ragged forced parallel
+    calls["n"] = 0
+    data = bases[np.zeros(8, dtype=int)]
+    rag = Ragged.from_lengths(data, np.array([4, 4]))
+    sp.tokenize(rag, token_map, unknown_token=-1, parallel=True)
+    assert calls["n"] == 1
+
+
+def test_tokenize_parallel_true_rejects_noncontiguous_out():
+    """parallel=True cannot honor a non-C-contiguous out= buffer, so it raises."""
+    token_map = {"A": 0, "C": 1, "G": 2, "T": 3}
+    flat = np.frombuffer(b"ACGT" * 4, dtype="S1")
+    strided = np.empty((flat.size, 2), dtype=np.int32)[:, 0]
+    assert not strided.flags.c_contiguous
+    with pytest.raises(ValueError):
+        sp.tokenize(flat, token_map, unknown_token=-1, out=strided, parallel=True)

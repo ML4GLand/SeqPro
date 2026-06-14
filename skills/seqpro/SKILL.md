@@ -33,7 +33,7 @@ Python/Rust package for fast biological-sequence processing. Python+NumPy+Numba 
 | Normalize input | `sp.cast_seqs(x)` | → `|S1` bytes, or passthrough for OHE |
 | One-hot encode | `sp.ohe(x, alphabet, length_axis=-1)` | last axis added for OHE dim |
 | Decode OHE | `sp.decode_ohe(x, alphabet, ohe_axis=-1)` | |
-| Tokenize / detokenize | `sp.tokenize` / `sp.decode_tokens` | integer ids |
+| Tokenize / detokenize | `sp.tokenize` / `sp.decode_tokens` | integer ids; `parallel=True/False` forces/disables the parallel kernel (default `None` = size heuristic) |
 | Pad | `sp.pad_seqs(x, pad_val, length=...)` | |
 | Reverse complement | `sp.reverse_complement(x, alphabet, length_axis=-1)` | works on str/bytes/OHE |
 | K-mer shuffle | `sp.k_shuffle(x, k, length_axis=-1, seed=...)` | calls Rust `_k_shuffle` |
