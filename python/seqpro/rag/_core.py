@@ -137,6 +137,40 @@ class Ragged(Generic[RDTYPE_co]):
         )
         return Ragged(new_layout)
 
+    def _starts_stops(self) -> tuple[NDArray[Any], NDArray[Any]]:
+        offsets = self.offsets
+        if offsets.ndim == 1:
+            return offsets[:-1], offsets[1:]
+        return offsets[0], offsets[1]
+
+    def __getitem__(self, where: Any) -> "NDArray[Any] | bytes | Ragged[Any]":
+        starts, stops = self._starts_stops()
+        if isinstance(where, (int, np.integer)):
+            lo, hi = int(starts[where]), int(stops[where])
+            row = self._layout.data[lo:hi]
+            if self._layout.is_string:
+                return row.tobytes()
+            return row
+        # slice / mask / int-array on the leading axis -> gather to (2, M)
+        sel_starts = np.ascontiguousarray(starts[where], dtype=OFFSET_TYPE)
+        sel_stops = np.ascontiguousarray(stops[where], dtype=OFFSET_TYPE)
+        new_offsets = np.stack([sel_starts, sel_stops], 0)
+        if None not in self._layout.shape:  # string-leaf flat collection
+            new_layout = RaggedLayout(
+                data=self._layout.data,
+                offsets=[],
+                shape=(len(sel_starts),),
+                str_offsets=new_offsets,
+            )
+        else:
+            new_layout = RaggedLayout(
+                data=self._layout.data,
+                offsets=[new_offsets],
+                shape=(len(sel_starts), *self._layout.shape[self.rag_dim :]),
+                str_offsets=self._layout.str_offsets,
+            )
+        return Ragged(new_layout)
+
     @property
     def lengths(self) -> NDArray[Any]:
         offsets = self.offsets

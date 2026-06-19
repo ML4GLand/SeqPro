@@ -45,8 +45,10 @@ class RaggedLayout(Generic[DTYPE_co]):
 
 
 def _is_monotonic(offsets: NDArray[Any]) -> bool:
-    arr = offsets if offsets.ndim == 1 else offsets.ravel()
-    return bool(np.all(np.diff(arr) >= 0)) if arr.size else True
+    if offsets.ndim == 2:
+        # (2, M) gather layout: each column is [start, stop]; stop >= start required
+        return bool(np.all(offsets[1] >= offsets[0])) if offsets.size else True
+    return bool(np.all(np.diff(offsets) >= 0)) if offsets.size else True
 
 
 def validate_layout(layout: RaggedLayout[Any]) -> None:

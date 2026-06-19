@@ -121,3 +121,31 @@ def test_view_reinterprets_dtype_zero_copy():
     assert v.data.base is not None  # zero-copy view
     np.testing.assert_array_equal(v.data.view(np.int64), rag.data)
     assert v.offsets is rag.offsets  # offsets reused
+
+
+def test_getitem_int_returns_row():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    np.testing.assert_array_equal(rag[0], np.array([0, 1, 2], dtype=np.int32))
+    np.testing.assert_array_equal(rag[1], np.array([3, 4], dtype=np.int32))
+
+
+def test_getitem_int_string_leaf():
+    rag = Ragged.from_lengths(np.frombuffer(b"cathithere", "S1"), np.array([3, 2, 5]))
+    assert rag[0] == b"cat"
+    assert rag[2] == b"there"
+
+
+def test_getitem_slice_returns_ragged():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    sub = rag[1:3]
+    assert isinstance(sub, Ragged)
+    assert sub.offsets.ndim == 2  # (2, M) start/stop gather
+    np.testing.assert_array_equal(sub[0], np.array([3, 4]))
+    np.testing.assert_array_equal(sub[1], np.array([5, 6, 7, 8, 9]))
+
+
+def test_getitem_mask_returns_ragged():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    sub = rag[np.array([True, False, True])]
+    np.testing.assert_array_equal(sub[0], np.array([0, 1, 2]))
+    np.testing.assert_array_equal(sub[1], np.array([5, 6, 7, 8, 9]))
