@@ -196,3 +196,29 @@ def test_reshape_leading():
     assert re.shape == (2, 3, None)
     np.testing.assert_array_equal(re.data, np.arange(10))
     assert re.offsets is rag.offsets
+
+
+def test_to_packed_from_slice():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    packed = rag[1:3].to_packed()
+    assert packed.is_base is True
+    np.testing.assert_array_equal(packed.data, np.array([3, 4, 5, 6, 7, 8, 9]))
+    np.testing.assert_array_equal(packed.offsets, np.array([0, 2, 7]))
+
+
+def test_to_padded():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    out = rag.to_padded(-1)
+    assert out.shape == (3, 5)
+    np.testing.assert_array_equal(out[1], np.array([3, 4, -1, -1, -1]))
+
+
+def test_to_numpy_equal_lengths():
+    rag = Ragged.from_lengths(np.arange(6, dtype=np.int32), np.array([3, 3]))
+    np.testing.assert_array_equal(rag.to_numpy(), np.arange(6).reshape(2, 3))
+
+
+def test_to_numpy_jagged_raises():
+    rag = Ragged.from_lengths(np.arange(5, dtype=np.int32), np.array([3, 2]))
+    with pytest.raises(ValueError):
+        rag.to_numpy()

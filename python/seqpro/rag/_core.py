@@ -123,11 +123,15 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     @property
     def is_base(self) -> bool:
         offsets = self.offsets
+        data = self._layout.data
+        owns_memory = data.base is None or (
+            data.base is not None and data.base.base is None
+        )
         return bool(
-            self._layout.data.base is None
+            owns_memory
             and self.is_contiguous
             and offsets[0] == 0
-            and offsets[-1] == self._layout.data.shape[0]
+            and offsets[-1] == data.shape[0]
         )
 
     def view(self, dtype: Any) -> "Ragged[Any]":
@@ -287,3 +291,46 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             [d for d in leading if d is not None] if leading else [-1]
         )
         return raw.reshape(reshape_arg)
+
+    def to_packed(self, *, copy: bool = True) -> "Ragged[Any]":
+        from ._ops import _pack_parts
+
+        packed_data, packed_offsets = _pack_parts(
+            self._layout.data, self._layout.shape, self.offsets, copy
+        )
+        if packed_data is self._layout.data and packed_offsets is self.offsets:
+            return self
+        return Ragged.from_offsets(packed_data, self._layout.shape, packed_offsets)
+
+    def to_padded(self, pad_value: Any, *, length: int | None = None) -> NDArray[Any]:
+        from ._ops import _to_padded_copy
+
+        rag = self if self.is_contiguous else self.to_packed()
+        offsets = np.ascontiguousarray(rag.offsets, dtype=OFFSET_TYPE)
+        n_rows = offsets.shape[0] - 1
+        out_len = (
+            int(length)
+            if length is not None
+            else (int(rag.lengths.max()) if n_rows else 0)
+        )
+        dtype = rag.data.dtype
+        out = np.full((n_rows, out_len), pad_value, dtype=dtype)
+        if n_rows and out_len:
+            data_u1 = np.ascontiguousarray(rag.data).reshape(-1).view(np.uint8)
+            out_u1 = out.reshape(-1).view(np.uint8)
+            _to_padded_copy(data_u1, offsets, out_u1, dtype.itemsize, out_len)
+        leading = rag.shape[: rag.rag_dim]
+        return out.reshape((*leading, out_len)) if leading else out  # pyrefly: ignore[no-matching-overload] -- leading dims before rag_dim are always int; numpy stub can't verify this
+
+    def to_numpy(self, allow_missing: bool = False) -> NDArray[Any]:
+        lengths = self.lengths
+        if lengths.size and not np.all(lengths == lengths.flat[0]):
+            raise ValueError("cannot convert a jagged Ragged to a dense array")
+        packed = self if self.is_base else self.to_packed()
+        row_len = int(lengths.flat[0]) if lengths.size else 0
+        leading = packed.shape[: packed.rag_dim]
+        return packed.data.reshape(*(leading or (-1,)), row_len, *packed.data.shape[1:])  # pyrefly: ignore[no-matching-overload] -- leading dims before rag_dim are always int; numpy stub can't verify this
+
+    def __array__(self, dtype: Any = None) -> NDArray[Any]:
+        arr = self.to_numpy()
+        return arr.astype(dtype) if dtype is not None else arr
