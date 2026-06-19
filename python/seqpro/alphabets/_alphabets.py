@@ -13,7 +13,13 @@ from .._numba import (
 )
 from .._utils import SeqType, StrSeqType, cast_seqs, check_axes, is_dtype
 from ..rag import Ragged, is_rag_dtype
-from ..seqpro import _translate_bytes, _translate_drop, _translate_stop_ends  # type: ignore[missing-import]  # compiled Rust extension
+from ..seqpro import (  # type: ignore[missing-import]  # compiled Rust extension
+    _translate_bytes,
+    _translate_drop,
+    _translate_stop_ends,
+    _translate_ohe,
+    _translate_ohe_drop,
+)
 
 
 class NucleotideAlphabet:
@@ -579,19 +585,67 @@ class AminoAlphabet:
 
         n = len(lengths)
 
-        # Decode OHE → bytes if needed. seqs.data is (total, n_nuc) for OHE or (total,) for bytes.
         if is_ohe:
             if nuc_alphabet is None:
                 raise ValueError("nuc_alphabet is required for OHE Ragged input.")
             if validate:
                 self._check_ohe_rows(seqs.data, len(nuc_alphabet.array))
-            nuc_bytes_flat: NDArray[np.bytes_] = nuc_alphabet.decode_ohe(  # type: ignore[union-attr]
-                seqs.data, ohe_axis=-1
-            )
-        else:
-            nuc_bytes_flat = seqs.data
-            if validate:
-                self._check_nuc_bytes(nuc_bytes_flat.view(np.uint8))
+            n_aa = len(self.aa_array)
+            nuc_bytes = nuc_alphabet.array.view(np.uint8)
+            aa_bytes = self.aa_array.view(np.uint8)
+            if self.codon_lut is not None:
+                lut_arg, keys_arg, values_arg = self.codon_lut, None, None
+            else:
+                lut_arg = None
+                keys_arg = np.ascontiguousarray(
+                    self.codon_array.view(np.uint8)
+                ).reshape(-1)
+                values_arg = np.ascontiguousarray(self.aa_array.view(np.uint8)).reshape(
+                    -1
+                )
+            if is_drop:
+                ohe_flat, new_offsets = _translate_ohe_drop(
+                    seqs.data,
+                    nuc_bytes,
+                    codon_size,
+                    self._valid_upper_bytes,
+                    offsets.astype(np.int64),
+                    lut_arg,
+                    keys_arg,
+                    values_arg,
+                    aa_bytes,
+                    int(marker_byte),
+                )
+            else:
+                ohe_flat = _translate_ohe(
+                    seqs.data,
+                    nuc_bytes,
+                    codon_size,
+                    lut_arg,
+                    keys_arg,
+                    values_arg,
+                    aa_bytes,
+                    int(marker_byte),
+                )
+                new_offsets = offsets // codon_size
+            if truncate_stop:
+                # Stop '*' is a real AA row; find its one-hot column and the first
+                # row set there (applied AFTER drop-compaction, matching the bytes
+                # path's drop-then-truncate order).
+                stop_col = int(np.where(aa_bytes == ord("*"))[0][0])
+                stop_rows = (ohe_flat[:, stop_col] == 1).view(np.uint8)
+                starts = new_offsets[:-1].astype(np.int64)
+                full_ends = new_offsets[1:].astype(np.int64)
+                ends = _translate_stop_ends(stop_rows, starts, full_ends, np.uint8(1))
+                out_offsets = np.stack([starts, ends])
+            else:
+                out_offsets = new_offsets
+            return Ragged.from_offsets(ohe_flat, (n, None, n_aa), out_offsets)
+
+        # --- bytes-only path ---
+        nuc_bytes_flat = seqs.data
+        if validate:
+            self._check_nuc_bytes(nuc_bytes_flat.view(np.uint8))
 
         # Translate the entire flat buffer in one vectorized call. This is valid because
         # translation is invariant to splitting/concatenation when all lengths % codon_size == 0.
@@ -629,9 +683,6 @@ class AminoAlphabet:
         new_offsets = offsets // codon_size  # (n+1,) codon-indexed in translated_flat
 
         if is_drop:
-            # For OHE Ragged the nucleotide-alphabet trailing axis was consumed
-            # by decode_ohe, so translated_flat / codons_u1 are 1-D along the
-            # codon axis. (Dense drop is handled in the non-Ragged branch.)
             if trailing:
                 raise ValueError(
                     "unknown='drop' is not supported for dense-trailing Ragged "
@@ -663,16 +714,7 @@ class AminoAlphabet:
         else:
             out_offsets = new_offsets  # 1D — ListOffsetArray
 
-        if is_ohe:
-            # OHE input: trailing was the OHE alphabet axis (consumed by decode_ohe),
-            # so translated_flat has no trailing — re-encode and reshape.
-            n_aa = len(self.aa_array)
-            ohe_flat = self.ohe(translated_flat).reshape(-1, n_aa)
-            return Ragged.from_offsets(ohe_flat, (n, None, n_aa), out_offsets)
-        else:
-            return Ragged.from_offsets(
-                translated_flat, (n, None, *trailing), out_offsets
-            )
+        return Ragged.from_offsets(translated_flat, (n, None, *trailing), out_offsets)
 
     def ohe(self, seqs: StrSeqType) -> NDArray[np.uint8]:
         """One hot encode an amino acid sequence."""

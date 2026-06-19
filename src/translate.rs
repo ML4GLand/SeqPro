@@ -93,7 +93,7 @@ mod tests {
     }
 }
 
-use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1, PyReadonlyArray2};
+use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -204,6 +204,181 @@ pub fn _translate_drop<'py>(
             }
         }
         new_offsets.push(out.len() as i64);
+    }
+    Ok((
+        out.into_pyarray(py),
+        ndarray::Array1::from(new_offsets).into_pyarray(py),
+    ))
+}
+
+/// Decode each one-hot row to a nucleotide byte; all-zero (or no-1) row -> 0 sentinel
+/// (a non-canonical byte that downstream validity/translation treats as invalid).
+fn decode_ohe_rows(data: ndarray::ArrayView2<u8>, nuc: &[u8]) -> Vec<u8> {
+    let total = data.shape()[0];
+    let n_nuc = data.shape()[1];
+    let mut nuc_buf = vec![0u8; total];
+    for r in 0..total {
+        let mut found = 0u8;
+        for c in 0..n_nuc {
+            if data[[r, c]] == 1 { found = nuc[c]; break; }
+        }
+        nuc_buf[r] = found;
+    }
+    nuc_buf
+}
+
+/// Fused OHE->codon->AA->OHE translation for OHE-ragged input, avoiding any
+/// round-trip through the Numba-backed ohe/decode_ohe. `data` is (total, n_nuc);
+/// returns (total/codon_size, n_aa).
+#[pyfunction]
+#[pyo3(signature = (data, nuc_bytes, codon_size, lut=None, keys=None, values=None, aa_bytes=None, marker=88))]
+pub fn _translate_ohe<'py>(
+    py: Python<'py>,
+    data: PyReadonlyArray2<'py, u8>,
+    nuc_bytes: PyReadonlyArray1<'py, u8>,
+    codon_size: usize,
+    lut: Option<PyReadonlyArray1<'py, u8>>,
+    keys: Option<PyReadonlyArray1<'py, u8>>,
+    values: Option<PyReadonlyArray1<'py, u8>>,
+    aa_bytes: Option<PyReadonlyArray1<'py, u8>>,
+    marker: u8,
+) -> PyResult<&'py PyArray2<u8>> {
+    let data = data.as_array(); // (total, n_nuc)
+    let nuc = nuc_bytes.as_slice()?;
+    let aa_bytes = aa_bytes
+        .ok_or_else(|| PyValueError::new_err("aa_bytes required"))?;
+    let aa_bytes = aa_bytes.as_slice()?;
+    let total = data.shape()[0];
+    let n_aa = aa_bytes.len();
+    if codon_size == 0 || total % codon_size != 0 {
+        return Err(PyValueError::new_err(
+            "total rows must be a positive multiple of codon_size",
+        ));
+    }
+
+    // 1) Decode each OHE row to a nucleotide byte (all-zero row -> 0 sentinel).
+    let nuc_buf = decode_ohe_rows(data, nuc);
+
+    // 2) Translate to AA bytes.
+    let n_codons = total / codon_size;
+    let mut aa = vec![0u8; n_codons];
+    match lut {
+        Some(lut) => translate_lut_into(&nuc_buf, codon_size, lut.as_slice()?, marker, &mut aa),
+        None => {
+            let keys = keys.ok_or_else(|| PyValueError::new_err("keys required without lut"))?;
+            let values =
+                values.ok_or_else(|| PyValueError::new_err("values required without lut"))?;
+            translate_scan_into(
+                &nuc_buf,
+                codon_size,
+                keys.as_slice()?,
+                values.as_slice()?,
+                marker,
+                &mut aa,
+            );
+        }
+    }
+
+    // 3) Re-encode AA bytes one-hot against aa_bytes (no match -> all-zero row).
+    let mut out = ndarray::Array2::<u8>::zeros((n_codons, n_aa));
+    for i in 0..n_codons {
+        for (j, &ab) in aa_bytes.iter().enumerate() {
+            if ab == aa[i] {
+                out[[i, j]] = 1;
+                break;
+            }
+        }
+    }
+    Ok(out.into_pyarray(py))
+}
+
+/// Fused OHE->codon->AA->OHE with unknown="drop" compaction. Drops any codon
+/// containing a nucleotide row whose decoded byte (`& 0xDF`) is not in
+/// `valid_upper` (all-zero/unknown rows decode to a sentinel that is never
+/// valid). Returns the compacted (n_kept, n_aa) OHE array and codon-indexed new
+/// offsets. `offsets` are nucleotide-row offsets (multiples of codon_size).
+#[pyfunction]
+#[pyo3(signature = (data, nuc_bytes, codon_size, valid_upper, offsets, lut=None, keys=None, values=None, aa_bytes=None, marker=88))]
+pub fn _translate_ohe_drop<'py>(
+    py: Python<'py>,
+    data: PyReadonlyArray2<'py, u8>,
+    nuc_bytes: PyReadonlyArray1<'py, u8>,
+    codon_size: usize,
+    valid_upper: PyReadonlyArray1<'py, u8>,
+    offsets: PyReadonlyArray1<'py, i64>,
+    lut: Option<PyReadonlyArray1<'py, u8>>,
+    keys: Option<PyReadonlyArray1<'py, u8>>,
+    values: Option<PyReadonlyArray1<'py, u8>>,
+    aa_bytes: Option<PyReadonlyArray1<'py, u8>>,
+    marker: u8,
+) -> PyResult<(&'py PyArray2<u8>, &'py PyArray1<i64>)> {
+    let data = data.as_array();
+    let nuc = nuc_bytes.as_slice()?;
+    let valid = valid_upper.as_slice()?;
+    let offsets = offsets.as_slice()?;
+    let aa_bytes = aa_bytes.ok_or_else(|| PyValueError::new_err("aa_bytes required"))?;
+    let aa_bytes = aa_bytes.as_slice()?;
+    let total = data.shape()[0];
+    let n_aa = aa_bytes.len();
+    if codon_size == 0 || total % codon_size != 0 {
+        return Err(PyValueError::new_err(
+            "total rows must be a positive multiple of codon_size",
+        ));
+    }
+
+    // 1) Decode rows to nucleotide bytes.
+    let nuc_buf = decode_ohe_rows(data, nuc);
+
+    // 2) Translate all codons to AA bytes.
+    let n_codons = total / codon_size;
+    let mut aa = vec![0u8; n_codons];
+    match lut {
+        Some(lut) => translate_lut_into(&nuc_buf, codon_size, lut.as_slice()?, marker, &mut aa),
+        None => {
+            let keys = keys.ok_or_else(|| PyValueError::new_err("keys required without lut"))?;
+            let values =
+                values.ok_or_else(|| PyValueError::new_err("values required without lut"))?;
+            translate_scan_into(
+                &nuc_buf, codon_size, keys.as_slice()?, values.as_slice()?, marker, &mut aa,
+            );
+        }
+    }
+
+    // 3) Per sequence, keep codons whose every nucleotide row is valid; collect
+    //    kept AA bytes; build codon-indexed new offsets.
+    let n_seq = offsets.len() - 1;
+    let mut kept_aa: Vec<u8> = Vec::new();
+    let mut new_offsets: Vec<i64> = Vec::with_capacity(n_seq + 1);
+    new_offsets.push(0);
+    for s in 0..n_seq {
+        let codon_start = (offsets[s] as usize) / codon_size;
+        let codon_end = (offsets[s + 1] as usize) / codon_size;
+        for c in codon_start..codon_end {
+            let mut keep = true;
+            for j in 0..codon_size {
+                let b = nuc_buf[c * codon_size + j] & 0xDF;
+                if !valid.iter().any(|&v| v == b) {
+                    keep = false;
+                    break;
+                }
+            }
+            if keep {
+                kept_aa.push(aa[c]);
+            }
+        }
+        new_offsets.push(kept_aa.len() as i64);
+    }
+
+    // 4) One-hot encode kept AA bytes against aa_bytes (no match -> all-zero row).
+    let n_kept = kept_aa.len();
+    let mut out = ndarray::Array2::<u8>::zeros((n_kept, n_aa));
+    for (i, &ab_byte) in kept_aa.iter().enumerate() {
+        for (j, &ab) in aa_bytes.iter().enumerate() {
+            if ab == ab_byte {
+                out[[i, j]] = 1;
+                break;
+            }
+        }
     }
     Ok((
         out.into_pyarray(py),

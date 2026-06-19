@@ -78,3 +78,27 @@ def test_translate_ragged_truncate_stop():
     # got[i] returns Python bytes for a 1D Ragged element
     assert np.frombuffer(got[0], "S1").tobytes().decode() == "M*"
     assert np.frombuffer(got[1], "S1").tobytes().decode() == "KK"
+
+
+def test_translate_ohe_ragged_roundtrips():
+    # Build OHE ragged DNA for "ATGTAA" (len 6, 2 codons -> "M*").
+    seq = np.frombuffer(b"ATGTAA", "S1")
+    ohe = sp.DNA.ohe(seq)  # (6, 4)
+    offsets = np.array([0, 6], dtype=np.int64)
+    rag = Ragged.from_offsets(ohe, (1, None, 4), offsets)
+    got = sp.AA.translate(rag, nuc_alphabet=sp.DNA)
+    # Decode AA OHE back to bytes for assertion.
+    aa_bytes = sp.AA.decode_ohe(got.data, ohe_axis=-1)
+    assert aa_bytes.tobytes().decode() == _bio_like_translate("ATGTAA")
+
+
+def test_translate_ohe_ragged_drop_removes_noncanonical():
+    # "ATGNNNTAA": ATG=M, NNN=drop (all-zero OHE rows), TAA=*  -> "M*"
+    seq = np.frombuffer(b"ATGNNNTAA", "S1")
+    ohe = sp.DNA.ohe(seq)  # (9, 4); N rows are all-zero
+    offsets = np.array([0, 9], dtype=np.int64)
+    rag = Ragged.from_offsets(ohe, (1, None, 4), offsets)
+    got = sp.AA.translate(rag, nuc_alphabet=sp.DNA, unknown="drop")
+    aa_bytes = sp.AA.decode_ohe(got.data, ohe_axis=-1)
+    assert aa_bytes.tobytes().decode() == "M*"
+    np.testing.assert_array_equal(got.offsets, np.array([0, 2], dtype=np.int64))
