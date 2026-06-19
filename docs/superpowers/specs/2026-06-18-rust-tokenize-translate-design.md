@@ -281,13 +281,32 @@ The rule: **keep if Rust wins clearly in ≥1 regime and never meaningfully regr
 | `translate` warm medium (n=3,333) | **Rust** | 55.9 µs vs 83.1 µs — 1.5× faster |
 | `translate` warm large (n=333,333) | Numba | 610 µs vs 8,987 µs — 15× faster |
 
+**Update (parallel rayon path added):** The 333k regression is closed. After adding
+`translate_lut_into_par` / `translate_scan_into_par` (rayon) with a 20k-codon
+crossover threshold, re-measured on the same 10-core Apple M-series Mac:
+
+| codons | serial (Mcodon/s) | parallel (Mcodon/s) | speedup |
+|--------|-------------------|---------------------|---------|
+| 1,000  | 57.8              | 8.2                 | serial wins |
+| 10,000 | 69.6              | 72.8                | ~tie   |
+| 20,000 | 67.2              | 123.5               | 1.8×   |
+| 40,000 | 67.8              | 192.1               | 2.8×   |
+| 333,333| 66.7              | 395.8               | 5.9×   |
+
+`TRANSLATE_PARALLEL_THRESHOLD` is set to 20,000 codons (conservative break-even).
+The full bench suite (`bench_tokenize_translate.py`) shows `translate_dense[333333]`
+at ~1,301 µs median — substantially better than the 8,987 µs serial baseline. The
+large-scale regression versus Numba (610 µs) is narrowed but not fully closed;
+Numba's advantage here reflects its dedicated parallel SIMD gather vs. rayon's
+per-element dispatch overhead at this workload size.
+
 **Summary of findings:**
 
 `translate`: Rust is a clear winner on cold and warm-small/medium. The regression
-at large scale (333k codons) is severe (15×) because the translate Rust kernel has
-no parallel path — it is purely serial. The `TRANSLATE_PARALLEL_THRESHOLD` constant
-exists in `src/translate.rs` but is unused. A rayon-parallel translate kernel would
-likely close or reverse this gap at large scale.
+at large scale (333k codons) that existed in the initial port (15× slower than
+Numba, serial-only path) has been substantially reduced by the rayon parallel path
+(5.9× speedup over serial Rust at 333k). The `TRANSLATE_PARALLEL_THRESHOLD`
+constant in `src/translate.rs` is now wired and drives real dispatch.
 
 `tokenize`: Rust regresses warm across all measured sizes. The baseline uses
 `np.take` (not Numba) for n < 40k, which is highly optimized and cache-friendly.

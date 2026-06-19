@@ -3,12 +3,13 @@
 //! The standard ACGT/k=3 path uses a 64-entry LUT keyed by the same bit-hash
 //! as Python `_pack_codon_index`; non-standard alphabets use a linear scan.
 
-/// UNUSED / reserved. translate.rs has no rayon path — all kernels
-/// (`translate_lut_into`, `translate_scan_into`) are purely serial. No
-/// parallel-translate wiring is planned for this phase. This constant is
-/// retained as a placeholder for a future rayon port; do not use it to gate
-/// behaviour until a parallel kernel is actually implemented.
-pub const TRANSLATE_PARALLEL_THRESHOLD: usize = 40_000;
+/// Crossover threshold (in codons) above which `_translate_bytes` uses the
+/// rayon parallel path (`translate_lut_into_par` / `translate_scan_into_par`).
+/// Measured on a 10-core Apple M-series Mac: serial ≈ 67 Mcodon/s flat;
+/// parallel overtakes at ~10k codons (tie) and reaches 395 Mcodon/s at 333k
+/// (5.9x). 20_000 is chosen as a conservative crossover (1.8x win there),
+/// safely above the ~10k break-even. WIRED.
+pub const TRANSLATE_PARALLEL_THRESHOLD: usize = 20_000;
 
 /// Pack a canonical ACGT codon into a 6-bit LUT index `[0,63]`.
 /// Mirrors Python `_pack_codon_index`. Caller guarantees bytes are upper-cased ACGT.
@@ -25,22 +26,46 @@ fn is_acgt(b: u8) -> bool {
     b == b'A' || b == b'C' || b == b'G' || b == b'T'
 }
 
-/// Standard ACGT/k=3 LUT translate. Non-canonical codons → `marker`.
-pub fn translate_lut_into(buf: &[u8], codon_size: usize, lut: &[u8], marker: u8, out: &mut [u8]) {
-    debug_assert_eq!(codon_size, 3);
-    for (o, codon) in out.iter_mut().zip(buf.chunks_exact(codon_size)) {
-        let b0 = codon[0] & 0xDF;
-        let b1 = codon[1] & 0xDF;
-        let b2 = codon[2] & 0xDF;
-        *o = if is_acgt(b0) && is_acgt(b1) && is_acgt(b2) {
-            lut[pack_codon_index(b0, b1, b2)]
-        } else {
-            marker
-        };
+/// Translate a single codon using the 64-entry LUT. Non-canonical → `marker`.
+#[inline]
+fn translate_codon_lut(codon: &[u8], lut: &[u8], marker: u8) -> u8 {
+    let b0 = codon[0] & 0xDF;
+    let b1 = codon[1] & 0xDF;
+    let b2 = codon[2] & 0xDF;
+    if is_acgt(b0) && is_acgt(b1) && is_acgt(b2) {
+        lut[pack_codon_index(b0, b1, b2)]
+    } else {
+        marker
     }
 }
 
-/// Generic case-insensitive linear-scan translate for non-standard alphabets.
+/// Translate a single codon by linear scan against `keys`/`values`. No match → `marker`.
+#[inline]
+fn translate_codon_scan(codon: &[u8], codon_size: usize, keys: &[u8], values: &[u8], marker: u8) -> u8 {
+    let n_codons_table = values.len();
+    let mut hit = marker;
+    'keys: for i in 0..n_codons_table {
+        let key = &keys[i * codon_size..(i + 1) * codon_size];
+        for j in 0..codon_size {
+            if (codon[j] & 0xDF) != (key[j] & 0xDF) {
+                continue 'keys;
+            }
+        }
+        hit = values[i];
+        break;
+    }
+    hit
+}
+
+/// Standard ACGT/k=3 LUT translate (serial). Non-canonical codons → `marker`.
+pub fn translate_lut_into(buf: &[u8], codon_size: usize, lut: &[u8], marker: u8, out: &mut [u8]) {
+    debug_assert_eq!(codon_size, 3);
+    for (o, codon) in out.iter_mut().zip(buf.chunks_exact(codon_size)) {
+        *o = translate_codon_lut(codon, lut, marker);
+    }
+}
+
+/// Generic case-insensitive linear-scan translate for non-standard alphabets (serial).
 pub fn translate_scan_into(
     buf: &[u8],
     codon_size: usize,
@@ -49,21 +74,32 @@ pub fn translate_scan_into(
     marker: u8,
     out: &mut [u8],
 ) {
-    let n_codons_table = values.len();
     for (o, codon) in out.iter_mut().zip(buf.chunks_exact(codon_size)) {
-        let mut hit = marker;
-        'keys: for i in 0..n_codons_table {
-            let key = &keys[i * codon_size..(i + 1) * codon_size];
-            for j in 0..codon_size {
-                if (codon[j] & 0xDF) != (key[j] & 0xDF) {
-                    continue 'keys;
-                }
-            }
-            hit = values[i];
-            break;
-        }
-        *o = hit;
+        *o = translate_codon_scan(codon, codon_size, keys, values, marker);
     }
+}
+
+/// Parallel LUT translate using rayon. Bit-identical to `translate_lut_into`.
+pub fn translate_lut_into_par(buf: &[u8], codon_size: usize, lut: &[u8], marker: u8, out: &mut [u8]) {
+    use rayon::prelude::*;
+    out.par_iter_mut()
+        .zip(buf.par_chunks_exact(codon_size))
+        .for_each(|(o, codon)| *o = translate_codon_lut(codon, lut, marker));
+}
+
+/// Parallel scan translate using rayon. Bit-identical to `translate_scan_into`.
+pub fn translate_scan_into_par(
+    buf: &[u8],
+    codon_size: usize,
+    keys: &[u8],
+    values: &[u8],
+    marker: u8,
+    out: &mut [u8],
+) {
+    use rayon::prelude::*;
+    out.par_iter_mut()
+        .zip(buf.par_chunks_exact(codon_size))
+        .for_each(|(o, codon)| *o = translate_codon_scan(codon, codon_size, keys, values, marker));
 }
 
 #[cfg(test)]
@@ -96,6 +132,33 @@ mod tests {
         translate_scan_into(buf, 3, keys, values, b'X', &mut out);
         assert_eq!(out, b"M*K");
     }
+
+    #[test]
+    fn parallel_lut_matches_serial() {
+        // Build a ~50k-codon random-ish ACGT buffer
+        let codons = 50_000usize;
+        let buf: Vec<u8> = (0..codons * 3)
+            .map(|i| [b'A', b'C', b'G', b'T'][i % 4])
+            .collect();
+        let mut out_serial = vec![0u8; codons];
+        let mut out_par = vec![0u8; codons];
+        translate_lut_into(&buf, 3, &lut(), b'X', &mut out_serial);
+        translate_lut_into_par(&buf, 3, &lut(), b'X', &mut out_par);
+        assert_eq!(out_serial, out_par);
+    }
+
+    #[test]
+    fn parallel_scan_matches_serial() {
+        let keys = b"ATGTAAAAA";
+        let values = b"M*K";
+        let base: Vec<u8> = b"ATGTAAAAA".repeat(5000);
+        let codons = base.len() / 3;
+        let mut out_serial = vec![0u8; codons];
+        let mut out_par = vec![0u8; codons];
+        translate_scan_into(&base, 3, keys, values, b'X', &mut out_serial);
+        translate_scan_into_par(&base, 3, keys, values, b'X', &mut out_par);
+        assert_eq!(out_serial, out_par);
+    }
 }
 
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
@@ -123,20 +186,27 @@ pub fn _translate_bytes<'py>(
     }
     let n_codons = buf.len() / codon_size;
     let mut out = vec![0u8; n_codons];
+    let parallel = n_codons >= TRANSLATE_PARALLEL_THRESHOLD;
     match lut {
-        Some(lut) => translate_lut_into(buf, codon_size, lut.as_slice()?, marker, &mut out),
+        Some(lut) => {
+            let lut = lut.as_slice()?;
+            if parallel {
+                translate_lut_into_par(buf, codon_size, lut, marker, &mut out);
+            } else {
+                translate_lut_into(buf, codon_size, lut, marker, &mut out);
+            }
+        }
         None => {
             let keys = keys.ok_or_else(|| PyValueError::new_err("keys required without lut"))?;
             let values =
                 values.ok_or_else(|| PyValueError::new_err("values required without lut"))?;
-            translate_scan_into(
-                buf,
-                codon_size,
-                keys.as_slice()?,
-                values.as_slice()?,
-                marker,
-                &mut out,
-            );
+            let keys = keys.as_slice()?;
+            let values = values.as_slice()?;
+            if parallel {
+                translate_scan_into_par(buf, codon_size, keys, values, marker, &mut out);
+            } else {
+                translate_scan_into(buf, codon_size, keys, values, marker, &mut out);
+            }
         }
     }
     Ok(out.into_pyarray(py))
@@ -264,7 +334,9 @@ pub fn _translate_ohe<'py>(
     // 1) Decode each OHE row to a nucleotide byte (all-zero row -> 0 sentinel).
     let nuc_buf = decode_ohe_rows(data, nuc);
 
-    // 2) Translate to AA bytes.
+    // 2) Translate all codons to AA bytes.
+    // NOTE: serial path intentional — surrounding decode/compaction loops are serial;
+    // parallel translate could be wired here in a future pass if OHE becomes a bottleneck.
     let n_codons = total / codon_size;
     let mut aa = vec![0u8; n_codons];
     match lut {
@@ -335,6 +407,8 @@ pub fn _translate_ohe_drop<'py>(
     let nuc_buf = decode_ohe_rows(data, nuc);
 
     // 2) Translate all codons to AA bytes.
+    // NOTE: serial path intentional — surrounding decode/compaction loops are serial;
+    // parallel translate could be wired here in a future pass if OHE becomes a bottleneck.
     let n_codons = total / codon_size;
     let mut aa = vec![0u8; n_codons];
     match lut {
