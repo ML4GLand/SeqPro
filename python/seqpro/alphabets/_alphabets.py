@@ -529,9 +529,18 @@ class AminoAlphabet:
                 # rest into the batch dim. Each row becomes one Ragged sequence.
                 norm = np.moveaxis(seqs, length_axis, -1)
                 seq_len = norm.shape[-1]
-                norm = np.ascontiguousarray(norm.reshape(-1, seq_len))
-                n_seq = norm.shape[0]
                 n_codons = seq_len // codon_size
+                n_seq = int(np.prod(norm.shape[:-1])) if norm.ndim > 1 else 1
+                if seqs.size == 0:
+                    # Empty input: reshape(-1, 0) and sliding_window_view both
+                    # choke on zero-length rows. unknown="drop" always returns a
+                    # Ragged, so return an empty one directly.
+                    return Ragged.from_offsets(
+                        np.empty(0, dtype="S1"),
+                        (n_seq, None),
+                        np.zeros(n_seq + 1, dtype=np.int64),
+                    )
+                norm = np.ascontiguousarray(norm.reshape(-1, seq_len))
                 codons = np.lib.stride_tricks.sliding_window_view(
                     norm, window_shape=codon_size, axis=-1
                 )[:, ::codon_size]  # (n_seq, n_codons, codon_size)
