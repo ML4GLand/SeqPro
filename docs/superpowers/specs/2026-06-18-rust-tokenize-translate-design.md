@@ -281,71 +281,69 @@ The rule: **keep if Rust wins clearly in ≥1 regime and never meaningfully regr
 | `translate` warm medium (n=3,333) | **Rust** | 55.9 µs vs 83.1 µs — 1.5× faster |
 | `translate` warm large (n=333,333) | Numba | 610 µs vs 8,987 µs — 15× faster |
 
-**Update (parallel rayon path added):** The 333k regression is closed. After adding
-`translate_lut_into_par` / `translate_scan_into_par` (rayon) with a 20k-codon
-crossover threshold, re-measured on the same 10-core Apple M-series Mac:
+> **Important — the 333,333-codon Rust numbers above (9,319 cold / 8,987 warm)
+> are the INITIAL SERIAL kernel.** The serial Rust translate genuinely was ~15×
+> slower than Numba's parallel `gufunc` at that size. That gap was real and is
+> what motivated wiring the rayon parallel path below. The other rows
+> (n=33, n=3,333) are unaffected — they were already faster than Numba.
 
-| codons | serial (Mcodon/s) | parallel (Mcodon/s) | speedup |
-|--------|-------------------|---------------------|---------|
-| 1,000  | 57.8              | 8.2                 | serial wins |
-| 10,000 | 69.6              | 72.8                | ~tie   |
-| 20,000 | 67.2              | 123.5               | 1.8×   |
-| 40,000 | 67.8              | 192.1               | 2.8×   |
-| 333,333| 66.7              | 395.8               | 5.9×   |
+### Update — rayon parallel path added, then re-measured cleanly
 
-`TRANSLATE_PARALLEL_THRESHOLD` is set to 20,000 codons (conservative break-even).
-The full bench suite (`bench_tokenize_translate.py`) shows `translate_dense[333333]`
-at ~1,301 µs median — substantially better than the 8,987 µs serial baseline. The
-large-scale regression versus Numba (610 µs) is narrowed but not fully closed;
-Numba's advantage here reflects its dedicated parallel SIMD gather vs. rayon's
-per-element dispatch overhead at this workload size.
+A rayon parallel path (`translate_lut_into_par` / `translate_scan_into_par`,
+dispatched by `_translate_bytes` above `TRANSLATE_PARALLEL_THRESHOLD = 20,000`
+codons) plus a kernel micro-optimization (256-entry `IS_ACGT` validity table,
+coarse 8,192-codon chunks) replaced the serial large-array path.
 
-**Summary of findings:**
+**Measurement caveat (important):** intermediate "2.1× / 1.19× residual
+regression" readings recorded during development were **thermal measurement
+noise** — repeated back-to-back benchmarking saturated the laptop and inflated
+absolute times by 30–80%. The numbers below are a controlled head-to-head run
+**in a single process / single thermal window**, comparing the full Rust
+`AA.translate` against Numba's bare `gufunc_translate_lut` kernel. This
+comparison **favors Numba**: its number excludes the Python orchestration
+(`sliding_window_view`, casts, marshalling) that the Rust full-path number
+includes.
 
-`translate`: Rust is a clear winner on cold and warm-small/medium. The regression
-at large scale (333k codons) that existed in the initial port (15× slower than
-Numba, serial-only path) has been substantially reduced by the rayon parallel path
-(5.9× speedup over serial Rust at 333k). The `TRANSLATE_PARALLEL_THRESHOLD`
-constant in `src/translate.rs` is now wired and drives real dispatch.
+| n_codons | Rust (full `translate`) | Numba (bare kernel) | ratio |
+|---|---|---|---|
+| 3,333 | 51 µs | 54 µs | 0.94× (Rust faster) |
+| 100,000 | 292 µs | 266 µs | 1.10× (Rust ~10% slower) |
+| 333,333 | 503 µs | 607 µs | 0.83× (Rust faster) |
 
-`tokenize`: Rust regresses warm across all measured sizes. The baseline uses
-`np.take` (not Numba) for n < 40k, which is highly optimized and cache-friendly.
-At n=1M, the parallel Numba `lut_gather` is ~5× faster than the Rust parallel
-gather. Rust also adds a cold-startup overhead (~126 µs first call) that `np.take`
-avoids entirely.
+After the parallel path, **the large-scale regression is gone** — Rust is at
+parity-or-better with Numba across all sizes, and this is the conservative
+read (the orchestration overhead is on Rust's side of the ledger).
 
-### Decision: RECOMMEND REVERT (or conditional keep — see below)
+**Diagnosis of the residual (why it is NOT a bounds-check problem):** Numba's
+`@njit` kernel compiles with bounds-checking disabled, whereas the Rust kernel
+bounds-checks `codon[0..3]` and `lut[idx]` per codon. Eliding those checks with
+`unsafe { get_unchecked }` was tried and measured **slower** (945 µs vs 521 µs
+for the safe version, same thermal window), so bounds checks are not the
+bottleneck — the 333k case is memory-bandwidth bound on a ~1.3 MB gather, where
+both implementations sit near the hardware limit. The unsafe change was
+discarded. The genuinely necessary fix was parallelism (serial → parallel was
+the ~18× win); micro-optimizations beyond that have no measurable headroom.
 
-**As measured, the data does not support a clean KEEP verdict:**
+### Decision (FINAL)
 
-- `tokenize` regresses in every warm regime (2–5×). The baseline uses `np.take`,
-  not Numba, for the small/medium sizes, so there was never a cold-JIT problem to
-  solve there. At large scale the parallel Numba kernel outperforms Rust.
-- `translate` strongly wins cold and warm-small (the clearest win; the data does
-  support keeping translate). But it regresses 15× at large scale due to the
-  missing parallel path.
+- **`tokenize` → REVERTED to the original `np.take`/Numba path.** Rust regressed
+  2–5× in every warm regime with no compensating cold win: the baseline used the
+  highly-optimized `np.take` (not Numba) for n < 40k, so there was never a
+  cold-JIT problem to solve there, and at n=1M the parallel Numba `lut_gather`
+  beat the Rust gather ~5×. The Rust tokenize kernel (`src/tokenize.rs`) and its
+  Python wiring were removed; `lut_gather` / `np.take` restored.
 
-**Conditional paths for the controller/user to choose from:**
+- **`translate` → KEPT (Rust, with the rayon parallel path).** It wins decisively
+  cold (no JIT stall) and at warm-small/medium (≈1.7–8.7× faster — the primary
+  biological-batch regime), and is at parity-or-better with Numba at the large
+  extreme after parallelization. All Numba translate kernels remain in
+  `_numba.py` (still exercised by direct unit tests and preserved as a revert
+  reference); no kernels were deleted.
 
-1. **REVERT both** — restore Numba/`np.take` for `tokenize` and Numba for
-   `translate`. Keep the design doc, bench harness, and Rust kernel code (do not
-   delete `src/tokenize.rs` or `src/translate.rs`) for the follow-up work
-   identified below.
-
-2. **KEEP translate, REVERT tokenize** — `translate` wins clearly in cold + warm
-   small/medium (the primary use case for biological sequence data). The 333k-codon
-   regression is a known gap (missing rayon path) not a fundamental limitation.
-   `tokenize` has no clear win in any regime.
-
-3. **KEEP both, add rayon to translate** — accept the current translate regression as
-   temporary, add the parallel Rust translate kernel as immediate follow-up before
-   merging. This realizes the original experiment's full intent and likely closes
-   the large-scale gap.
-
-**Controller's recommendation to user:** Option 2 or 3. Option 2 is the
-conservative choice (ships what's strictly better); Option 3 is the aggressive
-choice (finishes the experiment properly). Option 1 is safe but wastes a clear
-10× win on `translate` cold + small.
+Decision rule (**keep if Rust wins clearly in ≥1 regime and never meaningfully
+regresses others**): `translate` satisfies it (clear cold + small/medium wins, no
+meaningful large-scale regression); `tokenize` fails it (no winning regime) and
+was reverted.
 
 ### Step 3 — Skill verification
 
