@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Generic, Sequence, TypeVar, cast
+from typing import Any, Generic, Sequence, TypeVar
 
 import numpy as np
+from numpy.lib.mixins import NDArrayOperatorsMixin
 from numpy.typing import NDArray
+from typing_extensions import override
 
 from ._layout import RaggedLayout, validate_layout
 from ._utils import OFFSET_TYPE, lengths_to_offsets
@@ -34,7 +36,7 @@ def _build_layout(
     return RaggedLayout(data=data, offsets=[offsets], shape=shape)
 
 
-class Ragged(Generic[RDTYPE_co]):
+class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     """A non-branching ragged array with a single ragged axis (Spec A)."""
 
     __slots__ = ("_layout",)
@@ -181,6 +183,7 @@ class Ragged(Generic[RDTYPE_co]):
             )
         )
 
+    @override
     def __array_ufunc__(
         self, ufunc: Any, method: str, *inputs: Any, **kwargs: Any
     ) -> "Ragged[Any]":
@@ -201,30 +204,6 @@ class Ragged(Generic[RDTYPE_co]):
                 raw_inputs.append(x)
         result = getattr(ufunc, method)(*raw_inputs, **kwargs)
         return self._with_data(result)
-
-    def __add__(self, other: Any) -> "Ragged[Any]":
-        return np.add(cast(Any, self), other)
-
-    def __radd__(self, other: Any) -> "Ragged[Any]":
-        return np.add(other, cast(Any, self))
-
-    def __mul__(self, other: Any) -> "Ragged[Any]":
-        return np.multiply(cast(Any, self), other)
-
-    def __rmul__(self, other: Any) -> "Ragged[Any]":
-        return np.multiply(other, cast(Any, self))
-
-    def __sub__(self, other: Any) -> "Ragged[Any]":
-        return np.subtract(cast(Any, self), other)
-
-    def __rsub__(self, other: Any) -> "Ragged[Any]":
-        return np.subtract(other, cast(Any, self))
-
-    def __truediv__(self, other: Any) -> "Ragged[Any]":
-        return np.true_divide(cast(Any, self), other)
-
-    def __rtruediv__(self, other: Any) -> "Ragged[Any]":
-        return np.true_divide(other, cast(Any, self))
 
     @property
     def lengths(self) -> NDArray[Any]:
