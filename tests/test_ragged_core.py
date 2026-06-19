@@ -103,3 +103,21 @@ def test_empty():
 def test_from_offsets_rejects_two_none():
     with pytest.raises(NotImplementedError, match="Spec C"):
         Ragged.from_offsets(np.arange(6), (2, None, None), np.array([0, 6]))
+
+
+def test_state_predicates():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    assert rag.is_empty is False
+    assert rag.is_contiguous is True
+    assert rag.is_base is True
+    empty = Ragged.empty((3, None), np.int32)
+    assert empty.is_empty is True
+
+
+def test_view_reinterprets_dtype_zero_copy():
+    rag = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
+    v = rag.view(np.uint64)
+    assert v.dtype == np.dtype(np.uint64)
+    assert v.data.base is not None  # zero-copy view
+    np.testing.assert_array_equal(v.data.view(np.int64), rag.data)
+    assert v.offsets is rag.offsets  # offsets reused

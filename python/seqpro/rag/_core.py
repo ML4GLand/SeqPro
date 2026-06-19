@@ -108,6 +108,36 @@ class Ragged(Generic[RDTYPE_co]):
         return self._layout.shape.index(None)
 
     @property
+    def is_empty(self) -> bool:
+        offsets = self.offsets
+        if offsets.ndim == 1:
+            return bool(offsets.size == 0 or offsets[-1] == 0)
+        return bool(np.all(offsets[0] == offsets[1]))
+
+    @property
+    def is_contiguous(self) -> bool:
+        return self.offsets.ndim == 1 and self._layout.data.flags.c_contiguous
+
+    @property
+    def is_base(self) -> bool:
+        offsets = self.offsets
+        return bool(
+            self._layout.data.base is None
+            and self.is_contiguous
+            and offsets[0] == 0
+            and offsets[-1] == self._layout.data.shape[0]
+        )
+
+    def view(self, dtype: Any) -> "Ragged[Any]":
+        new_layout = RaggedLayout(
+            data=self._layout.data.view(dtype),
+            offsets=self._layout.offsets,
+            shape=self._layout.shape,
+            str_offsets=self._layout.str_offsets,
+        )
+        return Ragged(new_layout)
+
+    @property
     def lengths(self) -> NDArray[Any]:
         offsets = self.offsets
         raw = np.diff(offsets) if offsets.ndim == 1 else np.diff(offsets, axis=0)
