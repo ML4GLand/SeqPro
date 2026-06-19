@@ -318,3 +318,17 @@ def test_getitem_uses_rust_select_intarray():
     sub_neg = rag[np.array([-1, 0])]
     np.testing.assert_array_equal(sub_neg[0], np.array([5, 6, 7, 8, 9]))
     np.testing.assert_array_equal(sub_neg[1], np.array([0, 1, 2]))
+
+
+def test_getitem_oversized_bool_mask_raises():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    # length-4 mask on 3-row Ragged must raise IndexError, not panic
+    with pytest.raises(IndexError):
+        rag[np.array([True, False, True, True])]
+
+
+def test_getitem_undersized_bool_mask_raises():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    # length-2 mask on 3-row Ragged must raise IndexError
+    with pytest.raises(IndexError):
+        rag[np.array([True, False])]

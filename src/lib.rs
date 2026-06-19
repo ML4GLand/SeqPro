@@ -58,7 +58,8 @@ fn _ragged_select<'py>(
     starts: PyReadonlyArray1<'py, i64>,
     stops: PyReadonlyArray1<'py, i64>,
     idx: PyReadonlyArray1<'py, i64>,
-) -> (&'py PyArray<i64, Ix1>, &'py PyArray<i64, Ix1>) {
-    let (s, e) = ragged::select(starts.as_array(), stops.as_array(), idx.as_array());
-    (s.into_pyarray(py), e.into_pyarray(py))
+) -> PyResult<(&'py PyArray<i64, Ix1>, &'py PyArray<i64, Ix1>)> {
+    let (s, e) = ragged::select(starts.as_array(), stops.as_array(), idx.as_array())
+        .map_err(PyValueError::new_err)?;
+    Ok((s.into_pyarray(py), e.into_pyarray(py)))
 }

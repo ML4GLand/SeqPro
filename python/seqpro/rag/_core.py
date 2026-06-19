@@ -170,6 +170,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         # slice / mask / int-array on the leading axis -> gather to (2, M)
         n = len(starts)
         if _where_is_bool(where):
+            mask_len = where.shape[0]
+            if mask_len != n:
+                raise IndexError(
+                    f"boolean index did not match indexed array along axis 0; "
+                    f"size of axis is {n} but size of corresponding boolean axis is {mask_len}"
+                )
             idx = np.flatnonzero(where).astype(np.int64)
         else:
             idx = np.atleast_1d(np.asarray(np.arange(n)[where], dtype=np.int64))
