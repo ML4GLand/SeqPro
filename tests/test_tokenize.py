@@ -210,8 +210,9 @@ def test_tokenize_out_requires_int32():
 def test_tokenize_parallel_branch_matches_reference():
     """Inputs above the parallel threshold must match the gufunc reference,
     across writable/readonly, dense/ragged, and out= variants (regression guard
-    for the Rust parallel path)."""
+    for the parallel lut_gather path)."""
     from seqpro._numba import gufunc_tokenize
+    from seqpro._encoders import _TOKENIZE_PARALLEL_THRESHOLD as THRESH
 
     token_map = {"A": 0, "C": 1, "G": 2, "T": 3}
     src = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
@@ -220,7 +221,7 @@ def test_tokenize_parallel_branch_matches_reference():
     def ref(u8):
         return gufunc_tokenize(u8, src, tgt, np.int32(4))
 
-    n = 45_000  # comfortably above the Rust internal parallel threshold of 40_000
+    n = THRESH + 5000  # comfortably above the parallel threshold
     rng = np.random.default_rng(0)
     bases = np.frombuffer(b"ACGTN", dtype="S1")
     flat = bases[rng.integers(0, 5, n)]  # (n,) S1, writable, known + unknown
@@ -263,46 +264,42 @@ def test_tokenize_parallel_branch_matches_reference():
 
 def test_tokenize_parallel_override_forces_path(monkeypatch):
     """parallel= overrides the size heuristic in both directions, while staying
-    correct. Both dense and Ragged paths go through Rust _tokenize; we spy on
-    _tokenize to verify the parallel arg is forwarded in all cases."""
+    correct. Spying on the parallel kernel reveals which branch ran."""
     import seqpro._encoders as enc
+    from seqpro._encoders import _TOKENIZE_PARALLEL_THRESHOLD as THRESH
 
     token_map = {"A": 0, "C": 1, "G": 2, "T": 3}
     bases = np.frombuffer(b"ACGT", dtype="S1")
 
-    # Dense path: spy on _tokenize (Rust) to verify parallel arg is forwarded.
-    dense_calls: list[tuple] = []
-    real_tokenize = enc._tokenize
+    calls = {"n": 0}
+    real_lut = enc.lut_gather
 
-    def spy_tokenize(*args, **kwargs):
-        dense_calls.append(args + tuple(kwargs.items()))
-        return real_tokenize(*args, **kwargs)
+    def spy(*args, **kwargs):
+        calls["n"] += 1
+        return real_lut(*args, **kwargs)
 
-    monkeypatch.setattr(enc, "_tokenize", spy_tokenize)
+    monkeypatch.setattr(enc, "lut_gather", spy)
 
-    # small input, parallel=True -> _tokenize called with parallel=True despite being below thresh
+    # small input, parallel=True -> parallel kernel used despite being below thresh
     small = bases[np.zeros(8, dtype=int)]
+    assert small.size < THRESH
     res = sp.tokenize(small, token_map, unknown_token=-1, parallel=True)
-    assert len(dense_calls) == 1
-    # parallel=True is the 4th positional arg to _tokenize(u8, lut, out, parallel)
-    assert dense_calls[0][3] is True
+    assert calls["n"] == 1
     np.testing.assert_array_equal(res, np.zeros(8, dtype=np.int32))
 
-    # large input, parallel=False -> _tokenize called with parallel=False
-    dense_calls.clear()
-    large = bases[np.zeros(45_000, dtype=int)]
+    # large input, parallel=False -> single-threaded np.take, kernel not used
+    calls["n"] = 0
+    large = bases[np.zeros(THRESH + 1000, dtype=int)]
     res = sp.tokenize(large, token_map, unknown_token=-1, parallel=False)
-    assert len(dense_calls) == 1
-    assert dense_calls[0][3] is False
-    np.testing.assert_array_equal(res, np.zeros(45_000, dtype=np.int32))
+    assert calls["n"] == 0
+    np.testing.assert_array_equal(res, np.zeros(THRESH + 1000, dtype=np.int32))
 
-    # ragged honors the override too: small ragged forced parallel (goes through _tokenize)
-    dense_calls.clear()
+    # ragged honors the override too: small ragged forced parallel
+    calls["n"] = 0
     data = bases[np.zeros(8, dtype=int)]
     rag = Ragged.from_lengths(data, np.array([4, 4]))
     sp.tokenize(rag, token_map, unknown_token=-1, parallel=True)
-    assert len(dense_calls) == 1
-    assert dense_calls[0][3] is True
+    assert calls["n"] == 1
 
 
 def test_tokenize_parallel_true_rejects_noncontiguous_out():
