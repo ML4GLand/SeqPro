@@ -9,17 +9,11 @@ from ._numba import (
     gufunc_pad_both,
     gufunc_pad_left,
     gufunc_tokenize,
-    lut_gather,
 )
 from ._utils import SeqType, StrSeqType, array_slice, cast_seqs, check_axes
 from .alphabets._alphabets import AminoAlphabet, NucleotideAlphabet
 from .rag import Ragged
 from .seqpro import _tokenize  # type: ignore[missing-import]  # compiled Rust extension
-
-# Element-count crossover where the parallel LUT gather (~96µs thread-launch
-# floor) overtakes single-threaded np.take. Measured ~40k on a 14-core machine;
-# the curve is flat near the crossover so the exact value is not sensitive.
-_TOKENIZE_PARALLEL_THRESHOLD = 40_000
 
 
 def pad_seqs(
@@ -270,12 +264,11 @@ def tokenize(
         Output array to store the result in. Only valid for non-Ragged input.
         Must have dtype ``np.int32``; any other dtype raises ``TypeError``.
     parallel
-        Escape hatch overriding the size-based heuristic for choosing between the
-        single-threaded ``np.take`` and the parallel Numba LUT gather. ``None``
-        (default) uses the heuristic (parallel past
-        ``_TOKENIZE_PARALLEL_THRESHOLD`` elements); ``True`` forces the parallel
-        kernel; ``False`` forces single-threaded. ``parallel=True`` is
-        incompatible with a non-C-contiguous ``out`` and raises ``ValueError``.
+        Escape hatch overriding the Rust kernel's internal serial/parallel
+        heuristic. ``None`` (default) lets the Rust kernel choose; ``True``
+        forces the parallel kernel; ``False`` forces single-threaded.
+        ``parallel=True`` is incompatible with a non-C-contiguous ``out`` and
+        raises ``ValueError``.
 
     Returns
     -------
@@ -285,8 +278,8 @@ def tokenize(
     if out is not None and out.dtype != np.int32:
         raise TypeError(f"out must have dtype int32, got {out.dtype}.")
     # Build a 256-entry lookup table: lut[byte] -> token. Tokenizing is then a
-    # gather, lut[seqs]. Small inputs use single-threaded np.take; larger inputs
-    # use a parallel Numba gather that overtakes it past _TOKENIZE_PARALLEL_THRESHOLD.
+    # gather, lut[seqs]. The Rust kernel chooses serial vs. parallel by its own
+    # internal threshold; pass the parallel= override through unchanged.
     keys = np.array([c.encode("ascii") for c in token_map]).view(np.uint8)
     vals = np.array(list(token_map.values()), dtype=np.int32)
     lut = np.full(256, np.int32(unknown_token), dtype=np.int32)
@@ -297,14 +290,7 @@ def tokenize(
         n = len(seqs.lengths.ravel())
         trailing = seqs.data.shape[1:]
         u8 = seqs.data.view(np.uint8)
-        use_parallel = (
-            u8.size >= _TOKENIZE_PARALLEL_THRESHOLD if parallel is None else parallel
-        )
-        if use_parallel:
-            flat = np.empty(u8.shape, dtype=np.int32)
-            lut_gather(np.ascontiguousarray(u8).reshape(-1), lut, flat.reshape(-1))
-        else:
-            flat = np.take(lut, u8)
+        flat = _tokenize(u8, lut, None, parallel)
         return Ragged.from_offsets(flat, (n, None, *trailing), seqs.offsets)
 
     _seqs = cast_seqs(seqs)
