@@ -120,3 +120,9 @@ doc → implementation plan → build cycle.
 - **2026-06-19** — Epic kicked off. Locked the four design decisions above after
   surveying consumer shapes. Chose to decompose into 4 sequential specs rather
   than front-load all specs before proving the core model.
+- **2026-06-19** — Spec A landed: Rust-native single-level `Ragged` in
+  `rag/_core.py` (+ `_layout.py`, `_ingest.py`, `src/ragged.rs`), fully tested
+  against the awkward oracle. Public `seqpro.rag.Ragged` still points at the
+  awkward type; the swap + tokenize/translate adaptation are deferred to Spec D
+  (records to Spec B, nesting to Spec C). Confirmed string-leaf shape change
+  `(N, None) -> (N,)` for byte collections.
