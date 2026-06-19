@@ -3,6 +3,7 @@ import pytest
 
 import seqpro as sp
 from seqpro import AA  # standard AminoAlphabet
+from seqpro.rag import Ragged
 
 
 def _bio_like_translate(seq_str: str) -> str:
@@ -22,3 +23,13 @@ def test_translate_dense_pad_matches_reference(seq):
     got = sp.AA.translate(arr, length_axis=0)
     exp = _bio_like_translate(seq.upper())
     assert got.tobytes().decode() == exp
+
+
+def test_translate_ragged_bytes_pad():
+    # Two sequences, lengths 9 and 6 (both divisible by 3).
+    data = np.frombuffer(b"ATGAAATAAAAATAA", "S1")
+    offsets = np.array([0, 9, 15], dtype=np.int64)
+    rag = Ragged.from_offsets(data, (2, None), offsets)
+    got = sp.AA.translate(rag)
+    assert got.data.tobytes().decode() == _bio_like_translate("ATGAAATAAAAATAA")
+    np.testing.assert_array_equal(got.offsets, offsets // 3)

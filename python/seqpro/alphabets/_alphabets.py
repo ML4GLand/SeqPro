@@ -615,32 +615,33 @@ class AminoAlphabet:
         # nuc_bytes_flat shape: (total, *trailing) — translation broadcasts over trailing axes.
         total = nuc_bytes_flat.shape[0]
         trailing = nuc_bytes_flat.shape[1:]
-        if total > 0:
-            codons = np.lib.stride_tricks.sliding_window_view(
-                nuc_bytes_flat, codon_size, axis=0
+        translated_flat: NDArray[np.bytes_]
+        if total > 0 and not trailing:
+            translated_flat = self._rust_translate_flat(
+                nuc_bytes_flat.view(np.uint8), marker_byte
+            ).view("S1")
+        elif total > 0 and trailing:
+            # Multi-track bytes: translate each trailing column via the flat
+            # codon stride. Move codon axis contiguous per column.
+            n_codons = total // codon_size
+            cols = int(np.prod(trailing))
+            buf = np.ascontiguousarray(
+                np.moveaxis(nuc_bytes_flat.reshape(total, cols), 0, -1)
+            ).reshape(-1)  # (cols*total,)
+            aa = self._rust_translate_flat(buf.view(np.uint8), marker_byte)
+            aa = aa.view("S1").reshape(cols, n_codons)
+            translated_flat = np.ascontiguousarray(np.moveaxis(aa, 0, -1)).reshape(
+                n_codons, *trailing
             )
-            codons = codons[::codon_size]
-            # codons shape: (num_codons, *trailing, codon_size); codon axis last
-            codons_u1 = codons.view(np.uint8)
-            translated_flat: NDArray[np.bytes_]
-            if self.codon_lut is not None:
-                translated_flat = gufunc_translate_lut(
-                    codons_u1,
-                    self.codon_lut,
-                    marker_byte,
-                    axes=[-1, -1, (), ()],  # type: ignore
-                ).view("S1")  # (num_codons, *trailing)
-            else:
-                translated_flat = gufunc_translate(
-                    codons_u1,
-                    self.codon_array.view(np.uint8),
-                    self.aa_array.view(np.uint8),
-                    marker_byte,
-                    axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
-                ).view("S1")  # (num_codons, *trailing)
         else:
-            codons_u1 = np.empty((0, codon_size), dtype=np.uint8)
             translated_flat = np.empty((0, *trailing), dtype="S1")
+        codons_u1 = (
+            np.ascontiguousarray(nuc_bytes_flat.view(np.uint8)).reshape(
+                total // codon_size if total else 0, codon_size
+            )
+            if not trailing
+            else np.empty((0, codon_size), dtype=np.uint8)
+        )
 
         new_offsets = offsets // codon_size  # (n+1,) codon-indexed in translated_flat
 
