@@ -7,17 +7,14 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .._numba import (
-    _nb_drop_unknown_codons,
     _nb_find_stop_ends,
     _pack_codon_index,
     gufunc_complement_bytes,
-    gufunc_translate,
-    gufunc_translate_lut,
     ufunc_comp_dna,
 )
 from .._utils import SeqType, StrSeqType, cast_seqs, check_axes, is_dtype
 from ..rag import Ragged, is_rag_dtype
-from ..seqpro import _translate_bytes  # type: ignore[missing-import]  # compiled Rust extension
+from ..seqpro import _translate_bytes, _translate_drop  # type: ignore[missing-import]  # compiled Rust extension
 
 
 class NucleotideAlphabet:
@@ -534,22 +531,9 @@ class AminoAlphabet:
                     norm, window_shape=codon_size, axis=-1
                 )[:, ::codon_size]  # (n_seq, n_codons, codon_size)
                 codons_u1 = np.ascontiguousarray(codons.view(np.uint8))
-                if self.codon_lut is not None:
-                    translated = gufunc_translate_lut(
-                        codons_u1,
-                        self.codon_lut,
-                        marker_byte,
-                        axes=[-1, -1, (), ()],  # type: ignore
-                    )
-                else:
-                    translated = gufunc_translate(
-                        codons_u1,
-                        self.codon_array.view(np.uint8),
-                        self.aa_array.view(np.uint8),
-                        marker_byte,
-                        axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
-                    )
-                translated_flat = np.ascontiguousarray(translated.reshape(-1))
+                translated_flat = self._rust_translate_flat(  # pyrefly: ignore[bad-assignment]
+                    norm.reshape(-1).view(np.uint8), marker_byte
+                )
                 codons_flat = codons_u1.reshape(-1, codon_size)
                 offsets = np.arange(n_seq + 1, dtype=np.int64) * n_codons
                 # The drop criterion is per-nucleotide-byte validity, which
@@ -558,10 +542,10 @@ class AminoAlphabet:
                 # all-valid-nucleotide codon has a key) — true for the standard
                 # genetic code. A sparse custom alphabet could keep an unkeyed
                 # codon still carrying the marker byte.
-                out_u1, new_offsets = _nb_drop_unknown_codons(
-                    translated_flat,  # pyrefly: ignore[bad-argument-type]  # gufunc returns uint8 at runtime despite bytes_ inferred type
-                    codons_flat,
-                    offsets,
+                out_u1, new_offsets = _translate_drop(
+                    translated_flat,
+                    np.ascontiguousarray(codons_flat),
+                    offsets.astype(np.int64),
                     self._valid_upper_bytes,
                 )
                 return Ragged.from_offsets(
@@ -655,7 +639,7 @@ class AminoAlphabet:
                     "input (e.g. multi-track). Use a single-track Ragged."
                 )
             if total > 0:
-                out_u1, new_offsets = _nb_drop_unknown_codons(
+                out_u1, new_offsets = _translate_drop(
                     translated_flat.view(np.uint8),
                     np.ascontiguousarray(codons_u1),
                     new_offsets.astype(np.int64),

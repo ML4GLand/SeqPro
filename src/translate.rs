@@ -93,7 +93,7 @@ mod tests {
     }
 }
 
-use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -135,4 +135,49 @@ pub fn _translate_bytes<'py>(
         }
     }
     Ok(out.into_pyarray(py))
+}
+
+/// Compact a flat translated AA buffer, dropping codons containing a byte whose
+/// upper-cased form is not in `valid_upper`. `offsets` are codon-indexed.
+/// Mirrors Python `_nb_drop_unknown_codons`.
+#[pyfunction]
+pub fn _translate_drop<'py>(
+    py: Python<'py>,
+    translated: PyReadonlyArray1<'py, u8>,
+    codons: PyReadonlyArray2<'py, u8>,
+    offsets: PyReadonlyArray1<'py, i64>,
+    valid_upper: PyReadonlyArray1<'py, u8>,
+) -> PyResult<(&'py PyArray1<u8>, &'py PyArray1<i64>)> {
+    let translated = translated.as_slice()?;
+    let codons = codons.as_array(); // (n_codons, codon_size)
+    let offsets = offsets.as_slice()?;
+    let valid = valid_upper.as_slice()?;
+    let k = codons.shape()[1];
+    let n = offsets.len() - 1;
+
+    let mut out: Vec<u8> = Vec::with_capacity(translated.len());
+    let mut new_offsets: Vec<i64> = Vec::with_capacity(n + 1);
+    new_offsets.push(0);
+    for s in 0..n {
+        let start = offsets[s] as usize;
+        let end = offsets[s + 1] as usize;
+        for c in start..end {
+            let mut keep = true;
+            for j in 0..k {
+                let b = codons[[c, j]] & 0xDF;
+                if !valid.iter().any(|&v| v == b) {
+                    keep = false;
+                    break;
+                }
+            }
+            if keep {
+                out.push(translated[c]);
+            }
+        }
+        new_offsets.push(out.len() as i64);
+    }
+    Ok((
+        out.into_pyarray(py),
+        ndarray::Array1::from(new_offsets).into_pyarray(py),
+    ))
 }

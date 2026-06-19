@@ -59,3 +59,11 @@ def test_translate_ragged_bytes_pad_multitrack():
     # Each track column must match an independent reference translation.
     assert got.data[:, 0].tobytes().decode() == _bio_like_translate("ATGAAATAAAAAAAA")
     assert got.data[:, 1].tobytes().decode() == _bio_like_translate("GGTCCCTTTGGTGGT")
+
+
+def test_translate_dense_drop_removes_noncanonical():
+    # ATG (M), NNN (drop), TAA (*). Drop returns a Ragged even for dense input.
+    arr = np.frombuffer(b"ATGNNNTAA", "S1")
+    got = sp.AA.translate(arr, unknown="drop", length_axis=0)
+    assert got.data.tobytes().decode() == "M*"
+    np.testing.assert_array_equal(got.offsets, np.array([0, 2], dtype=np.int64))
