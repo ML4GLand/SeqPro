@@ -73,3 +73,15 @@ def validate_layout(layout: RaggedLayout[Any]) -> None:
             raise ValueError(
                 f"segment count {n_seg} != product of leading dims {expected}"
             )
+        try:
+            from seqpro.seqpro import _ragged_validate  # type: ignore[missing-import]  # compiled Rust extension
+
+            off = layout.offsets[0]
+            if off.ndim == 1:
+                _ragged_validate(
+                    np.ascontiguousarray(off, np.int64),
+                    int(layout.data.shape[0]),
+                    len(off) - 1,
+                )
+        except ImportError:  # pragma: no cover - fallback to pure-Python checks above
+            pass

@@ -307,3 +307,14 @@ def test_diff_string_shape_documented_change():
     assert old.shape == (3, None)
     np.testing.assert_array_equal(new.offsets, old.offsets)  # same byte offsets
     np.testing.assert_array_equal(new.data, old.data)
+
+
+def test_getitem_uses_rust_select_intarray():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    sub = rag[np.array([2, 0])]
+    np.testing.assert_array_equal(sub[0], np.array([5, 6, 7, 8, 9]))
+    np.testing.assert_array_equal(sub[1], np.array([0, 1, 2]))
+    # negative index: last row then first row
+    sub_neg = rag[np.array([-1, 0])]
+    np.testing.assert_array_equal(sub_neg[0], np.array([5, 6, 7, 8, 9]))
+    np.testing.assert_array_equal(sub_neg[1], np.array([0, 1, 2]))

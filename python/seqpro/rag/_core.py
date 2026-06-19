@@ -14,6 +14,10 @@ RDTYPE_co = TypeVar("RDTYPE_co", covariant=True)
 DTYPE_co = TypeVar("DTYPE_co", covariant=True)
 
 
+def _where_is_bool(where: Any) -> bool:
+    return isinstance(where, np.ndarray) and where.dtype == np.bool_
+
+
 def _build_layout(
     data: NDArray[Any], shape: tuple[int | None, ...], offsets: NDArray[Any]
 ) -> RaggedLayout[Any]:
@@ -164,8 +168,25 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 return row.tobytes()
             return row
         # slice / mask / int-array on the leading axis -> gather to (2, M)
-        sel_starts = np.ascontiguousarray(starts[where], dtype=OFFSET_TYPE)
-        sel_stops = np.ascontiguousarray(stops[where], dtype=OFFSET_TYPE)
+        n = len(starts)
+        if _where_is_bool(where):
+            idx = np.flatnonzero(where).astype(np.int64)
+        else:
+            idx = np.atleast_1d(np.asarray(np.arange(n)[where], dtype=np.int64))
+            # normalize negative indices so Rust kernel never receives negatives
+            idx = np.where(idx < 0, idx + n, idx)
+        try:
+            from seqpro.seqpro import _ragged_select  # type: ignore[missing-import]  # compiled Rust extension
+
+            sel_starts, sel_stops = _ragged_select(
+                np.ascontiguousarray(starts, np.int64),
+                np.ascontiguousarray(stops, np.int64),
+                idx,
+            )
+        except ImportError:  # pragma: no cover - fallback
+            sel_starts, sel_stops = starts[idx], stops[idx]
+        sel_starts = np.ascontiguousarray(sel_starts, dtype=OFFSET_TYPE)
+        sel_stops = np.ascontiguousarray(sel_stops, dtype=OFFSET_TYPE)
         new_offsets = np.stack([sel_starts, sel_stops], 0)
         if None not in self._layout.shape:  # string-leaf flat collection
             new_layout = RaggedLayout(
