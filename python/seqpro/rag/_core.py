@@ -42,13 +42,19 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     __slots__ = ("_layout",)
 
     def __init__(self, data: RaggedLayout[Any]):
+        if isinstance(data, Ragged):
+            data = data._layout
         if not isinstance(data, RaggedLayout):
-            raise TypeError(
-                "Ragged(...) currently accepts a RaggedLayout; "
-                "awkward/Ragged ingestion is added in a later task."
-            )
+            from ._ingest import layout_from_ak
+
+            data = layout_from_ak(data)
         validate_layout(data)
         self._layout = data
+
+    def to_ak(self):
+        from ._ingest import to_ak as _to_ak
+
+        return _to_ak(self)
 
     @staticmethod
     def from_offsets(

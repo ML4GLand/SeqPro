@@ -1,3 +1,4 @@
+import awkward as ak
 import numpy as np
 import pytest
 from seqpro.rag._utils import OFFSET_TYPE, lengths_to_offsets
@@ -222,3 +223,22 @@ def test_to_numpy_jagged_raises():
     rag = Ragged.from_lengths(np.arange(5, dtype=np.int32), np.array([3, 2]))
     with pytest.raises(ValueError):
         rag.to_numpy()
+
+
+def test_ingest_from_ak_numeric():
+    arr = ak.Array([[1, 2, 3], [4, 5]])
+    rag = Ragged(arr)
+    assert rag.shape == (2, None)
+    np.testing.assert_array_equal(rag.data, np.array([1, 2, 3, 4, 5]))
+    np.testing.assert_array_equal(rag.offsets, np.array([0, 3, 5]))
+
+
+def test_to_ak_roundtrips_values():
+    rag = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
+    np.testing.assert_array_equal(ak.to_numpy(ak.flatten(rag.to_ak())), rag.data)
+
+
+def test_ingest_record_raises_spec_b():
+    arr = ak.Array({"a": [[1, 2], [3]], "b": [[1.0, 2.0], [3.0]]})
+    with pytest.raises(NotImplementedError, match="Spec B"):
+        Ragged(arr)
