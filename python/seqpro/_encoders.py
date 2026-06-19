@@ -14,6 +14,7 @@ from ._numba import (
 from ._utils import SeqType, StrSeqType, array_slice, cast_seqs, check_axes
 from .alphabets._alphabets import AminoAlphabet, NucleotideAlphabet
 from .rag import Ragged
+from .seqpro import _tokenize  # type: ignore[missing-import]  # compiled Rust extension
 
 # Element-count crossover where the parallel LUT gather (~96µs thread-launch
 # floor) overtakes single-threaded np.take. Measured ~40k on a 14-core machine;
@@ -308,24 +309,15 @@ def tokenize(
 
     _seqs = cast_seqs(seqs)
     u8 = _seqs.view(np.uint8)
-    # A strided out= can't be flattened to a writable view, so the parallel
-    # kernel can't write through it; such out= always takes the np.take path
-    # (which handles arbitrary strides). parallel=True can't honor it -> error.
+    # A strided out= cannot be written through by the parallel kernel; reject
+    # the impossible combination early with a clear message (Rust also guards).
     out_blocks_parallel = out is not None and not out.flags.c_contiguous
     if parallel is True and out_blocks_parallel:
         raise ValueError(
             "parallel=True requires a C-contiguous out array, got a "
             "non-contiguous out. Use parallel=None/False or a contiguous out."
         )
-    if parallel is None:
-        use_parallel = u8.size >= _TOKENIZE_PARALLEL_THRESHOLD
-    else:
-        use_parallel = parallel
-    if not use_parallel or out_blocks_parallel:
-        return np.take(lut, u8, out=out)
-    result = out if out is not None else np.empty(u8.shape, dtype=np.int32)
-    lut_gather(np.ascontiguousarray(u8).reshape(-1), lut, result.reshape(-1))
-    return result
+    return _tokenize(u8, lut, out, parallel)
 
 
 @overload
