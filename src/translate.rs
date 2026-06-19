@@ -21,19 +21,29 @@ pub fn pack_codon_index(b0: u8, b1: u8, b2: u8) -> usize {
     (n0 << 4) | (n1 << 2) | n2
 }
 
-#[inline]
-fn is_acgt(b: u8) -> bool {
-    b == b'A' || b == b'C' || b == b'G' || b == b'T'
+const fn build_is_acgt() -> [bool; 256] {
+    let mut t = [false; 256];
+    t[b'A' as usize] = true; t[b'a' as usize] = true;
+    t[b'C' as usize] = true; t[b'c' as usize] = true;
+    t[b'G' as usize] = true; t[b'g' as usize] = true;
+    t[b'T' as usize] = true; t[b't' as usize] = true;
+    t
 }
+static IS_ACGT: [bool; 256] = build_is_acgt();
 
 /// Translate a single codon using the 64-entry LUT. Non-canonical → `marker`.
+/// Uses a 256-entry validity table (non-short-circuit `&`) to avoid branch mispredictions.
+/// The `& 0xDF` case fold is now implicit: IS_ACGT accepts both 'A'/'a' etc., and
+/// the index computation via `(b >> 1) & 3` produces the same result for upper/lower pairs.
 #[inline]
 fn translate_codon_lut(codon: &[u8], lut: &[u8], marker: u8) -> u8 {
-    let b0 = codon[0] & 0xDF;
-    let b1 = codon[1] & 0xDF;
-    let b2 = codon[2] & 0xDF;
-    if is_acgt(b0) && is_acgt(b1) && is_acgt(b2) {
-        lut[pack_codon_index(b0, b1, b2)]
+    let b0 = codon[0]; let b1 = codon[1]; let b2 = codon[2];
+    // non-short-circuit `&` avoids extra branches; 3 table lookups replace ~12 comparisons.
+    if IS_ACGT[b0 as usize] & IS_ACGT[b1 as usize] & IS_ACGT[b2 as usize] {
+        let idx = (((b0 >> 1) & 3) as usize) << 4
+                | (((b1 >> 1) & 3) as usize) << 2
+                |  ((b2 >> 1) & 3) as usize;
+        lut[idx]
     } else {
         marker
     }
@@ -80,11 +90,18 @@ pub fn translate_scan_into(
 }
 
 /// Parallel LUT translate using rayon. Bit-identical to `translate_lut_into`.
+/// Uses coarse-grained chunking (8192 codons per task) to amortize rayon scheduling
+/// overhead — per-codon parallelism has prohibitive dispatch cost at ~3 bytes/item.
 pub fn translate_lut_into_par(buf: &[u8], codon_size: usize, lut: &[u8], marker: u8, out: &mut [u8]) {
     use rayon::prelude::*;
-    out.par_iter_mut()
-        .zip(buf.par_chunks_exact(codon_size))
-        .for_each(|(o, codon)| *o = translate_codon_lut(codon, lut, marker));
+    const CHUNK_CODONS: usize = 8192;
+    out.par_chunks_mut(CHUNK_CODONS)
+        .zip(buf.par_chunks(CHUNK_CODONS * codon_size))
+        .for_each(|(out_chunk, buf_chunk)| {
+            for (o, codon) in out_chunk.iter_mut().zip(buf_chunk.chunks_exact(codon_size)) {
+                *o = translate_codon_lut(codon, lut, marker);
+            }
+        });
 }
 
 /// Parallel scan translate using rayon. Bit-identical to `translate_scan_into`.
