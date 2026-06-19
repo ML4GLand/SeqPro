@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+from typing import Any, Generic, Sequence, TypeVar
+
+import numpy as np
+from numpy.typing import NDArray
+
+from ._layout import RaggedLayout, validate_layout
+from ._utils import OFFSET_TYPE, lengths_to_offsets
+
+RDTYPE_co = TypeVar("RDTYPE_co", covariant=True)
+DTYPE_co = TypeVar("DTYPE_co", covariant=True)
+
+
+def _build_layout(
+    data: NDArray[Any], shape: tuple[int | None, ...], offsets: NDArray[Any]
+) -> RaggedLayout[Any]:
+    """Build a single-level layout, applying the string-leaf rule.
+
+    For bytes (S1) data with no trailing fixed dims, the single ragged axis is
+    the string itself -> collapse to a string leaf: drop the None, store the
+    supplied offsets as str_offsets.
+    """
+    is_bytes = data.dtype.kind == "S"
+    n_none = shape.count(None)
+    if is_bytes and n_none == 1:
+        rag_dim = shape.index(None)
+        trailing = shape[rag_dim + 1 :]
+        if all(d is not None for d in trailing) and len(trailing) == 0:
+            leaf_shape = shape[:rag_dim]
+            return RaggedLayout(
+                data=data, offsets=[], shape=leaf_shape, str_offsets=offsets
+            )
+    return RaggedLayout(data=data, offsets=[offsets], shape=shape)
+
+
+class Ragged(Generic[RDTYPE_co]):
+    """A non-branching ragged array with a single ragged axis (Spec A)."""
+
+    __slots__ = ("_layout",)
+
+    def __init__(self, data: RaggedLayout[Any]):
+        if not isinstance(data, RaggedLayout):
+            raise TypeError(
+                "Ragged(...) currently accepts a RaggedLayout; "
+                "awkward/Ragged ingestion is added in a later task."
+            )
+        validate_layout(data)
+        self._layout = data
+
+    @staticmethod
+    def from_offsets(
+        data: NDArray[Any], shape: tuple[int | None, ...], offsets: NDArray[Any]
+    ) -> "Ragged[Any]":
+        if shape.count(None) > 1:
+            raise NotImplementedError(
+                "nested raggedness (>1 ragged level) lands in Spec C"
+            )
+        if shape.count(None) == 0 and data.dtype.kind != "S":
+            raise ValueError("shape must have exactly one None ragged dimension")
+        offsets = np.ascontiguousarray(offsets, dtype=OFFSET_TYPE)
+        return Ragged(_build_layout(data, shape, offsets))
+
+    @staticmethod
+    def from_lengths(data: NDArray[Any], lengths: NDArray[Any]) -> "Ragged[Any]":
+        offsets = lengths_to_offsets(lengths)
+        trailing = data.shape[1:]
+        shape: tuple[int | None, ...] = (*lengths.shape, None, *trailing)
+        return Ragged.from_offsets(data, shape, offsets)
+
+    @classmethod
+    def empty(cls, shape: int | tuple[int | None, ...], dtype: Any) -> "Ragged[Any]":
+        if isinstance(shape, int):
+            shape = (shape,)
+        rag_dim = shape.index(None)
+        trailing = shape[rag_dim + 1 :]  # all int (only the ragged dim is None)
+        trailing_ints: list[int] = [d for d in trailing if d is not None]
+        empty_shape: Sequence[int] = [0, *trailing_ints] if trailing_ints else [0]
+        data: NDArray[Any] = (
+            np.empty(empty_shape, dtype=dtype) if trailing else np.empty(0, dtype=dtype)
+        )
+        leading = [d for d in shape[:rag_dim] if d is not None]
+        n_seg = int(np.prod(np.array(leading, dtype=np.int64))) if leading else 1
+        offsets: NDArray[Any] = np.zeros(n_seg + 1, dtype=OFFSET_TYPE)
+        return Ragged.from_offsets(data, shape, offsets)
+
+    @property
+    def data(self) -> NDArray[Any]:
+        return self._layout.data
+
+    @property
+    def offsets(self) -> NDArray[Any]:
+        if self._layout.offsets:
+            return self._layout.offsets[0]
+        assert self._layout.str_offsets is not None
+        return self._layout.str_offsets
+
+    @property
+    def shape(self) -> tuple[int | None, ...]:
+        return self._layout.shape
+
+    @property
+    def dtype(self) -> np.dtype[Any]:
+        return self._layout.data.dtype
+
+    @property
+    def rag_dim(self) -> int:
+        return self._layout.shape.index(None)
+
+    @property
+    def lengths(self) -> NDArray[Any]:
+        offsets = self.offsets
+        raw = np.diff(offsets) if offsets.ndim == 1 else np.diff(offsets, axis=0)
+        rag_dim = (
+            self._layout.shape.index(None)
+            if None in self._layout.shape
+            else len(self._layout.shape)
+        )
+        leading = self._layout.shape[:rag_dim]
+        reshape_arg: Sequence[int] = (
+            [d for d in leading if d is not None] if leading else [-1]
+        )
+        return raw.reshape(reshape_arg)

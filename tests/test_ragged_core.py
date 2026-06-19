@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from seqpro.rag._utils import OFFSET_TYPE, lengths_to_offsets
 from seqpro.rag._layout import RaggedLayout, validate_layout
+from seqpro.rag._core import Ragged
 
 
 def test_layout_numeric_basic():
@@ -51,3 +52,54 @@ def test_layout_rejects_segment_count_mismatch():
                 shape=(4, None),  # claims 4
             )
         )
+
+
+def test_from_lengths_numeric():
+    data = np.arange(10, dtype=np.int32)
+    lengths = np.array([3, 2, 5], dtype=np.uint32)
+    rag = Ragged.from_lengths(data, lengths)
+    assert rag.shape == (3, None)
+    assert rag.dtype == np.dtype(np.int32)
+    np.testing.assert_array_equal(rag.data, data)
+    np.testing.assert_array_equal(rag.offsets, np.array([0, 3, 5, 10]))
+    np.testing.assert_array_equal(rag.lengths, np.array([3, 2, 5]))
+    assert rag.rag_dim == 1
+
+
+def test_from_lengths_nested_leading_dims():
+    # case_nested from the legacy suite: leading (3,2,1), one ragged axis
+    data = np.arange(10)
+    lengths = np.array([[[1], [3]], [[2], [1]], [[1], [2]]])
+    rag = Ragged.from_lengths(data, lengths)
+    assert rag.shape == (3, 2, 1, None)
+    assert rag.rag_dim == 3
+    np.testing.assert_array_equal(rag.offsets, lengths_to_offsets(lengths))
+
+
+def test_from_lengths_string_collapses_to_leaf():
+    # NEW string-leaf behavior: flat collection -> (N,), not (N, None)
+    data = np.frombuffer(b"cathithere", dtype="S1")
+    lengths = np.array([3, 2, 5], dtype=np.uint32)
+    rag = Ragged.from_lengths(data, lengths)
+    assert rag.shape == (3,)
+    assert rag.dtype == np.dtype("S1")
+    np.testing.assert_array_equal(rag.offsets, np.array([0, 3, 5, 10]))
+
+
+def test_from_offsets_numeric_trailing_dim():
+    data = np.zeros((6, 4), dtype=np.int32)
+    rag = Ragged.from_offsets(data, (2, None, 4), np.array([0, 2, 6]))
+    assert rag.shape == (2, None, 4)
+    assert rag.data.shape == (6, 4)
+
+
+def test_empty():
+    rag = Ragged.empty((3, None), np.float64)
+    assert rag.shape == (3, None)
+    assert rag.data.size == 0
+    np.testing.assert_array_equal(rag.offsets, np.zeros(4, dtype=np.int64))
+
+
+def test_from_offsets_rejects_two_none():
+    with pytest.raises(NotImplementedError, match="Spec C"):
+        Ragged.from_offsets(np.arange(6), (2, None, None), np.array([0, 6]))
