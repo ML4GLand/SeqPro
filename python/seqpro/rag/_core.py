@@ -205,6 +205,74 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         result = getattr(ufunc, method)(*raw_inputs, **kwargs)
         return self._with_data(result)
 
+    def squeeze(
+        self, axis: int | tuple[int, ...] | None = None
+    ) -> "Ragged[Any] | NDArray[Any]":
+        if axis is None:
+            data = self._layout.data.squeeze()
+            shape = tuple(s for s in self._layout.shape if s != 1)
+            return Ragged(
+                RaggedLayout(
+                    data=data,
+                    offsets=self._layout.offsets,
+                    shape=shape,
+                    str_offsets=self._layout.str_offsets,
+                )
+            )
+        if isinstance(axis, int):
+            axis = (axis,)
+        ndim = len(self._layout.shape)
+        axis = tuple(a % ndim for a in axis)
+        for a in axis:
+            if self._layout.shape[a] != 1:
+                raise ValueError(
+                    f"cannot squeeze axis {a} of size {self._layout.shape[a]}"
+                )
+        shape = tuple(s for i, s in enumerate(self._layout.shape) if i not in axis)
+        data_trailing = tuple(
+            s
+            for i, s in enumerate(self._layout.shape)
+            if i not in axis and i > self.rag_dim
+        )
+        data = self._layout.data.reshape(len(self._layout.data), *data_trailing)
+        return Ragged(
+            RaggedLayout(
+                data=data,
+                offsets=self._layout.offsets,
+                shape=shape,
+                str_offsets=self._layout.str_offsets,
+            )
+        )
+
+    def reshape(self, *shape: int | None) -> "Ragged[Any]":
+        if len(shape) == 1 and isinstance(shape[0], tuple):
+            shape = shape[0]  # type: ignore[assignment]
+        rag_dim = shape.index(None)
+        new_rag_shape = shape[:rag_dim]
+        leading_ints = [s for s in self._layout.shape[: self.rag_dim] if s is not None]
+        n_rag = int(np.prod(np.array(leading_ints, dtype=np.int64)))
+        n_new = (
+            abs(
+                int(
+                    np.prod([s for s in new_rag_shape if s is not None], dtype=np.int64)
+                )
+            )
+            or 1
+        )
+        new_rag_shape = tuple(
+            s if s is not None and s >= 0 else n_rag // n_new for s in new_rag_shape
+        )
+        data = self._layout.data.reshape(len(self._layout.data), *shape[rag_dim + 1 :])
+        new_shape: tuple[int | None, ...] = (*new_rag_shape, None, *data.shape[1:])
+        return Ragged(
+            RaggedLayout(
+                data=data,
+                offsets=self._layout.offsets,
+                shape=new_shape,
+                str_offsets=self._layout.str_offsets,
+            )
+        )
+
     @property
     def lengths(self) -> NDArray[Any]:
         offsets = self.offsets

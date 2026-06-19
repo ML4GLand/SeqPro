@@ -176,3 +176,23 @@ def test_ufunc_reduce_raises():
     rag = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))
     with pytest.raises(NotImplementedError):
         np.add.reduce(rag)
+
+
+def test_squeeze_trailing_one():
+    data = np.arange(6, dtype=np.int64).reshape(6, 1)
+    rag = Ragged.from_offsets(
+        data, (3, None, 1), lengths_to_offsets(np.array([2, 1, 3]))
+    )
+    sq = rag.squeeze()
+    assert sq.shape == (3, None)
+    np.testing.assert_array_equal(sq.data, np.arange(6))
+
+
+def test_reshape_leading():
+    rag = Ragged.from_lengths(
+        np.arange(10, dtype=np.int64), np.array([2, 1, 3, 1, 2, 1])
+    )
+    re = rag.reshape(2, 3, None)
+    assert re.shape == (2, 3, None)
+    np.testing.assert_array_equal(re.data, np.arange(10))
+    assert re.offsets is rag.offsets
