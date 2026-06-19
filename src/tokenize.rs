@@ -5,9 +5,10 @@
 use rayon::prelude::*;
 
 /// Element count at or above which the rayon gather overtakes the serial one.
-/// Re-measured for rayon in `benches/` (Task 5); the old Numba constant (40k)
-/// was tuned to Numba's ~96µs thread-launch floor and does not transfer.
-pub const TOKENIZE_PARALLEL_THRESHOLD: usize = 40_000;
+/// Re-measured via end-to-end Python bench (Task 11) on a 14-core machine:
+/// crossover observed at ~30k–32k elements (serial wins below, parallel wins
+/// above). 32_000 is the first reliably faster point in the sweep.
+pub const TOKENIZE_PARALLEL_THRESHOLD: usize = 32_000;
 
 /// Serial gather. `out` and `seq` must have equal length; `lut` has 256 entries.
 pub fn gather_serial(seq: &[u8], lut: &[i32], out: &mut [i32]) {

@@ -3,6 +3,11 @@
 //! The standard ACGT/k=3 path uses a 64-entry LUT keyed by the same bit-hash
 //! as Python `_pack_codon_index`; non-standard alphabets use a linear scan.
 
+/// UNUSED / reserved. translate.rs has no rayon path — all kernels
+/// (`translate_lut_into`, `translate_scan_into`) are purely serial. No
+/// parallel-translate wiring is planned for this phase. This constant is
+/// retained as a placeholder for a future rayon port; do not use it to gate
+/// behaviour until a parallel kernel is actually implemented.
 pub const TRANSLATE_PARALLEL_THRESHOLD: usize = 40_000;
 
 /// Pack a canonical ACGT codon into a 6-bit LUT index `[0,63]`.
