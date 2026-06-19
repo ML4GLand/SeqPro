@@ -67,3 +67,14 @@ def test_translate_dense_drop_removes_noncanonical():
     got = sp.AA.translate(arr, unknown="drop", length_axis=0)
     assert got.data.tobytes().decode() == "M*"
     np.testing.assert_array_equal(got.offsets, np.array([0, 2], dtype=np.int64))
+
+
+def test_translate_ragged_truncate_stop():
+    data = np.frombuffer(b"ATGTAAAAAAAAAAA", "S1")  # seq0: M * K ; seq1: K K
+    offsets = np.array([0, 9, 15], dtype=np.int64)
+    rag = Ragged.from_offsets(data, (2, None), offsets)
+    got = sp.AA.translate(rag, truncate_stop=True)
+    # seq0 truncates after '*' -> "M*"; seq1 has no stop -> "KK"
+    # got[i] returns Python bytes for a 1D Ragged element
+    assert np.frombuffer(got[0], "S1").tobytes().decode() == "M*"
+    assert np.frombuffer(got[1], "S1").tobytes().decode() == "KK"

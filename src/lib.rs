@@ -16,6 +16,7 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tokenize::_tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(translate::_translate_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(translate::_translate_drop, m)?)?;
+    m.add_function(wrap_pyfunction!(translate::_translate_stop_ends, m)?)?;
     Ok(())
 }
 

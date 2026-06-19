@@ -137,6 +137,35 @@ pub fn _translate_bytes<'py>(
     Ok(out.into_pyarray(py))
 }
 
+/// First-stop truncation: per sequence, end = index just past the first
+/// `stop_char` in `[starts[i], full_ends[i])`, else `full_ends[i]`.
+/// Mirrors Python `_nb_find_stop_ends`.
+#[pyfunction]
+pub fn _translate_stop_ends<'py>(
+    py: Python<'py>,
+    data: PyReadonlyArray1<'py, u8>,
+    starts: PyReadonlyArray1<'py, i64>,
+    full_ends: PyReadonlyArray1<'py, i64>,
+    stop_char: u8,
+) -> PyResult<&'py PyArray1<i64>> {
+    let data = data.as_slice()?;
+    let starts = starts.as_slice()?;
+    let full_ends = full_ends.as_slice()?;
+    let n = starts.len();
+    let mut ends = vec![0i64; n];
+    for i in 0..n {
+        let mut end = full_ends[i];
+        for j in starts[i]..full_ends[i] {
+            if data[j as usize] == stop_char {
+                end = j + 1;
+                break;
+            }
+        }
+        ends[i] = end;
+    }
+    Ok(ndarray::Array1::from(ends).into_pyarray(py))
+}
+
 /// Compact a flat translated AA buffer, dropping codons containing a byte whose
 /// upper-cased form is not in `valid_upper`. `offsets` are codon-indexed.
 /// Mirrors Python `_nb_drop_unknown_codons`.

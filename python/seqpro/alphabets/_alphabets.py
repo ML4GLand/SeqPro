@@ -7,14 +7,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .._numba import (
-    _nb_find_stop_ends,
     _pack_codon_index,
     gufunc_complement_bytes,
     ufunc_comp_dna,
 )
 from .._utils import SeqType, StrSeqType, cast_seqs, check_axes, is_dtype
 from ..rag import Ragged, is_rag_dtype
-from ..seqpro import _translate_bytes, _translate_drop  # type: ignore[missing-import]  # compiled Rust extension
+from ..seqpro import _translate_bytes, _translate_drop, _translate_stop_ends  # type: ignore[missing-import]  # compiled Rust extension
 
 
 class NucleotideAlphabet:
@@ -652,7 +651,7 @@ class AminoAlphabet:
         if truncate_stop:
             starts = new_offsets[:-1].astype(np.int64)
             full_ends = new_offsets[1:].astype(np.int64)
-            ends = _nb_find_stop_ends(
+            ends = _translate_stop_ends(
                 translated_flat.view(np.uint8), starts, full_ends, np.uint8(ord("*"))
             )
             out_offsets = np.stack(
