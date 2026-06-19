@@ -428,46 +428,72 @@ def test_translate_ragged_fallback_for_nonstandard_alphabet():
 # alphabet (and conversely that the scan is used for non-standard ones). Without
 # them, a regression that silently routed every call through the linear scan
 # would still pass every correctness test, because the scan is correct, just slow.
+# Since translation now routes through the Rust _translate_bytes kernel (which
+# dispatches internally), we monkeypatch _translate_bytes to detect which args
+# are supplied: lut= means LUT path, keys=/values= means scan path.
 
 
 def test_dense_standard_alphabet_uses_lut_not_scan(monkeypatch):
-    """Standard-alphabet dense path must hit the LUT kernel, never the scan."""
+    """Standard-alphabet dense path must hit the Rust LUT path, never the scan."""
     import seqpro.alphabets._alphabets as alpha_mod
+    from seqpro import seqpro as _ext
 
-    def _boom(*args, **kwargs):
-        raise AssertionError("linear scan was used instead of the LUT")
+    calls: list[tuple] = []
+    orig = _ext._translate_bytes
 
-    monkeypatch.setattr(alpha_mod, "gufunc_translate", _boom)
+    def _spy(*args, **kwargs):
+        # args: (buf, codon_size, lut, keys, values, marker); lut is args[2]
+        calls.append(args)
+        return orig(*args, **kwargs)
+
+    monkeypatch.setattr(alpha_mod, "_translate_bytes", _spy)
     out = sp.AA.translate("ATGAAA", length_axis=-1).view("S1")
     np.testing.assert_array_equal(out, sp.cast_seqs(str(translate("ATGAAA"))))
+    # lut is positional arg 2; for the LUT path it must be a non-None array
+    assert any(len(c) > 2 and c[2] is not None for c in calls), "LUT path was not used"
 
 
 def test_ragged_standard_alphabet_uses_lut_not_scan(monkeypatch):
-    """Standard-alphabet Ragged path must hit the LUT kernel, never the scan."""
+    """Standard-alphabet Ragged path must hit the Rust LUT path, never the scan."""
     import seqpro.alphabets._alphabets as alpha_mod
+    from seqpro import seqpro as _ext
 
-    def _boom(*args, **kwargs):
-        raise AssertionError("linear scan was used instead of the LUT")
+    calls: list[tuple] = []
+    orig = _ext._translate_bytes
 
-    monkeypatch.setattr(alpha_mod, "gufunc_translate", _boom)
+    def _spy(*args, **kwargs):
+        calls.append(args)
+        return orig(*args, **kwargs)
+
+    monkeypatch.setattr(alpha_mod, "_translate_bytes", _spy)
     rag = _make_ragged_bytes("ATGAAA")
     out = sp.AA.translate(rag)
     np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("MK"))
+    assert any(len(c) > 2 and c[2] is not None for c in calls), "LUT path was not used"
 
 
 def test_nonstandard_alphabet_uses_scan_not_lut(monkeypatch):
-    """A non-standard (codon_lut=None) alphabet must use the scan, never the LUT."""
+    """A non-standard (codon_lut=None) alphabet must use the Rust scan path."""
     import seqpro.alphabets._alphabets as alpha_mod
+    from seqpro import seqpro as _ext
 
-    def _boom(*args, **kwargs):
-        raise AssertionError("LUT kernel was used for a non-standard alphabet")
+    calls: list[tuple] = []
+    orig = _ext._translate_bytes
 
-    monkeypatch.setattr(alpha_mod, "gufunc_translate_lut", _boom)
+    def _spy(*args, **kwargs):
+        calls.append(args)
+        return orig(*args, **kwargs)
+
+    monkeypatch.setattr(alpha_mod, "_translate_bytes", _spy)
     alpha = sp.AminoAlphabet(["AUG", "UAA"], ["M", "*"])
     data = np.array(list("AUGUAA"), dtype="S1")
     rag = Ragged.from_lengths(data, np.array([6]))
     out = alpha.translate(rag)
     np.testing.assert_array_equal(_rag_bytes_to_array(out[0]), sp.cast_seqs("M*"))
+    # keys is positional arg 3; for the scan path lut (arg 2) must be None and keys non-None
+    assert any(len(c) > 3 and c[2] is None and c[3] is not None for c in calls), (
+        "scan path was not used"
+    )
 
 
 # --- additional validate coverage ---

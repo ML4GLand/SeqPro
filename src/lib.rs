@@ -1,5 +1,6 @@
 pub mod kmer_encode;
 pub mod kshuffle;
+pub mod translate;
 #[cfg(test)]
 #[allow(dead_code, clippy::all)]
 mod kshuffle_ref;
@@ -13,6 +14,11 @@ use pyo3::prelude::*;
 #[pymodule]
 fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_k_shuffle, m)?)?;
+    m.add_function(wrap_pyfunction!(translate::_translate_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(translate::_translate_drop, m)?)?;
+    m.add_function(wrap_pyfunction!(translate::_translate_stop_ends, m)?)?;
+    m.add_function(wrap_pyfunction!(translate::_translate_ohe, m)?)?;
+    m.add_function(wrap_pyfunction!(translate::_translate_ohe_drop, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_validate, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_select, m)?)?;
     Ok(())

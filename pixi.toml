@@ -55,6 +55,7 @@ narwhals = "==2.20.0"
 
 [feature.dev.pypi-dependencies]
 pyranges = "==0.1.3"
+pytest-benchmark = ">=4.0"
 
 [feature.dev.tasks]
 prek = "prek install --hook-type commit-msg"

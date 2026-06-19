@@ -7,16 +7,19 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .._numba import (
-    _nb_drop_unknown_codons,
-    _nb_find_stop_ends,
     _pack_codon_index,
     gufunc_complement_bytes,
-    gufunc_translate,
-    gufunc_translate_lut,
     ufunc_comp_dna,
 )
-from .._utils import SeqType, StrSeqType, array_slice, cast_seqs, check_axes, is_dtype
+from .._utils import SeqType, StrSeqType, cast_seqs, check_axes, is_dtype
 from ..rag import Ragged, is_rag_dtype
+from ..seqpro import (  # type: ignore[missing-import]  # compiled Rust extension
+    _translate_bytes,
+    _translate_drop,
+    _translate_stop_ends,
+    _translate_ohe,
+    _translate_ohe_drop,
+)
 
 
 class NucleotideAlphabet:
@@ -396,6 +399,24 @@ class AminoAlphabet:
                 "(exactly one 1 per nucleotide position)."
             )
 
+    def _rust_translate_flat(
+        self, nuc_u8: NDArray[np.uint8], marker_byte: np.uint8
+    ) -> NDArray[np.uint8]:
+        """Translate a contiguous 1-D nucleotide u8 buffer to a flat AA u8 buffer.
+
+        Dispatches to the Rust LUT path for the standard ACGT/k=3 alphabet and
+        the Rust linear-scan path otherwise. One AA byte per codon.
+        """
+        codon_size = self.codon_array.shape[-1]
+        flat = np.ascontiguousarray(nuc_u8).reshape(-1)
+        if self.codon_lut is not None:
+            return _translate_bytes(
+                flat, codon_size, self.codon_lut, None, None, int(marker_byte)
+            )
+        keys = np.ascontiguousarray(self.codon_array.view(np.uint8)).reshape(-1)
+        values = np.ascontiguousarray(self.aa_array.view(np.uint8)).reshape(-1)
+        return _translate_bytes(flat, codon_size, None, keys, values, int(marker_byte))
+
     @overload
     def translate(
         self,
@@ -508,29 +529,25 @@ class AminoAlphabet:
                 # rest into the batch dim. Each row becomes one Ragged sequence.
                 norm = np.moveaxis(seqs, length_axis, -1)
                 seq_len = norm.shape[-1]
-                norm = np.ascontiguousarray(norm.reshape(-1, seq_len))
-                n_seq = norm.shape[0]
                 n_codons = seq_len // codon_size
+                n_seq = int(np.prod(norm.shape[:-1])) if norm.ndim > 1 else 1
+                if seqs.size == 0:
+                    # Empty input: reshape(-1, 0) and sliding_window_view both
+                    # choke on zero-length rows. unknown="drop" always returns a
+                    # Ragged, so return an empty one directly.
+                    return Ragged.from_offsets(
+                        np.empty(0, dtype="S1"),
+                        (n_seq, None),
+                        np.zeros(n_seq + 1, dtype=np.int64),
+                    )
+                norm = np.ascontiguousarray(norm.reshape(-1, seq_len))
                 codons = np.lib.stride_tricks.sliding_window_view(
                     norm, window_shape=codon_size, axis=-1
                 )[:, ::codon_size]  # (n_seq, n_codons, codon_size)
                 codons_u1 = np.ascontiguousarray(codons.view(np.uint8))
-                if self.codon_lut is not None:
-                    translated = gufunc_translate_lut(
-                        codons_u1,
-                        self.codon_lut,
-                        marker_byte,
-                        axes=[-1, -1, (), ()],  # type: ignore
-                    )
-                else:
-                    translated = gufunc_translate(
-                        codons_u1,
-                        self.codon_array.view(np.uint8),
-                        self.aa_array.view(np.uint8),
-                        marker_byte,
-                        axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
-                    )
-                translated_flat = np.ascontiguousarray(translated.reshape(-1))
+                translated_flat = self._rust_translate_flat(  # pyrefly: ignore[bad-assignment]
+                    norm.reshape(-1).view(np.uint8), marker_byte
+                )
                 codons_flat = codons_u1.reshape(-1, codon_size)
                 offsets = np.arange(n_seq + 1, dtype=np.int64) * n_codons
                 # The drop criterion is per-nucleotide-byte validity, which
@@ -539,35 +556,26 @@ class AminoAlphabet:
                 # all-valid-nucleotide codon has a key) — true for the standard
                 # genetic code. A sparse custom alphabet could keep an unkeyed
                 # codon still carrying the marker byte.
-                out_u1, new_offsets = _nb_drop_unknown_codons(
-                    translated_flat,  # pyrefly: ignore[bad-argument-type]  # gufunc returns uint8 at runtime despite bytes_ inferred type
-                    codons_flat,
-                    offsets,
+                out_u1, new_offsets = _translate_drop(
+                    translated_flat,
+                    np.ascontiguousarray(codons_flat),
+                    offsets.astype(np.int64),
                     self._valid_upper_bytes,
                 )
                 return Ragged.from_offsets(
                     out_u1.view("S1"), (n_seq, None), new_offsets
                 )
 
-            # pad: shape-preserving dense output
-            codons = np.lib.stride_tricks.sliding_window_view(
-                seqs, window_shape=codon_size, axis=length_axis
-            )
-            codons = array_slice(codons, length_axis, slice(None, None, codon_size))
-            if self.codon_lut is not None:
-                return gufunc_translate_lut(
-                    codons.view(np.uint8),
-                    self.codon_lut,
-                    marker_byte,
-                    axes=[-1, -1, (), ()],  # type: ignore
-                ).view("S1")
-            return gufunc_translate(
-                codons.view(np.uint8),
-                self.codon_array.view(np.uint8),
-                self.aa_array.view(np.uint8),
-                marker_byte,
-                axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
-            ).view("S1")
+            # pad: shape-preserving dense output. Move length axis last so codons
+            # are contiguous per row, translate the flat buffer, reshape back.
+            norm = np.moveaxis(seqs, length_axis, -1)
+            lead_shape = norm.shape[:-1]
+            seq_len = norm.shape[-1]
+            n_codons = seq_len // codon_size
+            flat = np.ascontiguousarray(norm.reshape(-1)).view(np.uint8)
+            aa = self._rust_translate_flat(flat, marker_byte)  # (total_codons,)
+            aa = aa.view("S1").reshape(*lead_shape, n_codons)
+            return np.moveaxis(aa, -1, length_axis)
 
         # --- Ragged path ---
         # Pack to ListOffsetArray so .data and .offsets are contiguous and valid.
@@ -586,65 +594,111 @@ class AminoAlphabet:
 
         n = len(lengths)
 
-        # Decode OHE → bytes if needed. seqs.data is (total, n_nuc) for OHE or (total,) for bytes.
         if is_ohe:
             if nuc_alphabet is None:
                 raise ValueError("nuc_alphabet is required for OHE Ragged input.")
             if validate:
                 self._check_ohe_rows(seqs.data, len(nuc_alphabet.array))
-            nuc_bytes_flat: NDArray[np.bytes_] = nuc_alphabet.decode_ohe(  # type: ignore[union-attr]
-                seqs.data, ohe_axis=-1
-            )
-        else:
-            nuc_bytes_flat = seqs.data
-            if validate:
-                self._check_nuc_bytes(nuc_bytes_flat.view(np.uint8))
+            n_aa = len(self.aa_array)
+            nuc_bytes = nuc_alphabet.array.view(np.uint8)
+            aa_bytes = self.aa_array.view(np.uint8)
+            if self.codon_lut is not None:
+                lut_arg, keys_arg, values_arg = self.codon_lut, None, None
+            else:
+                lut_arg = None
+                keys_arg = np.ascontiguousarray(
+                    self.codon_array.view(np.uint8)
+                ).reshape(-1)
+                values_arg = np.ascontiguousarray(self.aa_array.view(np.uint8)).reshape(
+                    -1
+                )
+            if is_drop:
+                ohe_flat, new_offsets = _translate_ohe_drop(
+                    seqs.data,
+                    nuc_bytes,
+                    codon_size,
+                    self._valid_upper_bytes,
+                    offsets.astype(np.int64),
+                    lut_arg,
+                    keys_arg,
+                    values_arg,
+                    aa_bytes,
+                    int(marker_byte),
+                )
+            else:
+                ohe_flat = _translate_ohe(
+                    seqs.data,
+                    nuc_bytes,
+                    codon_size,
+                    lut_arg,
+                    keys_arg,
+                    values_arg,
+                    aa_bytes,
+                    int(marker_byte),
+                )
+                new_offsets = offsets // codon_size
+            if truncate_stop:
+                # Stop '*' is a real AA row; find its one-hot column and the first
+                # row set there (applied AFTER drop-compaction, matching the bytes
+                # path's drop-then-truncate order).
+                stop_col = int(np.where(aa_bytes == ord("*"))[0][0])
+                stop_rows = (ohe_flat[:, stop_col] == 1).view(np.uint8)
+                starts = new_offsets[:-1].astype(np.int64)
+                full_ends = new_offsets[1:].astype(np.int64)
+                ends = _translate_stop_ends(stop_rows, starts, full_ends, np.uint8(1))
+                out_offsets = np.stack([starts, ends])
+            else:
+                out_offsets = new_offsets
+            return Ragged.from_offsets(ohe_flat, (n, None, n_aa), out_offsets)
+
+        # --- bytes-only path ---
+        nuc_bytes_flat = seqs.data
+        if validate:
+            self._check_nuc_bytes(nuc_bytes_flat.view(np.uint8))
 
         # Translate the entire flat buffer in one vectorized call. This is valid because
         # translation is invariant to splitting/concatenation when all lengths % codon_size == 0.
         # nuc_bytes_flat shape: (total, *trailing) — translation broadcasts over trailing axes.
         total = nuc_bytes_flat.shape[0]
         trailing = nuc_bytes_flat.shape[1:]
-        if total > 0:
-            codons = np.lib.stride_tricks.sliding_window_view(
-                nuc_bytes_flat, codon_size, axis=0
+        translated_flat: NDArray[np.bytes_]
+        if total > 0 and not trailing:
+            translated_flat = self._rust_translate_flat(
+                nuc_bytes_flat.view(np.uint8), marker_byte
+            ).view("S1")
+        elif total > 0 and trailing:
+            # Multi-track bytes: translate each trailing column via the flat
+            # codon stride. Move codon axis contiguous per column.
+            n_codons = total // codon_size
+            cols = int(np.prod(trailing))
+            buf = np.ascontiguousarray(
+                np.moveaxis(nuc_bytes_flat.reshape(total, cols), 0, -1)
+            ).reshape(-1)  # (cols*total,)
+            aa = self._rust_translate_flat(buf.view(np.uint8), marker_byte)
+            aa = aa.view("S1").reshape(cols, n_codons)
+            translated_flat = np.ascontiguousarray(np.moveaxis(aa, 0, -1)).reshape(
+                n_codons, *trailing
             )
-            codons = codons[::codon_size]
-            # codons shape: (num_codons, *trailing, codon_size); codon axis last
-            codons_u1 = codons.view(np.uint8)
-            translated_flat: NDArray[np.bytes_]
-            if self.codon_lut is not None:
-                translated_flat = gufunc_translate_lut(
-                    codons_u1,
-                    self.codon_lut,
-                    marker_byte,
-                    axes=[-1, -1, (), ()],  # type: ignore
-                ).view("S1")  # (num_codons, *trailing)
-            else:
-                translated_flat = gufunc_translate(
-                    codons_u1,
-                    self.codon_array.view(np.uint8),
-                    self.aa_array.view(np.uint8),
-                    marker_byte,
-                    axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
-                ).view("S1")  # (num_codons, *trailing)
         else:
-            codons_u1 = np.empty((0, codon_size), dtype=np.uint8)
             translated_flat = np.empty((0, *trailing), dtype="S1")
+        codons_u1 = (
+            np.ascontiguousarray(nuc_bytes_flat.view(np.uint8)).reshape(
+                total // codon_size if total else 0, codon_size
+            )
+            if not trailing
+            else np.empty((0, codon_size), dtype=np.uint8)
+        )
 
         new_offsets = offsets // codon_size  # (n+1,) codon-indexed in translated_flat
 
         if is_drop:
-            # For OHE Ragged the nucleotide-alphabet trailing axis was consumed
-            # by decode_ohe, so translated_flat / codons_u1 are 1-D along the
-            # codon axis. (Dense drop is handled in the non-Ragged branch.)
             if trailing:
                 raise ValueError(
                     "unknown='drop' is not supported for dense-trailing Ragged "
                     "input (e.g. multi-track). Use a single-track Ragged."
                 )
             if total > 0:
-                out_u1, new_offsets = _nb_drop_unknown_codons(
+                out_u1, new_offsets = _translate_drop(
                     translated_flat.view(np.uint8),
                     np.ascontiguousarray(codons_u1),
                     new_offsets.astype(np.int64),
@@ -657,7 +711,7 @@ class AminoAlphabet:
         if truncate_stop:
             starts = new_offsets[:-1].astype(np.int64)
             full_ends = new_offsets[1:].astype(np.int64)
-            ends = _nb_find_stop_ends(
+            ends = _translate_stop_ends(
                 translated_flat.view(np.uint8), starts, full_ends, np.uint8(ord("*"))
             )
             out_offsets = np.stack(
@@ -669,16 +723,7 @@ class AminoAlphabet:
         else:
             out_offsets = new_offsets  # 1D — ListOffsetArray
 
-        if is_ohe:
-            # OHE input: trailing was the OHE alphabet axis (consumed by decode_ohe),
-            # so translated_flat has no trailing — re-encode and reshape.
-            n_aa = len(self.aa_array)
-            ohe_flat = self.ohe(translated_flat).reshape(-1, n_aa)
-            return Ragged.from_offsets(ohe_flat, (n, None, n_aa), out_offsets)
-        else:
-            return Ragged.from_offsets(
-                translated_flat, (n, None, *trailing), out_offsets
-            )
+        return Ragged.from_offsets(translated_flat, (n, None, *trailing), out_offsets)
 
     def ohe(self, seqs: StrSeqType) -> NDArray[np.uint8]:
         """One hot encode an amino acid sequence."""
