@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Generic, Sequence, TypeVar
+from typing import Any, Generic, Sequence, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -170,6 +170,61 @@ class Ragged(Generic[RDTYPE_co]):
                 str_offsets=self._layout.str_offsets,
             )
         return Ragged(new_layout)
+
+    def _with_data(self, new_data: NDArray[Any]) -> "Ragged[Any]":
+        return Ragged(
+            RaggedLayout(
+                data=new_data,
+                offsets=self._layout.offsets,
+                shape=self._layout.shape,
+                str_offsets=self._layout.str_offsets,
+            )
+        )
+
+    def __array_ufunc__(
+        self, ufunc: Any, method: str, *inputs: Any, **kwargs: Any
+    ) -> "Ragged[Any]":
+        if method != "__call__":
+            raise NotImplementedError(
+                f"Ragged supports only element-wise ufuncs, not method={method!r}"
+            )
+        ref_offsets = self.offsets
+        raw_inputs = []
+        for x in inputs:
+            if isinstance(x, Ragged):
+                if x.offsets is not ref_offsets and not np.array_equal(
+                    x.offsets, ref_offsets
+                ):
+                    raise ValueError("ufunc operands must share offsets")
+                raw_inputs.append(x.data)
+            else:
+                raw_inputs.append(x)
+        result = getattr(ufunc, method)(*raw_inputs, **kwargs)
+        return self._with_data(result)
+
+    def __add__(self, other: Any) -> "Ragged[Any]":
+        return np.add(cast(Any, self), other)
+
+    def __radd__(self, other: Any) -> "Ragged[Any]":
+        return np.add(other, cast(Any, self))
+
+    def __mul__(self, other: Any) -> "Ragged[Any]":
+        return np.multiply(cast(Any, self), other)
+
+    def __rmul__(self, other: Any) -> "Ragged[Any]":
+        return np.multiply(other, cast(Any, self))
+
+    def __sub__(self, other: Any) -> "Ragged[Any]":
+        return np.subtract(cast(Any, self), other)
+
+    def __rsub__(self, other: Any) -> "Ragged[Any]":
+        return np.subtract(other, cast(Any, self))
+
+    def __truediv__(self, other: Any) -> "Ragged[Any]":
+        return np.true_divide(cast(Any, self), other)
+
+    def __rtruediv__(self, other: Any) -> "Ragged[Any]":
+        return np.true_divide(other, cast(Any, self))
 
     @property
     def lengths(self) -> NDArray[Any]:

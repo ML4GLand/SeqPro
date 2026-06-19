@@ -149,3 +149,30 @@ def test_getitem_mask_returns_ragged():
     sub = rag[np.array([True, False, True])]
     np.testing.assert_array_equal(sub[0], np.array([0, 1, 2]))
     np.testing.assert_array_equal(sub[1], np.array([5, 6, 7, 8, 9]))
+
+
+def test_ufunc_scalar_mul():
+    rag = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))
+    out = rag * 2.0
+    assert isinstance(out, Ragged)
+    np.testing.assert_array_equal(out.data, np.arange(6) * 2.0)
+    assert out.offsets is rag.offsets
+
+
+def test_ufunc_unary():
+    rag = Ragged.from_lengths(np.arange(1, 7, dtype=np.float64), np.array([2, 1, 3]))
+    out = np.log1p(rag)
+    np.testing.assert_allclose(out.data, np.log1p(np.arange(1, 7)))
+
+
+def test_ufunc_two_ragged_shared_offsets():
+    a = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))
+    b = a.view(np.float64)
+    out = a + b
+    np.testing.assert_array_equal(out.data, a.data * 2)
+
+
+def test_ufunc_reduce_raises():
+    rag = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))
+    with pytest.raises(NotImplementedError):
+        np.add.reduce(rag)
