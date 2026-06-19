@@ -1,6 +1,6 @@
 [project]
 name = "seqpro"
-version = "0.15.2"
+version = "0.16.0"
 authors = [
     { name = "David Laub", email = "dlaub@ucsd.edu" },
     { name = "Adam Klie", email = "aklie@ucsd.edu" },
@@ -68,3 +68,9 @@ preset = "strict"
 # Resolve third-party imports from the pixi `default` env rather than a stale
 # auto-detected `.venv` (which lacks attrs, polars, matplotlib, ...).
 python-interpreter = ".pixi/envs/default/bin/python"
+
+[tool.pyrefly.errors]
+# numpy's integer stubs differ by OS (e.g. np.int64 vs intp), so a per-line
+# suppression that is required on macOS reads as "unused" on linux-64 (CI) and
+# vice-versa. Don't fail the build over unused suppressions; they are harmless.
+unused-ignore = false

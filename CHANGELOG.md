@@ -1,3 +1,9 @@
+## 0.16.0 (2026-06-14)
+
+### Feat
+
+- **tokenize**: add parallel escape hatch overriding the size heuristic
+
 ## 0.15.2 (2026-06-13)
 
 ### Fix

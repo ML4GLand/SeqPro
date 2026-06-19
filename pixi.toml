@@ -28,7 +28,10 @@ typecheck = "pyrefly check python"
 python = "<3.14"
 uv = "*"
 maturin = "*"
-pytest = "*"
+# pytest 9 changed pytest's internal IdMaker signature, which breaks the latest
+# pytest-cases (3.10.1): `IdMaker.__init__() takes 7 positional arguments but 8
+# were given`. Pin to <9 until pytest-cases ships a pytest-9-compatible release.
+pytest = "<9"
 pytest-cases = "*"
 biopython = "*"
 hypothesis = "*"
