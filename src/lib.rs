@@ -14,6 +14,7 @@ use pyo3::prelude::*;
 fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_k_shuffle, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize::_tokenize, m)?)?;
+    m.add_function(wrap_pyfunction!(translate::_translate_bytes, m)?)?;
     Ok(())
 }
 

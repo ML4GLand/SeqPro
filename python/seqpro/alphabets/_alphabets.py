@@ -15,8 +15,9 @@ from .._numba import (
     gufunc_translate_lut,
     ufunc_comp_dna,
 )
-from .._utils import SeqType, StrSeqType, array_slice, cast_seqs, check_axes, is_dtype
+from .._utils import SeqType, StrSeqType, cast_seqs, check_axes, is_dtype
 from ..rag import Ragged, is_rag_dtype
+from ..seqpro import _translate_bytes  # type: ignore[missing-import]  # compiled Rust extension
 
 
 class NucleotideAlphabet:
@@ -396,6 +397,24 @@ class AminoAlphabet:
                 "(exactly one 1 per nucleotide position)."
             )
 
+    def _rust_translate_flat(
+        self, nuc_u8: NDArray[np.uint8], marker_byte: np.uint8
+    ) -> NDArray[np.uint8]:
+        """Translate a contiguous 1-D nucleotide u8 buffer to a flat AA u8 buffer.
+
+        Dispatches to the Rust LUT path for the standard ACGT/k=3 alphabet and
+        the Rust linear-scan path otherwise. One AA byte per codon.
+        """
+        codon_size = self.codon_array.shape[-1]
+        flat = np.ascontiguousarray(nuc_u8).reshape(-1)
+        if self.codon_lut is not None:
+            return _translate_bytes(
+                flat, codon_size, self.codon_lut, None, None, int(marker_byte)
+            )
+        keys = np.ascontiguousarray(self.codon_array.view(np.uint8)).reshape(-1)
+        values = np.ascontiguousarray(self.aa_array.view(np.uint8)).reshape(-1)
+        return _translate_bytes(flat, codon_size, None, keys, values, int(marker_byte))
+
     @overload
     def translate(
         self,
@@ -549,25 +568,16 @@ class AminoAlphabet:
                     out_u1.view("S1"), (n_seq, None), new_offsets
                 )
 
-            # pad: shape-preserving dense output
-            codons = np.lib.stride_tricks.sliding_window_view(
-                seqs, window_shape=codon_size, axis=length_axis
-            )
-            codons = array_slice(codons, length_axis, slice(None, None, codon_size))
-            if self.codon_lut is not None:
-                return gufunc_translate_lut(
-                    codons.view(np.uint8),
-                    self.codon_lut,
-                    marker_byte,
-                    axes=[-1, -1, (), ()],  # type: ignore
-                ).view("S1")
-            return gufunc_translate(
-                codons.view(np.uint8),
-                self.codon_array.view(np.uint8),
-                self.aa_array.view(np.uint8),
-                marker_byte,
-                axes=[-1, (-2, -1), (-1), (), ()],  # type: ignore
-            ).view("S1")
+            # pad: shape-preserving dense output. Move length axis last so codons
+            # are contiguous per row, translate the flat buffer, reshape back.
+            norm = np.moveaxis(seqs, length_axis, -1)
+            lead_shape = norm.shape[:-1]
+            seq_len = norm.shape[-1]
+            n_codons = seq_len // codon_size
+            flat = np.ascontiguousarray(norm.reshape(-1)).view(np.uint8)
+            aa = self._rust_translate_flat(flat, marker_byte)  # (total_codons,)
+            aa = aa.view("S1").reshape(*lead_shape, n_codons)
+            return np.moveaxis(aa, -1, length_axis)
 
         # --- Ragged path ---
         # Pack to ListOffsetArray so .data and .offsets are contiguous and valid.

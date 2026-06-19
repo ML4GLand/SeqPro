@@ -92,3 +92,47 @@ mod tests {
         assert_eq!(out, b"M*K");
     }
 }
+
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+
+/// Translate a flat nucleotide buffer (length multiple of `codon_size`) to a
+/// flat AA buffer of length `buf.len()/codon_size`.
+#[pyfunction]
+#[pyo3(signature = (buf, codon_size, lut=None, keys=None, values=None, marker=88))]
+pub fn _translate_bytes<'py>(
+    py: Python<'py>,
+    buf: PyReadonlyArray1<'py, u8>,
+    codon_size: usize,
+    lut: Option<PyReadonlyArray1<'py, u8>>,
+    keys: Option<PyReadonlyArray1<'py, u8>>,
+    values: Option<PyReadonlyArray1<'py, u8>>,
+    marker: u8,
+) -> PyResult<&'py PyArray1<u8>> {
+    let buf = buf.as_slice()?;
+    if codon_size == 0 || buf.len() % codon_size != 0 {
+        return Err(PyValueError::new_err(
+            "buffer length must be a positive multiple of codon_size",
+        ));
+    }
+    let n_codons = buf.len() / codon_size;
+    let mut out = vec![0u8; n_codons];
+    match lut {
+        Some(lut) => translate_lut_into(buf, codon_size, lut.as_slice()?, marker, &mut out),
+        None => {
+            let keys = keys.ok_or_else(|| PyValueError::new_err("keys required without lut"))?;
+            let values =
+                values.ok_or_else(|| PyValueError::new_err("values required without lut"))?;
+            translate_scan_into(
+                buf,
+                codon_size,
+                keys.as_slice()?,
+                values.as_slice()?,
+                marker,
+                &mut out,
+            );
+        }
+    }
+    Ok(out.into_pyarray(py))
+}
