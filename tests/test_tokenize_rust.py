@@ -1,5 +1,8 @@
 import numpy as np
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from hypothesis.extra import numpy as hnp
 
 import seqpro as sp
 from seqpro.rag import Ragged
@@ -64,4 +67,18 @@ def test_tokenize_out_strided_serial_ok():
     seqs = np.frombuffer(b"ACGTACGT", "S1")
     out = np.empty(16, dtype=np.int32)[::2]
     got = sp.tokenize(seqs, TOKEN_MAP, UNK, out=out, parallel=False)
+    np.testing.assert_array_equal(got, _ref_tokenize(seqs, TOKEN_MAP, UNK))
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    seqs=hnp.arrays(
+        dtype="S1",
+        shape=hnp.array_shapes(min_dims=1, max_dims=3, min_side=0, max_side=20),
+        elements=st.sampled_from([b"A", b"C", b"G", b"T", b"N", b"x"]),
+    ),
+    parallel=st.sampled_from([None, True, False]),
+)
+def test_tokenize_differential(seqs, parallel):
+    got = sp.tokenize(seqs, TOKEN_MAP, UNK, parallel=parallel)
     np.testing.assert_array_equal(got, _ref_tokenize(seqs, TOKEN_MAP, UNK))

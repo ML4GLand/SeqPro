@@ -1,5 +1,7 @@
 import numpy as np
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 import seqpro as sp
 from seqpro import AA  # standard AminoAlphabet
@@ -102,3 +104,32 @@ def test_translate_ohe_ragged_drop_removes_noncanonical():
     aa_bytes = sp.AA.decode_ohe(got.data, ohe_axis=-1)
     assert aa_bytes.tobytes().decode() == "M*"
     np.testing.assert_array_equal(got.offsets, np.array([0, 2], dtype=np.int64))
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    n_codons=st.integers(min_value=0, max_value=30),
+    data=st.data(),
+    unknown=st.sampled_from(["X", "drop"]),
+)
+def test_translate_dense_differential(n_codons, data, unknown):
+    chars = data.draw(
+        st.lists(
+            st.sampled_from(list("ACGTacgtN")),
+            min_size=n_codons * 3,
+            max_size=n_codons * 3,
+        )
+    )
+    seq = "".join(chars)
+    arr = np.frombuffer(seq.encode("ascii"), "S1")
+    got = sp.AA.translate(arr, unknown=unknown, length_axis=0)
+    if unknown == "drop":
+        # Reference: translate then drop non-canonical codons.
+        ref = []
+        for i in range(0, len(seq), 3):
+            cod = seq[i : i + 3].upper()
+            if set(cod) <= set("ACGT"):
+                ref.append(sp.AA.codon_to_aa.get(cod, "X"))
+        assert got.data.tobytes().decode() == "".join(ref)
+    else:
+        assert got.tobytes().decode() == _bio_like_translate(seq.upper())
