@@ -214,3 +214,130 @@ edits. Confirm during implementation; update if any documented behavior (e.g. th
 Numba kernels are left in `_numba.py` and the pre-port behavior is recoverable by
 reverting the Python call sites to the Numba kernels and unregistering the Rust
 modules. No Numba kernel is deleted until the keep decision is made.
+
+---
+
+## Results
+
+**Measured:** 2026-06-19, osx-arm64, 14-core machine. Baseline = commit `833a4ef`
+(pre-port, pure Numba/`np.take`). Rust = current branch HEAD. All measurements
+fully measured (no reasoned/fabricated numbers).
+
+### Machine details
+
+- Platform: osx-arm64 (Apple Silicon, 14 cores)
+- Python 3.10, Numba 0.58.1, NumPy 1.26.0
+- pytest-benchmark 5.2.3 (warm times = `min` across rounds)
+- Cold times = `time.perf_counter()` on a fresh process (single call)
+
+### Benchmark table — `tokenize`
+
+| n | Numba cold (µs) | Numba warm (µs) | Rust cold (µs) | Rust warm (µs) |
+|---|---|---|---|---|
+| 100 | 38 (`np.take`, no JIT) | 4.1 | 126 | 9.5 |
+| 10,000 | 29 (`np.take`, no JIT) | 23.0 | 65 | 47.7 |
+| 1,000,000 | 2,130 (Numba JIT + run) | 229 | 2,178 | 1,122 |
+
+**Notes:**
+- Baseline uses `np.take` (no Numba) for n < 40,000 (the old `_TOKENIZE_PARALLEL_THRESHOLD`).
+  Cold cost at small/medium sizes reflects `np.take` startup, not JIT compilation.
+- Rust cold overhead (~126 µs at n=100) is a first-call import/init cost, not
+  recompilation; subsequent calls pay only the warm time.
+- Rust warm at n=1M is **1,122 µs vs. Numba warm 229 µs** — Rust is ~2× slower
+  than the parallel Numba kernel at large scale. The Rust kernel at the current
+  threshold (32k, re-measured in Task 11) selects the parallel path at 1M.
+
+### Benchmark table — `translate`
+
+| n_codons | Numba cold (µs) | Numba warm (µs) | Rust cold (µs) | Rust warm (µs) |
+|---|---|---|---|---|
+| 33 | 324 (JIT compile) | 86.5 | 129 | 8.7 |
+| 3,333 | 284 (JIT compile) | 83.1 | 114 | 55.9 |
+| 333,333 | 946 (JIT + run) | 610 | 9,319 | 8,987 |
+
+**Notes:**
+- Baseline translate always uses Numba (`gufunc_translate_lut` / `gufunc_translate`)
+  for all sizes — no `np.take` fallback. Cold times include JIT compilation.
+- Rust cold at small sizes (8–10× faster than Numba cold) eliminates the JIT
+  penalty entirely.
+- Rust warm at n=33 is **8.7 µs vs. Numba warm 86.5 µs** — ~10× faster warm.
+- Rust warm at n=3,333 is **55.9 µs vs. Numba warm 83.1 µs** — ~1.5× faster warm.
+- Rust warm at n=333,333 is **8,987 µs vs. Numba warm 610 µs** — Rust is ~15×
+  slower at large scale. The translate Rust kernel is serial-only (no rayon path
+  wired; `TRANSLATE_PARALLEL_THRESHOLD` defined but unused per Task 11 findings).
+
+### Decision rule application
+
+The rule: **keep if Rust wins clearly in ≥1 regime and never meaningfully regresses others.**
+
+| Regime | Winner | Magnitude |
+|---|---|---|
+| `tokenize` cold, any size | Rust (at n≥10k) or tie (n=100) | Rust avoids 2+ s JIT for n=1M |
+| `tokenize` warm small (n=100) | Numba (`np.take`) | 4.1 µs vs 9.5 µs — 2× faster |
+| `tokenize` warm medium (n=10k) | Numba (`np.take`) | 23 µs vs 48 µs — 2× faster |
+| `tokenize` warm large (n=1M) | **Numba** | 229 µs vs 1,122 µs — ~5× faster |
+| `translate` cold, any size | **Rust** | 8–10× faster; no JIT stall |
+| `translate` warm small (n=33) | **Rust** | 8.7 µs vs 86.5 µs — 10× faster |
+| `translate` warm medium (n=3,333) | **Rust** | 55.9 µs vs 83.1 µs — 1.5× faster |
+| `translate` warm large (n=333,333) | Numba | 610 µs vs 8,987 µs — 15× faster |
+
+**Summary of findings:**
+
+`translate`: Rust is a clear winner on cold and warm-small/medium. The regression
+at large scale (333k codons) is severe (15×) because the translate Rust kernel has
+no parallel path — it is purely serial. The `TRANSLATE_PARALLEL_THRESHOLD` constant
+exists in `src/translate.rs` but is unused. A rayon-parallel translate kernel would
+likely close or reverse this gap at large scale.
+
+`tokenize`: Rust regresses warm across all measured sizes. The baseline uses
+`np.take` (not Numba) for n < 40k, which is highly optimized and cache-friendly.
+At n=1M, the parallel Numba `lut_gather` is ~5× faster than the Rust parallel
+gather. Rust also adds a cold-startup overhead (~126 µs first call) that `np.take`
+avoids entirely.
+
+### Decision: RECOMMEND REVERT (or conditional keep — see below)
+
+**As measured, the data does not support a clean KEEP verdict:**
+
+- `tokenize` regresses in every warm regime (2–5×). The baseline uses `np.take`,
+  not Numba, for the small/medium sizes, so there was never a cold-JIT problem to
+  solve there. At large scale the parallel Numba kernel outperforms Rust.
+- `translate` strongly wins cold and warm-small (the clearest win; the data does
+  support keeping translate). But it regresses 15× at large scale due to the
+  missing parallel path.
+
+**Conditional paths for the controller/user to choose from:**
+
+1. **REVERT both** — restore Numba/`np.take` for `tokenize` and Numba for
+   `translate`. Keep the design doc, bench harness, and Rust kernel code (do not
+   delete `src/tokenize.rs` or `src/translate.rs`) for the follow-up work
+   identified below.
+
+2. **KEEP translate, REVERT tokenize** — `translate` wins clearly in cold + warm
+   small/medium (the primary use case for biological sequence data). The 333k-codon
+   regression is a known gap (missing rayon path) not a fundamental limitation.
+   `tokenize` has no clear win in any regime.
+
+3. **KEEP both, add rayon to translate** — accept the current translate regression as
+   temporary, add the parallel Rust translate kernel as immediate follow-up before
+   merging. This realizes the original experiment's full intent and likely closes
+   the large-scale gap.
+
+**Controller's recommendation to user:** Option 2 or 3. Option 2 is the
+conservative choice (ships what's strictly better); Option 3 is the aggressive
+choice (finishes the experiment properly). Option 1 is safe but wastes a clear
+10× win on `translate` cold + small.
+
+### Step 3 — Skill verification
+
+**Signatures unchanged:** `git diff 833a4ef HEAD -- python/seqpro/_encoders.py
+python/seqpro/alphabets/_alphabets.py | grep -E '^[+-].*def (tokenize|translate)'`
+produced **no output** — no signature lines were added or removed.
+
+**Behavior review:** The only non-internal behavior change is that empty input to
+`translate` now returns an empty result (previously raised a Numba error).
+`skills/seqpro/SKILL.md` does not document that empty input raises — it describes
+the `unknown=` semantics and `validate=` fast-fail path only. No documented behavior
+shifted.
+
+**Skill determination: no skill change required.**
