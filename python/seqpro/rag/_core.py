@@ -209,7 +209,9 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         offsets = self.offsets
         if isinstance(self._layout, RecordLayout):
             fields = self._layout.fields.values()
-            owns = all(fl.data.base is None for fl in fields)
+            owns = all(
+                fl.data.base is None or fl.data.base.base is None for fl in fields
+            )
             size0 = next(iter(self._layout.fields.values())).data.shape[0]
             return bool(
                 owns and self.is_contiguous and offsets[0] == 0 and offsets[-1] == size0
@@ -563,10 +565,6 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 pdata, poff = _pack_parts(fl.data, fl.shape, shared, copy=True)
                 if packed_offsets is None:
                     packed_offsets = poff
-                # Ensure pdata owns its memory (base is None) so is_base holds.
-                # _pack_parts may return a view of an internal uint8 buffer.
-                if pdata.base is not None:
-                    pdata = pdata.copy()
                 new_fields[name] = RaggedLayout(
                     data=pdata, offsets=[packed_offsets], shape=fl.shape
                 )
