@@ -338,3 +338,28 @@ def test_record_array_raises():
     rag = _record_ragged()
     with pytest.raises(TypeError, match="dense array"):
         np.asarray(rag)
+
+
+# ---------------------------------------------------------------------------
+# Task 12: _ingest bridge — record layout_from_ak + to_ak
+# ---------------------------------------------------------------------------
+
+import awkward as ak  # noqa: E402
+
+
+def test_ingest_record_from_ak():
+    arr = ak.Array(
+        {"a": [[1, 2], [3], [4, 5, 6]], "b": [[1.0, 2.0], [3.0], [4.0, 5.0, 6.0]]}
+    )
+    rag = Ragged(arr)
+    assert rag._is_record is True
+    assert rag.fields == ["a", "b"]
+    np.testing.assert_array_equal(rag["a"].data, np.array([1, 2, 3, 4, 5, 6]))
+    assert rag["a"].offsets is rag["b"].offsets
+
+
+def test_record_to_ak_roundtrips():
+    rag = _record_ragged()
+    out = rag.to_ak()
+    assert set(ak.fields(out)) == {"a", "b"}
+    np.testing.assert_array_equal(ak.to_numpy(ak.flatten(out["a"])), rag["a"].data)

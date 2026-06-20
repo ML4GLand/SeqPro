@@ -241,10 +241,14 @@ def test_to_ak_roundtrips_values():
     np.testing.assert_array_equal(ak.to_numpy(ak.flatten(rag.to_ak())), rag.data)
 
 
-def test_ingest_record_raises_spec_b():
+def test_ingest_record_from_ak_works():
+    # Task 12: record ingest is now implemented (Spec B landed); verify basic round-trip
     arr = ak.Array({"a": [[1, 2], [3]], "b": [[1.0, 2.0], [3.0]]})
-    with pytest.raises(NotImplementedError, match="Spec B"):
-        Ragged(arr)
+    rag = Ragged(arr)
+    assert rag._is_record is True
+    assert rag.fields == ["a", "b"]
+    np.testing.assert_array_equal(rag["a"].data, np.array([1, 2, 3]))
+    assert rag["a"].offsets is rag["b"].offsets
 
 
 # ---------------------------------------------------------------------------
