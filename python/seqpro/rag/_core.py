@@ -539,6 +539,44 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def to_packed(self, *, copy: bool = True) -> "Ragged[Any]":
         from ._ops import _pack_parts
 
+        if isinstance(self._layout, RecordLayout):
+            rec = self._layout
+            shared = self.offsets
+            if not copy:
+                already = (
+                    shared.ndim == 1
+                    and (shared.size == 0 or shared[0] == 0)
+                    and all(
+                        fl.data.flags.c_contiguous
+                        and int(shared[-1]) == fl.data.shape[0]
+                        for fl in rec.fields.values()
+                    )
+                )
+                if already:
+                    return self
+                raise ValueError(
+                    "to_packed(copy=False) requires already-packed input; got an unpacked record."
+                )
+            packed_offsets: NDArray[Any] | None = None
+            new_fields: dict[str, RaggedLayout[Any]] = {}
+            for name, fl in rec.fields.items():
+                pdata, poff = _pack_parts(fl.data, fl.shape, shared, copy=True)
+                if packed_offsets is None:
+                    packed_offsets = poff
+                # Ensure pdata owns its memory (base is None) so is_base holds.
+                # _pack_parts may return a view of an internal uint8 buffer.
+                if pdata.base is not None:
+                    pdata = pdata.copy()
+                new_fields[name] = RaggedLayout(
+                    data=pdata, offsets=[packed_offsets], shape=fl.shape
+                )
+            assert packed_offsets is not None
+            return Ragged(
+                RecordLayout(
+                    offsets=[packed_offsets], shape=rec.shape, fields=new_fields
+                )
+            )
+
         packed_data, packed_offsets = _pack_parts(
             self._rl.data, self._layout.shape, self.offsets, copy
         )

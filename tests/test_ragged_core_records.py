@@ -268,3 +268,31 @@ def test_record_squeeze_trailing_one():
     sq = rag.squeeze()
     assert sq.shape == (3, None)
     assert sq["a"].offsets is sq["b"].offsets
+
+
+# ---------------------------------------------------------------------------
+# Task 10: record-aware to_packed
+# ---------------------------------------------------------------------------
+
+
+def test_record_to_packed_after_slice():
+    rag = _record_ragged()[::-1]  # gather -> (2, M) offsets
+    packed = rag.to_packed()
+    assert packed._is_record is True
+    assert packed.is_base is True
+    assert packed["a"].offsets is packed["b"].offsets
+    np.testing.assert_array_equal(
+        packed["a"].data, np.array([3, 4, 5, 2, 0, 1], dtype=np.int32)
+    )
+    np.testing.assert_array_equal(packed.offsets, np.array([0, 3, 4, 6]))
+
+
+def test_record_to_packed_copy_false_passthrough():
+    rag = _record_ragged()
+    assert rag.to_packed(copy=False) is rag
+
+
+def test_record_to_packed_copy_false_unpacked_raises():
+    rag = _record_ragged()[::-1]
+    with pytest.raises(ValueError, match="already-packed"):
+        rag.to_packed(copy=False)
