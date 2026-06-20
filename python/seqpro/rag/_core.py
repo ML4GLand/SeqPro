@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Generic, Sequence, TypeVar
+from typing import Any, Generic, Sequence, TypeVar, cast
 
 import numpy as np
 from numpy.lib.mixins import NDArrayOperatorsMixin
@@ -442,6 +442,16 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def squeeze(
         self, axis: int | tuple[int, ...] | None = None
     ) -> "Ragged[Any] | NDArray[Any]":
+        if isinstance(self._layout, RecordLayout):
+            return Ragged.from_fields(
+                cast(
+                    "dict[str, Ragged[Any]]",
+                    {
+                        f: Ragged(fl).squeeze(axis)
+                        for f, fl in self._layout.fields.items()
+                    },
+                )
+            )
         if axis is None:
             data = self._rl.data.squeeze()
             shape = tuple(s for s in self._layout.shape if s != 1)
@@ -479,6 +489,10 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         )
 
     def reshape(self, *shape: int | None) -> "Ragged[Any]":
+        if isinstance(self._layout, RecordLayout):
+            return Ragged.from_fields(
+                {f: Ragged(fl).reshape(*shape) for f, fl in self._layout.fields.items()}
+            )
         if len(shape) == 1 and isinstance(shape[0], tuple):
             shape = shape[0]  # type: ignore[assignment]
         rag_dim = shape.index(None)

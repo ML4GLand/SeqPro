@@ -230,3 +230,41 @@ def test_record_row_int_returns_dict():
     assert set(row.keys()) == {"a", "b"}
     np.testing.assert_array_equal(row["a"], np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(row["b"], np.array([0.0, 1.0]))
+
+
+# ---------------------------------------------------------------------------
+# Task 9: squeeze / reshape on record Ragged (per-field)
+# ---------------------------------------------------------------------------
+
+
+def _record_with_leading_two():
+    lens = np.array([2, 1, 3, 1, 2, 1], dtype=np.uint32)
+    a = Ragged.from_lengths(np.arange(10, dtype=np.int32), lens)
+    b = Ragged.from_lengths(np.arange(10, dtype=np.float64), lens)
+    return Ragged.from_fields({"a": a, "b": b})
+
+
+def test_record_reshape_leading():
+    rag = _record_with_leading_two()
+    re = rag.reshape(2, 3, None)
+    assert re._is_record is True
+    assert re.shape == (2, 3, None)
+    assert re["a"].offsets is re["b"].offsets
+
+
+def test_record_squeeze_trailing_one():
+    lens = np.array([2, 1, 3], dtype=np.uint32)
+    a = Ragged.from_offsets(
+        np.arange(6, dtype=np.int64).reshape(6, 1),
+        (3, None, 1),
+        lengths_to_offsets(lens),
+    )
+    b = Ragged.from_offsets(
+        np.arange(6, dtype=np.float64).reshape(6, 1),
+        (3, None, 1),
+        lengths_to_offsets(lens),
+    )
+    rag = Ragged.from_fields({"a": a, "b": b})
+    sq = rag.squeeze()
+    assert sq.shape == (3, None)
+    assert sq["a"].offsets is sq["b"].offsets
