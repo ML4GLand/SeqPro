@@ -7,7 +7,7 @@ from numpy.lib.mixins import NDArrayOperatorsMixin
 from numpy.typing import NDArray
 from typing_extensions import override
 
-from ._layout import RaggedLayout, validate_layout
+from ._layout import RaggedLayout, RecordLayout, validate_layout
 from ._utils import OFFSET_TYPE, lengths_to_offsets
 
 RDTYPE_co = TypeVar("RDTYPE_co", covariant=True)
@@ -42,15 +42,30 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     __slots__ = ("_layout",)
 
-    def __init__(self, data: RaggedLayout[Any]):
+    def __init__(self, data: Any):
         if isinstance(data, Ragged):
             data = data._layout
-        if not isinstance(data, RaggedLayout):
+        if not isinstance(data, (RaggedLayout, RecordLayout)):
             from ._ingest import layout_from_ak
 
             data = layout_from_ak(data)
         validate_layout(data)
         self._layout = data
+
+    @property
+    def _is_record(self) -> bool:
+        return isinstance(self._layout, RecordLayout)
+
+    @property
+    def _rl(self) -> "RaggedLayout[Any]":
+        """Narrow ``_layout`` to ``RaggedLayout`` for single-layout code paths.
+
+        All methods that access ``data``/``offsets``/``str_offsets``/``is_string``
+        are only valid on non-record Rageds; this assert enforces that contract at
+        runtime while satisfying the type-checker.
+        """
+        assert isinstance(self._layout, RaggedLayout)
+        return self._layout
 
     def to_ak(self):
         from ._ingest import to_ak as _to_ak
@@ -81,6 +96,36 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         shape = (*lengths.shape, None, *trailing)
         return Ragged.from_offsets(data, shape, offsets)
 
+    @staticmethod
+    def from_fields(fields: "dict[str, Ragged[Any]]") -> "Ragged[Any]":
+        """Build a record (struct-of-arrays) from named single-field Ragged inputs
+        that share one ragged axis. Sequence fields must be chars (see to_chars)."""
+        if not fields:
+            raise ValueError("from_fields requires at least one field (got empty)")
+        items = list(fields.items())
+        for name, f in items:
+            if f._is_record:
+                raise NotImplementedError(
+                    f"record-of-record field {name!r} lands in Spec C"
+                )
+            if f.is_string:
+                raise NotImplementedError(
+                    f"opaque-string field {name!r} is Spec C; pass chars via .to_chars()"
+                )
+        shared = items[0][1].offsets
+        for name, f in items[1:]:
+            if not np.array_equal(f.offsets, shared):
+                raise ValueError(
+                    f"field {name!r} offsets are not equal to the first field's"
+                )
+        rec_shape = items[0][1].shape
+        rebound: dict[str, RaggedLayout[Any]] = {}
+        for name, f in items:
+            rebound[name] = RaggedLayout(
+                data=f._rl.data, offsets=[shared], shape=f._layout.shape
+            )
+        return Ragged(RecordLayout(offsets=[shared], shape=rec_shape, fields=rebound))
+
     @classmethod
     def empty(cls, shape: int | tuple[int | None, ...], dtype: Any) -> "Ragged[Any]":
         if isinstance(shape, int):
@@ -99,14 +144,14 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     @property
     def data(self) -> NDArray[Any]:
-        return self._layout.data
+        return self._rl.data
 
     @property
     def offsets(self) -> NDArray[Any]:
         if self._layout.offsets:
             return self._layout.offsets[0]
-        assert self._layout.str_offsets is not None
-        return self._layout.str_offsets
+        assert self._rl.str_offsets is not None
+        return self._rl.str_offsets
 
     @property
     def shape(self) -> tuple[int | None, ...]:
@@ -114,16 +159,16 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     @property
     def dtype(self) -> np.dtype[Any]:
-        if self._layout.is_string:
+        if self._rl.is_string:
             return np.dtype(
                 "S"
             )  # opaque variable-width string: descriptor, not S1 storage
-        return self._layout.data.dtype
+        return self._rl.data.dtype
 
     @property
     def is_string(self) -> bool:
         """True for an opaque variable-width string Ragged (dtype 'S', shape (N,))."""
-        return self._layout.is_string
+        return self._rl.is_string
 
     @property
     def rag_dim(self) -> int:
@@ -138,12 +183,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     @property
     def is_contiguous(self) -> bool:
-        return self.offsets.ndim == 1 and self._layout.data.flags.c_contiguous
+        return self.offsets.ndim == 1 and self._rl.data.flags.c_contiguous
 
     @property
     def is_base(self) -> bool:
         offsets = self.offsets
-        data = self._layout.data
+        data = self._rl.data
         owns_memory = data.base is None or (
             data.base is not None and data.base.base is None
         )
@@ -156,24 +201,24 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     def view(self, dtype: Any) -> "Ragged[Any]":
         new_layout = RaggedLayout(
-            data=self._layout.data.view(dtype),
+            data=self._rl.data.view(dtype),
             offsets=self._layout.offsets,
             shape=self._layout.shape,
-            str_offsets=self._layout.str_offsets,
+            str_offsets=self._rl.str_offsets,
         )
         return Ragged(new_layout)
 
     def to_chars(self) -> "Ragged[Any]":
         """Zero-copy view of an opaque string ('S', (N,)) as ascii chars
         ('S1', (N, None)); the byte-length becomes a counted ragged axis."""
-        if not self._layout.is_string:
+        if not self._rl.is_string:
             raise ValueError("to_chars() requires an opaque string Ragged (dtype 'S')")
-        assert self._layout.str_offsets is not None
+        assert self._rl.str_offsets is not None
         new_shape = (*self._layout.shape, None)
         return Ragged(
             RaggedLayout(
-                data=self._layout.data,
-                offsets=[self._layout.str_offsets],
+                data=self._rl.data,
+                offsets=[self._rl.str_offsets],
                 shape=new_shape,
             )
         )
@@ -181,17 +226,17 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def to_strings(self) -> "Ragged[Any]":
         """Zero-copy view of a 1-D ascii-char leaf ('S1', (N, None)) as an opaque
         string ('S', (N,)); the length axis becomes an uncounted byte leaf."""
-        if self._layout.is_string:
+        if self._rl.is_string:
             return self
-        if self._layout.data.dtype.kind != "S":
+        if self._rl.data.dtype.kind != "S":
             raise ValueError("to_strings() requires an S1 char Ragged")
-        if self._layout.data.ndim != 1 or self._layout.shape[self.rag_dim + 1 :]:
+        if self._rl.data.ndim != 1 or self._layout.shape[self.rag_dim + 1 :]:
             raise ValueError(
                 "to_strings() requires a 1-D S1 char leaf (no trailing dims)"
             )
         return Ragged(
             RaggedLayout(
-                data=self._layout.data,
+                data=self._rl.data,
                 offsets=[],
                 shape=self._layout.shape[: self.rag_dim],
                 str_offsets=self.offsets,
@@ -208,8 +253,8 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         starts, stops = self._starts_stops()
         if isinstance(where, (int, np.integer)):
             lo, hi = int(starts[where]), int(stops[where])
-            row = self._layout.data[lo:hi]
-            if self._layout.is_string:
+            row = self._rl.data[lo:hi]
+            if self._rl.is_string:
                 return row.tobytes()
             return row
         # slice / mask / int-array on the leading axis -> gather to (2, M)
@@ -241,17 +286,17 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         new_offsets = np.stack([sel_starts, sel_stops], 0)
         if None not in self._layout.shape:  # string-leaf flat collection
             new_layout = RaggedLayout(
-                data=self._layout.data,
+                data=self._rl.data,
                 offsets=[],
                 shape=(len(sel_starts),),
                 str_offsets=new_offsets,
             )
         else:
             new_layout = RaggedLayout(
-                data=self._layout.data,
+                data=self._rl.data,
                 offsets=[new_offsets],
                 shape=(len(sel_starts), *self._layout.shape[self.rag_dim :]),
-                str_offsets=self._layout.str_offsets,
+                str_offsets=self._rl.str_offsets,
             )
         return Ragged(new_layout)
 
@@ -261,7 +306,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 data=new_data,
                 offsets=self._layout.offsets,
                 shape=self._layout.shape,
-                str_offsets=self._layout.str_offsets,
+                str_offsets=self._rl.str_offsets,
             )
         )
 
@@ -291,14 +336,14 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         self, axis: int | tuple[int, ...] | None = None
     ) -> "Ragged[Any] | NDArray[Any]":
         if axis is None:
-            data = self._layout.data.squeeze()
+            data = self._rl.data.squeeze()
             shape = tuple(s for s in self._layout.shape if s != 1)
             return Ragged(
                 RaggedLayout(
                     data=data,
                     offsets=self._layout.offsets,
                     shape=shape,
-                    str_offsets=self._layout.str_offsets,
+                    str_offsets=self._rl.str_offsets,
                 )
             )
         if isinstance(axis, int):
@@ -316,13 +361,13 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             for i, s in enumerate(self._layout.shape)
             if i not in axis and i > self.rag_dim
         )
-        data = self._layout.data.reshape(len(self._layout.data), *data_trailing)
+        data = self._rl.data.reshape(len(self._rl.data), *data_trailing)
         return Ragged(
             RaggedLayout(
                 data=data,
                 offsets=self._layout.offsets,
                 shape=shape,
-                str_offsets=self._layout.str_offsets,
+                str_offsets=self._rl.str_offsets,
             )
         )
 
@@ -344,14 +389,14 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         new_rag_shape = tuple(
             s if s is not None and s >= 0 else n_rag // n_new for s in new_rag_shape
         )
-        data = self._layout.data.reshape(len(self._layout.data), *shape[rag_dim + 1 :])
+        data = self._rl.data.reshape(len(self._rl.data), *shape[rag_dim + 1 :])
         new_shape: tuple[int | None, ...] = (*new_rag_shape, None, *data.shape[1:])
         return Ragged(
             RaggedLayout(
                 data=data,
                 offsets=self._layout.offsets,
                 shape=new_shape,
-                str_offsets=self._layout.str_offsets,
+                str_offsets=self._rl.str_offsets,
             )
         )
 
@@ -374,9 +419,9 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         from ._ops import _pack_parts
 
         packed_data, packed_offsets = _pack_parts(
-            self._layout.data, self._layout.shape, self.offsets, copy
+            self._rl.data, self._layout.shape, self.offsets, copy
         )
-        if packed_data is self._layout.data and packed_offsets is self.offsets:
+        if packed_data is self._rl.data and packed_offsets is self.offsets:
             return self
         return Ragged.from_offsets(packed_data, self._layout.shape, packed_offsets)
 
