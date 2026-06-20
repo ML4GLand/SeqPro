@@ -21,23 +21,20 @@ def _where_is_bool(where: Any) -> bool:
 def _build_layout(
     data: NDArray[Any], shape: tuple[int | None, ...], offsets: NDArray[Any]
 ) -> RaggedLayout[Any]:
-    """Build a single-level layout, applying the string-leaf rule.
+    """Build a single-level layout under the string/char rule.
 
-    For bytes (S1) data with no trailing fixed dims, the single ragged axis is
-    the string itself -> collapse to a string leaf: drop the None, store the
-    supplied offsets as str_offsets.
+    - ``None`` present in ``shape``  -> counted ragged axis: numeric, or S1 *chars*
+      (length is an axis). ``offsets`` is the ragged axis; ``str_offsets`` is None.
+    - no ``None`` + S1 data          -> opaque *string* leaf: ``offsets`` is stored
+      as ``str_offsets``; the byte-length is not an axis.
     """
-    is_bytes = data.dtype.kind == "S"
-    n_none = shape.count(None)
-    if is_bytes and n_none == 1:
-        rag_dim = shape.index(None)
-        trailing = shape[rag_dim + 1 :]
-        if all(d is not None for d in trailing) and len(trailing) == 0:
-            leaf_shape = shape[:rag_dim]
-            return RaggedLayout(
-                data=data, offsets=[], shape=leaf_shape, str_offsets=offsets
-            )
-    return RaggedLayout(data=data, offsets=[offsets], shape=shape)
+    if None in shape:
+        return RaggedLayout(data=data, offsets=[offsets], shape=shape)
+    if data.dtype.kind == "S":
+        return RaggedLayout(data=data, offsets=[], shape=shape, str_offsets=offsets)
+    raise ValueError(
+        "shape must have exactly one None ragged dimension for numeric data"
+    )
 
 
 class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
@@ -76,8 +73,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     @staticmethod
     def from_lengths(data: NDArray[Any], lengths: NDArray[Any]) -> "Ragged[Any]":
         offsets = lengths_to_offsets(lengths)
+        if data.dtype.kind == "S" and data.ndim == 1:
+            # opaque string collection: (N,), byte-length is not an axis
+            shape: tuple[int | None, ...] = tuple(lengths.shape)
+            return Ragged.from_offsets(data, shape, offsets)
         trailing = data.shape[1:]
-        shape: tuple[int | None, ...] = (*lengths.shape, None, *trailing)
+        shape = (*lengths.shape, None, *trailing)
         return Ragged.from_offsets(data, shape, offsets)
 
     @classmethod
@@ -118,6 +119,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 "S"
             )  # opaque variable-width string: descriptor, not S1 storage
         return self._layout.data.dtype
+
+    @property
+    def is_string(self) -> bool:
+        """True for an opaque variable-width string Ragged (dtype 'S', shape (N,))."""
+        return self._layout.is_string
 
     @property
     def rag_dim(self) -> int:

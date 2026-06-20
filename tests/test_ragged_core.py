@@ -340,3 +340,28 @@ def test_getitem_undersized_bool_mask_raises():
     # length-2 mask on 3-row Ragged must raise IndexError
     with pytest.raises(IndexError):
         rag[np.array([True, False])]
+
+
+def test_is_string_predicate():
+    s = Ragged.from_lengths(np.frombuffer(b"catdog", "S1"), np.array([3, 3]))
+    n = Ragged.from_lengths(np.arange(6, dtype=np.int32), np.array([3, 3]))
+    assert s.is_string is True
+    assert n.is_string is False
+
+
+def test_from_offsets_S1_with_none_is_chars_not_opaque():
+    data = np.frombuffer(b"cathithere", "S1")
+    offsets = np.array([0, 3, 5, 10])
+    chars = Ragged.from_offsets(data, (3, None), offsets)
+    assert chars.is_string is False  # counted axis => chars
+    assert chars.dtype == np.dtype("S1")
+    assert chars.shape == (3, None)
+
+
+def test_from_offsets_S1_without_none_is_opaque():
+    data = np.frombuffer(b"cathithere", "S1")
+    str_offsets = np.array([0, 3, 5, 10])
+    opaque = Ragged.from_offsets(data, (3,), str_offsets)
+    assert opaque.is_string is True
+    assert opaque.dtype == np.dtype("S")
+    assert opaque.shape == (3,)
