@@ -86,7 +86,7 @@ def test_from_lengths_string_collapses_to_leaf():
     lengths = np.array([3, 2, 5], dtype=np.uint32)
     rag = Ragged.from_lengths(data, lengths)
     assert rag.shape == (3,)
-    assert rag.dtype == np.dtype("S1")
+    assert rag.dtype == np.dtype("S")  # opaque string descriptor (string/char duality)
     np.testing.assert_array_equal(rag.offsets, np.array([0, 3, 5, 10]))
 
 
@@ -318,6 +318,14 @@ def test_getitem_uses_rust_select_intarray():
     sub_neg = rag[np.array([-1, 0])]
     np.testing.assert_array_equal(sub_neg[0], np.array([5, 6, 7, 8, 9]))
     np.testing.assert_array_equal(sub_neg[1], np.array([0, 1, 2]))
+
+
+def test_opaque_string_dtype_is_flexible_bytes():
+    rag = Ragged.from_lengths(np.frombuffer(b"cathithere", "S1"), np.array([3, 2, 5]))
+    assert rag.dtype == np.dtype("S")
+    assert rag.dtype.itemsize == 0
+    # storage is still S1 bytes
+    assert rag.data.dtype == np.dtype("S1")
 
 
 def test_getitem_oversized_bool_mask_raises():

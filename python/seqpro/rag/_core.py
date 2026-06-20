@@ -113,6 +113,10 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     @property
     def dtype(self) -> np.dtype[Any]:
+        if self._layout.is_string:
+            return np.dtype(
+                "S"
+            )  # opaque variable-width string: descriptor, not S1 storage
         return self._layout.data.dtype
 
     @property
