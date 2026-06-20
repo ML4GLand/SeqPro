@@ -33,6 +33,12 @@ repos:
     language: system
     stages: [pre-push]
     pass_filenames: false
+  - id: cargo-check
+    name: Type-check Rust with cargo check
+    entry: cargo check --all-targets --all-features
+    language: system
+    types: [rust]
+    pass_filenames: false
   - id: cargo-fmt
     name: Format Rust with cargo fmt
     entry: cargo fmt --all
