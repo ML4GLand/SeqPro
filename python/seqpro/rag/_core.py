@@ -643,6 +643,13 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         )
 
     def __array__(self, dtype: Any = None) -> NDArray[Any]:
+        if isinstance(self._layout, RecordLayout):
+            raise TypeError(
+                "record Ragged arrays have no single dense array form; "
+                "use to_numpy() per field."
+            )
         arr = self.to_numpy()
-        assert isinstance(arr, np.ndarray)  # records have no __array__ path
+        assert isinstance(
+            arr, np.ndarray
+        )  # keep for pyrefly narrowing on single-level path
         return arr.astype(dtype) if dtype is not None else arr

@@ -332,3 +332,9 @@ def test_record_ufunc_raises():
     rag = _record_ragged()
     with pytest.raises(NotImplementedError):
         rag + 1
+
+
+def test_record_array_raises():
+    rag = _record_ragged()
+    with pytest.raises(TypeError, match="dense array"):
+        np.asarray(rag)
