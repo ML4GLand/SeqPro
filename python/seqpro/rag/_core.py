@@ -228,6 +228,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         )
 
     def view(self, dtype: Any) -> "Ragged[Any]":
+        if isinstance(self._layout, RecordLayout):
+            raise NotImplementedError(
+                "view is not defined on record Ragged arrays; view a field, "
+                "e.g. rag['f'] = rag['f'].view(dtype)."
+            )
         new_layout = RaggedLayout(
             data=self._rl.data.view(dtype),
             offsets=self._layout.offsets,
@@ -423,6 +428,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def __array_ufunc__(
         self, ufunc: Any, method: str, *inputs: Any, **kwargs: Any
     ) -> "Ragged[Any]":
+        if any(isinstance(x, Ragged) and x._is_record for x in inputs):
+            raise NotImplementedError(
+                "element-wise ufuncs are not defined on record Ragged arrays; "
+                "operate on individual fields."
+            )
         if method != "__call__":
             raise NotImplementedError(
                 f"Ragged supports only element-wise ufuncs, not method={method!r}"
@@ -582,7 +592,17 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return self
         return Ragged.from_offsets(packed_data, self._layout.shape, packed_offsets)
 
-    def to_padded(self, pad_value: Any, *, length: int | None = None) -> NDArray[Any]:
+    def to_padded(
+        self, pad_value: Any, *, length: int | None = None
+    ) -> "NDArray[Any] | dict[str, NDArray[Any]]":
+        if isinstance(self._layout, RecordLayout):
+            return {  # pyrefly: ignore[bad-return] -- fields are never records; inner calls return NDArray
+                f: cast(
+                    "NDArray[Any]",
+                    cast("Ragged[Any]", self[f]).to_padded(pad_value, length=length),
+                )
+                for f in self._layout.fields
+            }
         from ._ops import _to_padded_copy
 
         rag = self if self.is_contiguous else self.to_packed()
@@ -602,7 +622,16 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         leading = rag.shape[: rag.rag_dim]
         return out.reshape((*leading, out_len)) if leading else out  # pyrefly: ignore[no-matching-overload] -- leading dims before rag_dim are always int; numpy stub can't verify this
 
-    def to_numpy(self, allow_missing: bool = False) -> NDArray[Any]:
+    def to_numpy(
+        self, allow_missing: bool = False
+    ) -> "NDArray[Any] | dict[str, NDArray[Any]]":
+        if isinstance(self._layout, RecordLayout):
+            return {  # pyrefly: ignore[bad-return] -- fields are never records; inner calls return NDArray
+                f: cast(
+                    "NDArray[Any]", cast("Ragged[Any]", self[f]).to_numpy(allow_missing)
+                )
+                for f in self._layout.fields
+            }
         lengths = self.lengths
         if lengths.size and not np.all(lengths == lengths.flat[0]):
             raise ValueError("cannot convert a jagged Ragged to a dense array")
@@ -615,4 +644,5 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     def __array__(self, dtype: Any = None) -> NDArray[Any]:
         arr = self.to_numpy()
+        assert isinstance(arr, np.ndarray)  # records have no __array__ path
         return arr.astype(dtype) if dtype is not None else arr

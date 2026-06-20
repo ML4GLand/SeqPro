@@ -296,3 +296,39 @@ def test_record_to_packed_copy_false_unpacked_raises():
     rag = _record_ragged()[::-1]
     with pytest.raises(ValueError, match="already-packed"):
         rag.to_packed(copy=False)
+
+
+# ---------------------------------------------------------------------------
+# Task 11: to_numpy / to_padded (per-field dict) + view / ufunc raise on records
+# ---------------------------------------------------------------------------
+
+
+def test_record_to_numpy_dict():
+    lens = np.array([3, 3], dtype=np.uint32)
+    a = Ragged.from_lengths(np.arange(6, dtype=np.int32), lens)
+    b = Ragged.from_lengths(np.arange(6, dtype=np.float64), lens)
+    rag = Ragged.from_fields({"a": a, "b": b})
+    out = rag.to_numpy()
+    np.testing.assert_array_equal(out["a"], np.arange(6, dtype=np.int32).reshape(2, 3))
+    np.testing.assert_array_equal(
+        out["b"], np.arange(6, dtype=np.float64).reshape(2, 3)
+    )
+
+
+def test_record_to_padded_dict():
+    rag = _record_ragged()
+    out = rag.to_padded(-1)
+    assert set(out.keys()) == {"a", "b"}
+    np.testing.assert_array_equal(out["a"][1], np.array([2, -1, -1], dtype=np.int32))
+
+
+def test_record_view_raises():
+    rag = _record_ragged()
+    with pytest.raises(NotImplementedError):
+        rag.view(np.uint32)
+
+
+def test_record_ufunc_raises():
+    rag = _record_ragged()
+    with pytest.raises(NotImplementedError):
+        rag + 1
