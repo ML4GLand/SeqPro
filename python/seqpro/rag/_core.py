@@ -163,6 +163,41 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         )
         return Ragged(new_layout)
 
+    def to_chars(self) -> "Ragged[Any]":
+        """Zero-copy view of an opaque string ('S', (N,)) as ascii chars
+        ('S1', (N, None)); the byte-length becomes a counted ragged axis."""
+        if not self._layout.is_string:
+            raise ValueError("to_chars() requires an opaque string Ragged (dtype 'S')")
+        assert self._layout.str_offsets is not None
+        new_shape = (*self._layout.shape, None)
+        return Ragged(
+            RaggedLayout(
+                data=self._layout.data,
+                offsets=[self._layout.str_offsets],
+                shape=new_shape,
+            )
+        )
+
+    def to_strings(self) -> "Ragged[Any]":
+        """Zero-copy view of a 1-D ascii-char leaf ('S1', (N, None)) as an opaque
+        string ('S', (N,)); the length axis becomes an uncounted byte leaf."""
+        if self._layout.is_string:
+            return self
+        if self._layout.data.dtype.kind != "S":
+            raise ValueError("to_strings() requires an S1 char Ragged")
+        if self._layout.data.ndim != 1 or self._layout.shape[self.rag_dim + 1 :]:
+            raise ValueError(
+                "to_strings() requires a 1-D S1 char leaf (no trailing dims)"
+            )
+        return Ragged(
+            RaggedLayout(
+                data=self._layout.data,
+                offsets=[],
+                shape=self._layout.shape[: self.rag_dim],
+                str_offsets=self.offsets,
+            )
+        )
+
     def _starts_stops(self) -> tuple[NDArray[Any], NDArray[Any]]:
         offsets = self.offsets
         if offsets.ndim == 1:

@@ -365,3 +365,36 @@ def test_from_offsets_S1_without_none_is_opaque():
     assert opaque.is_string is True
     assert opaque.dtype == np.dtype("S")
     assert opaque.shape == (3,)
+
+
+def test_to_chars_zero_copy_and_shape():
+    s = Ragged.from_lengths(np.frombuffer(b"cathithere", "S1"), np.array([3, 2, 5]))
+    c = s.to_chars()
+    assert c.dtype == np.dtype("S1")
+    assert c.shape == (3, None)
+    assert c.is_string is False
+    assert c.data is s.data  # zero-copy buffer
+    np.testing.assert_array_equal(c.offsets, s.offsets)  # str_offsets promoted
+    np.testing.assert_array_equal(c[0], np.frombuffer(b"cat", "S1"))
+
+
+def test_to_strings_roundtrip():
+    s = Ragged.from_lengths(np.frombuffer(b"cathithere", "S1"), np.array([3, 2, 5]))
+    back = s.to_chars().to_strings()
+    assert back.dtype == np.dtype("S")
+    assert back.shape == (3,)
+    assert back[0] == b"cat"
+    assert back.data is s.data
+
+
+def test_to_chars_raises_on_non_opaque():
+    n = Ragged.from_lengths(np.arange(6, dtype=np.int32), np.array([3, 3]))
+    with pytest.raises(ValueError, match="opaque"):
+        n.to_chars()
+
+
+def test_to_strings_raises_on_trailing_dims():
+    data = np.zeros((6, 4), dtype="S1")
+    chars_with_trailing = Ragged.from_offsets(data, (2, None, 4), np.array([0, 2, 6]))
+    with pytest.raises(ValueError, match="1-D|trailing"):
+        chars_with_trailing.to_strings()
