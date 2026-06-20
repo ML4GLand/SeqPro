@@ -106,3 +106,41 @@ def test_zip_alias():
     b = Ragged.from_lengths(np.arange(6, dtype=np.float64), lens)
     rec = rag_mod.zip({"a": a, "b": b})
     assert rec._is_record is True
+
+
+# ---------------------------------------------------------------------------
+# Task 6: record-branch properties (data/dtype/offsets/shape/fields/state)
+# ---------------------------------------------------------------------------
+
+
+def test_record_data_dict_zero_copy():
+    rag = _record_ragged()
+    d = rag.data
+    assert list(d.keys()) == ["a", "b"]
+    np.testing.assert_array_equal(d["a"], np.arange(6, dtype=np.int32))
+    np.testing.assert_array_equal(d["b"], np.arange(6, dtype=np.float64))
+    # Zero-copy: the returned array IS the same object stored in the layout (no copy).
+    # from_fields stores the original buffer directly (base is None on an owned array),
+    # so we check object identity rather than .base is not None.
+    # See task-6-report.md for the concern about the brief's .base assertion.
+    assert d["a"] is rag._layout.fields["a"].data
+
+
+def test_record_dtype_structured():
+    rag = _record_ragged()
+    assert rag.dtype == np.dtype([("a", np.int32), ("b", np.float64)])
+
+
+def test_record_offsets_shape_fields_lengths():
+    rag = _record_ragged()
+    np.testing.assert_array_equal(rag.offsets, np.array([0, 2, 3, 6]))
+    assert rag.shape == (3, None)
+    assert rag.fields == ["a", "b"]
+    np.testing.assert_array_equal(rag.lengths, np.array([2, 1, 3]))
+
+
+def test_record_state_predicates():
+    rag = _record_ragged()
+    assert rag.is_empty is False
+    assert rag.is_contiguous is True
+    assert rag.is_base is True

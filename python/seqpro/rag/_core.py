@@ -143,11 +143,15 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return Ragged.from_offsets(data, shape, offsets)
 
     @property
-    def data(self) -> NDArray[Any]:
+    def data(self) -> "NDArray[Any] | dict[str, NDArray[Any]]":
+        if isinstance(self._layout, RecordLayout):
+            return {f: fl.data for f, fl in self._layout.fields.items()}
         return self._rl.data
 
     @property
     def offsets(self) -> NDArray[Any]:
+        if isinstance(self._layout, RecordLayout):
+            return self._layout.offsets[0]
         if self._layout.offsets:
             return self._layout.offsets[0]
         assert self._rl.str_offsets is not None
@@ -158,12 +162,23 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return self._layout.shape
 
     @property
-    def dtype(self) -> np.dtype[Any]:
+    def dtype(self) -> "np.dtype[Any]":
+        if isinstance(self._layout, RecordLayout):
+            return np.dtype(
+                [(f, fl.data.dtype) for f, fl in self._layout.fields.items()]
+            )
         if self._rl.is_string:
             return np.dtype(
                 "S"
             )  # opaque variable-width string: descriptor, not S1 storage
         return self._rl.data.dtype
+
+    @property
+    def fields(self) -> list[str]:
+        """Field names for a record Ragged. Raises TypeError on non-record arrays."""
+        if isinstance(self._layout, RecordLayout):
+            return list(self._layout.fields)
+        raise TypeError("fields is only defined on record Ragged arrays")
 
     @property
     def is_string(self) -> bool:
@@ -183,11 +198,22 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     @property
     def is_contiguous(self) -> bool:
+        if isinstance(self._layout, RecordLayout):
+            return self.offsets.ndim == 1 and all(
+                fl.data.flags.c_contiguous for fl in self._layout.fields.values()
+            )
         return self.offsets.ndim == 1 and self._rl.data.flags.c_contiguous
 
     @property
     def is_base(self) -> bool:
         offsets = self.offsets
+        if isinstance(self._layout, RecordLayout):
+            fields = self._layout.fields.values()
+            owns = all(fl.data.base is None for fl in fields)
+            size0 = next(iter(self._layout.fields.values())).data.shape[0]
+            return bool(
+                owns and self.is_contiguous and offsets[0] == 0 and offsets[-1] == size0
+            )
         data = self._rl.data
         owns_memory = data.base is None or (
             data.base is not None and data.base.base is None
@@ -326,7 +352,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                     x.offsets, ref_offsets
                 ):
                     raise ValueError("ufunc operands must share offsets")
-                raw_inputs.append(x.data)
+                raw_inputs.append(x._rl.data)
             else:
                 raw_inputs.append(x)
         result = getattr(ufunc, method)(*raw_inputs, **kwargs)
@@ -436,10 +462,10 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             if length is not None
             else (int(rag.lengths.max()) if n_rows else 0)
         )
-        dtype = rag.data.dtype
+        dtype = rag._rl.data.dtype
         out = np.full((n_rows, out_len), pad_value, dtype=dtype)
         if n_rows and out_len:
-            data_u1 = np.ascontiguousarray(rag.data).reshape(-1).view(np.uint8)
+            data_u1 = np.ascontiguousarray(rag._rl.data).reshape(-1).view(np.uint8)
             out_u1 = out.reshape(-1).view(np.uint8)
             _to_padded_copy(data_u1, offsets, out_u1, dtype.itemsize, out_len)
         leading = rag.shape[: rag.rag_dim]
@@ -452,7 +478,9 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         packed = self if self.is_base else self.to_packed()
         row_len = int(lengths.flat[0]) if lengths.size else 0
         leading = packed.shape[: packed.rag_dim]
-        return packed.data.reshape(*(leading or (-1,)), row_len, *packed.data.shape[1:])  # pyrefly: ignore[no-matching-overload] -- leading dims before rag_dim are always int; numpy stub can't verify this
+        return packed._rl.data.reshape(  # pyrefly: ignore[no-matching-overload] -- leading dims before rag_dim are always int; numpy stub can't verify this
+            *(leading or (-1,)), row_len, *packed._rl.data.shape[1:]
+        )
 
     def __array__(self, dtype: Any = None) -> NDArray[Any]:
         arr = self.to_numpy()
