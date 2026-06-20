@@ -1,10 +1,10 @@
 pub mod kmer_encode;
 pub mod kshuffle;
-pub mod translate;
 #[cfg(test)]
 #[allow(dead_code, clippy::all)]
 mod kshuffle_ref;
 pub mod ragged;
+pub mod translate;
 
 use ndarray::prelude::*;
 use numpy::{IntoPyArray, PyArray, PyReadonlyArray, PyReadonlyArray1};
