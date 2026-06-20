@@ -304,7 +304,7 @@ pub fn _translate_drop<'py>(
             let mut keep = true;
             for j in 0..k {
                 let b = codons[[c, j]] & 0xDF;
-                if !valid.iter().any(|&v| v == b) {
+                if !valid.contains(&b) {
                     keep = false;
                     break;
                 }
@@ -344,6 +344,7 @@ fn decode_ohe_rows(data: ndarray::ArrayView2<u8>, nuc: &[u8]) -> Vec<u8> {
 /// round-trip through the Numba-backed ohe/decode_ohe. `data` is (total, n_nuc);
 /// returns (total/codon_size, n_aa).
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (data, nuc_bytes, codon_size, lut=None, keys=None, values=None, aa_bytes=None, marker=88))]
 pub fn _translate_ohe<'py>(
     py: Python<'py>,
@@ -362,7 +363,7 @@ pub fn _translate_ohe<'py>(
     let aa_bytes = aa_bytes.as_slice()?;
     let total = data.shape()[0];
     let n_aa = aa_bytes.len();
-    if codon_size == 0 || total % codon_size != 0 {
+    if codon_size == 0 || !total.is_multiple_of(codon_size) {
         return Err(PyValueError::new_err(
             "total rows must be a positive multiple of codon_size",
         ));
@@ -412,6 +413,7 @@ pub fn _translate_ohe<'py>(
 /// valid). Returns the compacted (n_kept, n_aa) OHE array and codon-indexed new
 /// offsets. `offsets` are nucleotide-row offsets (multiples of codon_size).
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (data, nuc_bytes, codon_size, valid_upper, offsets, lut=None, keys=None, values=None, aa_bytes=None, marker=88))]
 pub fn _translate_ohe_drop<'py>(
     py: Python<'py>,
@@ -434,7 +436,7 @@ pub fn _translate_ohe_drop<'py>(
     let aa_bytes = aa_bytes.as_slice()?;
     let total = data.shape()[0];
     let n_aa = aa_bytes.len();
-    if codon_size == 0 || total % codon_size != 0 {
+    if codon_size == 0 || !total.is_multiple_of(codon_size) {
         return Err(PyValueError::new_err(
             "total rows must be a positive multiple of codon_size",
         ));
@@ -478,7 +480,7 @@ pub fn _translate_ohe_drop<'py>(
             let mut keep = true;
             for j in 0..codon_size {
                 let b = nuc_buf[c * codon_size + j] & 0xDF;
-                if !valid.iter().any(|&v| v == b) {
+                if !valid.contains(&b) {
                     keep = false;
                     break;
                 }
