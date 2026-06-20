@@ -24,6 +24,12 @@ keeps pointing at the awkward type; the public swap, awkward removal, and
 See the [roadmap](../../roadmap/rust-ragged.md) for the locked epic-wide
 decisions. This spec applies them to single-level records (R = 1).
 
+**SSoT compliance.** The roadmap is the single source of truth for this epic; all
+Rust-`Ragged` work must read it and update it in the same PR. This spec obeys that
+directive: the roadmap's Spec B entry and decision log were amended (2026-06-20)
+to record this design and the `.parts` drop. Any PR implementing this spec must
+likewise update the roadmap's status when Spec B lands.
+
 ## Scope
 
 **In scope (single ragged level, records):**
@@ -121,8 +127,8 @@ documented loudly on the property; callers must not assume packed-struct memory.
 **`.parts` is dropped.** Spec A's `_core.py` already omits it; the old
 `dict[str, RagParts]` form has no analog now that `RagParts` is gone, and
 `.data` + `.offsets` + `.dtype` cover its uses. *This diverges from the roadmap's
-Spec B line, which lists `.parts`; the roadmap should get a one-line edit
-recording the drop.*
+original Spec B line, which listed `.parts`; the roadmap was amended (2026-06-20
+decision log + Spec B entry) to record the drop.*
 
 ## Section 4 — Field access & mutation
 

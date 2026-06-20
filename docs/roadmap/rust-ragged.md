@@ -4,6 +4,24 @@
 **Started:** 2026-06-19
 **Branch:** `feat/rust-ragged`
 
+## ⚠️ This file is the single source of truth (SSoT)
+
+This document is the **authoritative status and decision record** for the
+Rust-native `Ragged` epic. Any work on Rust-native `Ragged` (Spec A–D, or any
+follow-up) **MUST**:
+
+1. **Read this roadmap first** — locked decisions, scope constraints, and the
+   spec sequence below are binding context for all related work.
+2. **Update this roadmap as part of the same PR** — when a spec lands, a decision
+   changes, scope shifts, or a divergence from an earlier spec is introduced,
+   amend the relevant section (spec entry, decision log, or locked decisions) in
+   the PR that makes the change. A Rust-`Ragged` PR that does not update this file
+   when it should is incomplete.
+
+Per-spec design docs in `docs/superpowers/specs/` hold the detailed design; this
+roadmap holds the status, the locked epic-wide decisions, and the decision log.
+On conflict, the most recent decision-log entry here wins.
+
 ## Motivation
 
 `seqpro.rag.Ragged` is currently a subclass of `awkward.Array` restricted to
@@ -95,11 +113,16 @@ doc → implementation plan → build cycle.
    *Exit:* existing single-level, non-record tests pass with awkward removed
    from this path.
 
-2. **Spec B — Records / struct-of-arrays.**
-   Native record `Ragged`: shared offset list across fields, mixed
-   string+numeric leaves, native `zip`/record constructor (replaces `ak.zip`),
-   per-field dict `.dtype`/`.data`/`.parts`, zero-copy field access,
-   record-aware `to_packed`.
+2. **Spec B — Records / struct-of-arrays.** *(Design approved 2026-06-20 —
+   [design doc](../superpowers/specs/2026-06-20-rust-ragged-records-design.md).)*
+   Native record `Ragged`: `RecordLayout` composing per-field `RaggedLayout`s over
+   one shared offsets object, mixed string+numeric leaves, native `from_fields` /
+   `rag.zip` constructor (replaces `ak.zip`), per-field dict `.dtype`/`.data`,
+   zero-copy field access + `__setitem__` mutation, record-aware `to_packed`.
+   **`.parts` is dropped** (was listed here originally; superseded — see decision
+   log). `.dtype` returns a structured dtype as a *descriptor only* (SoA, not AoS).
+   `to_numpy`/`to_padded` return per-field dicts and raise on string fields;
+   `view`/ufunc raise on records. No new Rust kernels.
    *Exit:* genoray + single-level GVL/GVF record cases work.
 
 3. **Spec C — Arbitrary-depth nested raggedness.**
@@ -126,3 +149,15 @@ doc → implementation plan → build cycle.
   awkward type; the swap + tokenize/translate adaptation are deferred to Spec D
   (records to Spec B, nesting to Spec C). Confirmed string-leaf shape change
   `(N, None) -> (N,)` for byte collections.
+- **2026-06-20** — Roadmap declared the SSoT for this epic (see directive at top):
+  all Rust-`Ragged` work must read it and update it in the same PR.
+- **2026-06-20** — Spec B design approved (records / struct-of-arrays). Locked:
+  separate `RecordLayout` composing per-field `RaggedLayout`s over one shared
+  offsets object; `from_fields` canonical + `rag.zip` alias (fields offset-equal,
+  canonicalized to one shared object); `__setitem__` field mutation; row `int`
+  index → dict, `slice`/`mask` → record `Ragged`; `to_numpy`/`to_padded` → per-field
+  SoA dicts that raise on string fields; `view`/ufunc raise on records; no new
+  Rust kernels (reuse Spec A per field). **`.parts` dropped** — `_core.py` already
+  omits it and `RagParts` is gone; `.data`/`.offsets`/`.dtype` cover its uses.
+  `.dtype` returns a structured dtype as a descriptor only (SoA, not AoS). Spec B
+  stays internal/oracle-tested; public swap remains Spec D.
