@@ -275,7 +275,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return offsets[:-1], offsets[1:]
         return offsets[0], offsets[1]
 
-    def __getitem__(self, where: Any) -> "NDArray[Any] | bytes | Ragged[Any]":
+    def __getitem__(
+        self, where: Any
+    ) -> "NDArray[Any] | bytes | dict[str, Any] | Ragged[Any]":
+        if isinstance(self._layout, RecordLayout):
+            return self._getitem_record(where)
         starts, stops = self._starts_stops()
         if isinstance(where, (int, np.integer)):
             lo, hi = int(starts[where]), int(stops[where])
@@ -325,6 +329,54 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 str_offsets=self._rl.str_offsets,
             )
         return Ragged(new_layout)
+
+    def _getitem_record(self, where: Any) -> Any:
+        rec = self._layout
+        assert isinstance(rec, RecordLayout)
+        if isinstance(where, str):
+            try:
+                field = rec.fields[where]
+            except KeyError:
+                raise KeyError(where)
+            return Ragged(field)  # field.offsets[0] is the shared object (zero-copy)
+        return self._getitem_record_rows(where)  # Task 8
+
+    def _getitem_record_rows(self, where: Any) -> "Ragged[Any]":
+        raise NotImplementedError("record row-indexing lands in Task 8")
+
+    def __getattr__(self, name: str) -> "Ragged[Any]":
+        # Only reached when `name` is not a real attribute/slot.
+        # Must avoid recursion: use object.__getattribute__ to fetch _layout
+        # without going through __getattr__ again (which would happen if _layout
+        # is not set yet, e.g. during unpickling/copy before __init__).
+        try:
+            layout = object.__getattribute__(self, "_layout")
+        except AttributeError:
+            raise AttributeError(name)
+        if isinstance(layout, RecordLayout) and name in layout.fields:
+            return Ragged(layout.fields[name])
+        raise AttributeError(name)
+
+    def __setitem__(self, key: str, value: "Ragged[Any]") -> None:
+        if not isinstance(self._layout, RecordLayout):
+            raise TypeError("item assignment is only supported on record Ragged arrays")
+        if not isinstance(key, str):
+            raise TypeError("record field assignment requires a string field name")
+        if value._is_record or value.is_string:
+            raise NotImplementedError(
+                "record fields must be numeric/char single fields"
+            )
+        shared = self._layout.offsets[0]
+        if not np.array_equal(value.offsets, shared):
+            raise ValueError("assigned field offsets must equal the record's offsets")
+        new_field = RaggedLayout(
+            data=value._rl.data, offsets=[shared], shape=value._layout.shape
+        )
+        new_fields = dict(self._layout.fields)
+        new_fields[key] = new_field
+        self._layout = RecordLayout(
+            offsets=[shared], shape=self._layout.shape, fields=new_fields
+        )
 
     def _with_data(self, new_data: NDArray[Any]) -> "Ragged[Any]":
         return Ragged(

@@ -144,3 +144,60 @@ def test_record_state_predicates():
     assert rag.is_empty is False
     assert rag.is_contiguous is True
     assert rag.is_base is True
+
+
+# ---------------------------------------------------------------------------
+# Task 7: record field access (key/attr) + __setitem__ mutation
+# ---------------------------------------------------------------------------
+
+
+def test_field_access_by_key_and_attr():
+    rag = _record_ragged()
+    np.testing.assert_array_equal(rag["a"].data, np.arange(6, dtype=np.int32))
+    np.testing.assert_array_equal(rag.a.data, rag["a"].data)
+    assert rag["a"].offsets is rag.offsets
+    assert rag["a"].offsets is rag["b"].offsets
+
+
+def test_field_access_unknown_raises():
+    rag = _record_ragged()
+    with pytest.raises(KeyError):
+        rag["nope"]
+
+
+def test_setitem_replace_field():
+    rag = _record_ragged()
+    rag["a"] = rag["a"].view(np.uint32)
+    assert rag["a"].dtype == np.dtype(np.uint32)
+    assert rag["a"].offsets is rag.offsets
+
+
+def test_setitem_add_field():
+    rag = _record_ragged()
+    new = Ragged.from_offsets(np.arange(6, dtype=np.int16), (3, None), rag.offsets)
+    rag["c"] = new
+    assert rag.fields == ["a", "b", "c"]
+    assert rag["c"].offsets is rag.offsets
+
+
+def test_setitem_offset_mismatch_raises():
+    rag = _record_ragged()
+    bad = Ragged.from_lengths(
+        np.arange(6, dtype=np.int32), np.array([3, 1, 2], np.uint32)
+    )
+    with pytest.raises(ValueError, match="offset|equal"):
+        rag["d"] = bad
+
+
+def test_getattr_unknown_raises_attribute_error():
+    rag = _record_ragged()
+    with pytest.raises(AttributeError):
+        _ = rag.nonexistent
+
+
+def test_getattr_single_level_unknown_raises_attribute_error():
+    rag = Ragged.from_lengths(
+        np.arange(6, dtype=np.int32), np.array([2, 1, 3], np.uint32)
+    )
+    with pytest.raises(AttributeError):
+        _ = rag.someunknownattr
