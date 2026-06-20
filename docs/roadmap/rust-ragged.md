@@ -70,16 +70,20 @@ what lets us drop awkward's general machinery.
 | Awkward end-state | **Full removal, drop-in.** New type *is* `Ragged`; `awkward` leaves the dependency tree. Public API stays as close to today as possible. |
 | Rust/Python boundary | **Python holds the NumPy buffers; Rust does the layout algebra** (nested indexing/slicing math, multi-level pack/pad, validation). ufuncs and zero-copy NumPy interop stay pure-Python. Mirrors the existing kshuffle/tokenize/translate kernel pattern. |
 | Axis model | **Ragged run + regular ends.** `(*leading_int, None×R, *trailing_int)`. No regular axis between ragged axes. |
-| String leaf | **A bytes/`S1` element is an opaque variable-width leaf; its byte-length is never an axis.** A collection of `N` sequences has shape `(N,)`, dtype bytes. String byte-offsets are stored but not counted in `.shape`/`.offsets`. This keeps records clean: a string field and a numeric field at the same level share identical axes. |
+| String/char duality | **ASCII has two intentional interpretations, distinguished by dtype-as-descriptor; storage is a flat single-byte buffer either way.** *Opaque string:* `.dtype == np.dtype('S')` (itemsize 0), shape `(N,)` — the byte-length is **not** an axis (lives in `str_offsets`). *Ascii chars:* `.dtype == np.dtype('S1')` (itemsize 1), shape `(N, ~length)` — the length **is** a ragged axis (real `offsets`). Zero-copy `to_chars()`/`to_strings()` retag between them (promote/demote `str_offsets ↔ offsets`). This lets a sequence either stay opaque (length need not align with siblings on `zip`) or decompose to chars (must align on `~length`). numpy floor stays `>=1.26`. |
 
-### Consequence of the string-leaf decision
+### Consequence of the string/char decision
 
 The flat `.data` (S1 buffer) and byte-offsets for a sequence `Ragged` are
 *physically unchanged* — `tokenize`/`translate` kernels are byte-identical. What
-changes is shape bookkeeping: a byte collection's `.shape` drops its `None`
-(`(N, None)` → `(N,)`), and constructors learn "bytes dtype ⇒ trailing offsets
-are the string leaf, not an axis." A small, contained set of seqpro-owned call
-sites adapt; no kernel rewrites. Downstream gets a clean string-leaf constructor.
+changes is shape/dtype bookkeeping: an **opaque-string** collection's `.shape`
+drops its `None` (`(N, None)` → `(N,)`) and `.dtype` reports `np.dtype('S')`
+(decoupled from the `S1` storage buffer — the descriptor-not-storage pattern),
+while **chars** are an ordinary `S1` ragged with shape `(N, ~length)`. Records
+that must length-align a sequence with numeric siblings use chars (same shape,
+one shared offsets); opaque strings are for when length should not align. A
+small, contained set of seqpro-owned call sites adapt; no kernel rewrites.
+Downstream gets clean string/char constructors + zero-copy conversions.
 
 ## Shape survey (genoray / GenVarLoader / genvarformer)
 
@@ -98,7 +102,9 @@ Surveyed 2026-06-19 across `~/projects/{genoray,GenVarLoader,genvarformer}`.
 
 **Findings:** raggedness is 1 level almost everywhere, 2 nested levels in three
 hot cases; **zero** instances of a regular axis between two ragged axes; records
-(SoA) are pervasive and routinely mix string and numeric fields at a shared level.
+(SoA) are pervasive and routinely mix string and numeric fields at a shared level
+(in the Rust-native model, such sequence fields are expressed as `S1` **chars** so
+they share one offsets object with their numeric siblings — see string/char duality).
 
 ## Spec sequence
 
@@ -113,21 +119,28 @@ doc → implementation plan → build cycle.
    *Exit:* existing single-level, non-record tests pass with awkward removed
    from this path.
 
-2. **Spec B — Records / struct-of-arrays.** *(Design approved 2026-06-20 —
+2. **Spec B — Core string/char duality + records / struct-of-arrays.**
+   *(Design approved 2026-06-20 —
    [design doc](../superpowers/specs/2026-06-20-rust-ragged-records-design.md).)*
-   Native record `Ragged`: `RecordLayout` composing per-field `RaggedLayout`s over
-   one shared offsets object, mixed string+numeric leaves, native `from_fields` /
-   `rag.zip` constructor (replaces `ak.zip`), per-field dict `.dtype`/`.data`,
-   zero-copy field access + `__setitem__` mutation, record-aware `to_packed`.
-   **`.parts` is dropped** (was listed here originally; superseded — see decision
-   log). `.dtype` returns a structured dtype as a *descriptor only* (SoA, not AoS).
-   `to_numpy`/`to_padded` return per-field dicts and raise on string fields;
-   `view`/ufunc raise on records. No new Rust kernels.
-   *Exit:* genoray + single-level GVL/GVF record cases work.
+   **Prerequisite core refinement (modifies Spec A):** the string/char duality —
+   opaque `'S'` strings (`(N,)`, `str_offsets`) vs `'S1'` chars (`(N, ~length)`,
+   real `offsets`), `.dtype`-as-descriptor, zero-copy `to_chars()`/`to_strings()`,
+   `from_lengths(S1, …)` defaults to opaque.
+   **Records:** native `RecordLayout` composing per-field `RaggedLayout`s over
+   **one shared offsets object with the same shape**, fields **numeric and/or
+   `S1` chars**, native `from_fields` / `rag.zip` (replaces `ak.zip`), per-field
+   dict `.dtype` (structured, descriptor-only) / `.data`, zero-copy field access +
+   `__setitem__` mutation, record-aware `to_packed`, per-field `to_numpy`/`to_padded`
+   dicts. **`.parts` dropped** (was listed originally; superseded). `view`/ufunc
+   raise on records. **Opaque `'S'` strings are standalone only** (not record
+   fields); `view`/ufunc raise on records. No new Rust kernels.
+   *Exit:* genoray + single-level GVL/GVF record cases work (sequences as chars).
 
-3. **Spec C — Arbitrary-depth nested raggedness.**
+3. **Spec C — Arbitrary-depth nested raggedness + `'S'`-under-an-axis.**
    Generalize to `R ≥ 2`: nested offset list, multi-level indexing/slicing,
-   nested constructors, multi-level `to_packed`/`to_padded`, nested records.
+   nested constructors, multi-level `to_packed`/`to_padded`, nested records. Also
+   the opaque-string-**under**-a-ragged-axis leaf (a field carrying both shared
+   `offsets` and its own `str_offsets`), which the alleles case needs.
    Rust: nested-pack / nested-index kernels.
    *Exit:* the three doubly-ragged cases (alleles, flat windows, codon
    annotations) work.
@@ -161,3 +174,18 @@ doc → implementation plan → build cycle.
   omits it and `RagParts` is gone; `.data`/`.offsets`/`.dtype` cover its uses.
   `.dtype` returns a structured dtype as a descriptor only (SoA, not AoS). Spec B
   stays internal/oracle-tested; public swap remains Spec D.
+- **2026-06-20** — String/char duality adopted (supersedes the original
+  "String leaf" locked decision). ASCII has two intentional interpretations:
+  opaque `'S'` strings (`(N,)`, length in `str_offsets`, not an axis) and `'S1'`
+  chars (`(N, ~length)`, length is a counted ragged axis), distinguished by
+  `.dtype` as a descriptor (storage is a flat single-byte buffer either way).
+  Zero-copy `to_chars()`/`to_strings()` retag between them. `from_lengths(S1, …)`
+  defaults to opaque. `np.dtype('S')` (itemsize 0) chosen over `StringDType`
+  (numpy 2.0-only) / `np.str_` to keep the **numpy `>=1.26` floor**. This pulls
+  the core string refinement into Spec B as a prerequisite (modifies landed
+  Spec A) and **simplifies Spec B records**: sequence fields that length-align
+  with numeric siblings are chars (same shape, one shared offsets), so the record
+  invariant reverts to **shared offsets + same shape**; the earlier
+  shared-offsets-not-shape correction is withdrawn. **Opaque `'S'` strings are
+  standalone only in Spec B**; the `'S'`-under-a-ragged-axis leaf (alleles)
+  moves to **Spec C**.
