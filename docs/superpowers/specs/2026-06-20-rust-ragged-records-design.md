@@ -64,26 +64,45 @@ rather than re-implementing leaf storage.
 RecordLayout:
     shape:   tuple[int|None,...]      # the shared ragged structure, e.g. (N, None)
     offsets: list[NDArray]            # ONE shared offsets object. Spec B: len == 1.
-    fields:  dict[str, RaggedLayout]  # insertion-ordered; every field's
-                                      # RaggedLayout.offsets[0] IS the same shared object.
+    shape:   tuple[int|None,...]      # canonical ragged shape, e.g. (N, None)
+    fields:  dict[str, RaggedLayout]  # insertion-ordered; each field carries the
+                                      # SAME shared offsets object (see below).
 ```
 
 - **Each field is a single-level `RaggedLayout`.** Numeric fields:
-  `str_offsets is None`, flat (or `(total, *trailing)`) `data`. String fields:
-  `data` is the `S1` buffer, `str_offsets` is the per-element byte boundaries.
-  Mixed string + numeric fields at one level share identical axes and the same
-  ragged `offsets` — this falls out of the model with no special casing.
+  `str_offsets is None`, `offsets == [shared]`, shape `(*leading, None)`,
+  flat (or `(total, *trailing)`) `data`. String fields (flat leaf):
+  `data` is the `S1` buffer, `offsets == []`, the shared offsets live in
+  `str_offsets`, and shape drops the trailing `None` → `(*leading,)`.
+- **What "shared" means (the key subtlety).** Within a record, fields share the
+  same *outermost ragged offsets* — the grouping into rows — **not** the same
+  shape. A numeric per-element field has shape `(*leading, None)` and holds the
+  shared array in `offsets[0]`; a co-located flat string field has shape
+  `(*leading,)` and holds the *same* shared array in `str_offsets` (its byte
+  boundaries == the numeric field's element boundaries). Spec A's `.offsets`
+  property already returns `str_offsets` for a flat string field, so both expose
+  the shared array through `.offsets`. This is the locked string-leaf decision:
+  "a string field and a numeric field at the same level share identical axes"
+  means identical *offsets*, not identical *shape*. (Strings sitting **under** a
+  counted ragged axis — alleles `(…, ~variants, ~allele_len)` — need a separate
+  variant-offsets + str-offsets pair and are Spec C.)
+- **`RecordLayout.shape`** is the canonical ragged shape `(*leading, None)`
+  (derived from the shared offsets: `(n_segments_in_leading…, None)`), even when
+  every field is a string. `.shape` returns this; individual string-field
+  `RaggedLayout.shape` is the leaf form `(*leading,)`.
 - **`Ragged._layout` is `RaggedLayout | RecordLayout`.** Methods branch on
   `isinstance(self._layout, RecordLayout)`; the non-record path is exactly Spec A.
-- **Invariant (validated once, at construction):** every field's
-  `offsets[0]` is the *same object* as `RecordLayout.offsets[0]`, and every
-  field's `shape` equals `RecordLayout.shape`.
+- **Invariant (validated once, at construction):** for every field, the array it
+  exposes through `.offsets` (i.e. `offsets[0]` for numeric, `str_offsets` for a
+  flat string field) **is the same object** as the record's shared offsets; the
+  leading (non-ragged) dims agree across fields.
 - **Field order** is dict insertion order, preserved everywhere a record is
   enumerated (`.data`, `.dtype`, `.fields`, `to_*` dicts).
 
 `validate_layout` gains a `RecordLayout` arm: non-empty fields, shared-offsets
-identity, per-field shape agreement, and each field individually validated via
-the existing single-level checks. Nested/record-of-record fields → Spec C
+identity (per the invariant above, accounting for string fields holding it in
+`str_offsets`), agreement of leading dims, and each field individually validated
+via the existing single-level checks. Nested/record-of-record fields → Spec C
 `NotImplementedError`.
 
 ## Section 2 — Constructors
@@ -92,12 +111,16 @@ the existing single-level checks. Nested/record-of-record fields → Spec C
   - Rejects an empty dict.
   - Requires each value to be a **single-field (non-record) `Ragged`**
     (record-of-record → Spec C `NotImplementedError`).
-  - Requires all fields' offsets to be **array-equal and same shape**; raises a
-    clear error otherwise.
-  - **Canonicalizes to one shared offsets object** — the first field's — so the
-    zero-copy `rag['a'].offsets is rag['b'].offsets` contract holds. Field data
-    buffers are referenced, not copied.
-  - Returns a `Ragged` wrapping a `RecordLayout`.
+  - Requires all fields' **`.offsets` to be array-equal** (and leading dims to
+    agree); raises a clear error otherwise. The `.offsets` comparison naturally
+    spans numeric fields (offsets) and flat string fields (str_offsets) — see §1.
+  - **Canonicalizes to one shared offsets object** — the first field's `.offsets`
+    — and rebinds every field's `RaggedLayout` onto it (numeric → `offsets[0]`,
+    flat string → `str_offsets`), so the zero-copy
+    `rag['a'].offsets is rag['b'].offsets` contract holds. Field data buffers are
+    referenced, not copied.
+  - Derives `RecordLayout.shape = (*leading, None)` from the shared offsets +
+    leading dims. Returns a `Ragged` wrapping the `RecordLayout`.
 - **`seqpro.rag.zip(fields)`** — thin module-level alias for `from_fields`,
   exported from `rag/__init__.py`. Eases the downstream `ak.zip(...)` →
   `sp.rag.zip(...)` migration (one code path; no separate behavior).
@@ -111,10 +134,10 @@ Direct reads off `RecordLayout`; non-record behavior is unchanged from Spec A.
 
 | Property | Record return |
 |---|---|
-| `data` | `dict[str, NDArray]` — zero-copy per-field buffers, insertion order. |
-| `dtype` | numpy **structured** dtype `[(name, field_dtype), …]`. |
+| `data` | `dict[str, NDArray]` — zero-copy per-field buffers (S1 for string fields), insertion order. |
+| `dtype` | numpy **structured** dtype `[(name, field_dtype), …]` (string fields appear as `S1`). |
 | `offsets` | the shared offsets `NDArray`. |
-| `shape` | the shared `shape` tuple. |
+| `shape` | the canonical ragged `shape` tuple `(*leading, None)` (string fields' leaf shape is internal). |
 | `fields` | `list[str]` of field names (insertion order). |
 | `lengths` | `np.diff` of shared offsets, reshaped to leading dims (as Spec A). |
 | `is_empty` / `is_contiguous` / `is_base` | computed off shared offsets; the data-contiguity / ownership checks fold over **all** fields. |
@@ -250,6 +273,14 @@ the record differential suite is green with awkward as oracle.
   `slice`/`mask` → record `Ragged`. `to_numpy`/`to_padded` → per-field dict (SoA),
   raising on string fields. `view`/ufunc raise on records.
 - **2026-06-20** — No new Rust; records reuse Spec A kernels per field.
+- **2026-06-20** (correction, found during plan-writing) — The record invariant is
+  **shared offsets, not shared shape**. A flat string field co-located with numeric
+  fields (e.g. the annotated-haplotypes record) has leaf shape `(*leading,)` and
+  holds the shared offsets in `str_offsets`, while numeric fields have shape
+  `(*leading, None)` and hold it in `offsets[0]`. Both expose it via `.offsets`, so
+  `from_fields` reconciles on `.offsets` equality and `RecordLayout.shape` is the
+  canonical `(*leading, None)`. Strings under a counted ragged axis (alleles) remain
+  Spec C.
 
 ## Open questions deferred to later specs
 
