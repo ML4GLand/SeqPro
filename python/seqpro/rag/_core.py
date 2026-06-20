@@ -288,31 +288,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 return row.tobytes()
             return row
         # slice / mask / int-array on the leading axis -> gather to (2, M)
-        n = len(starts)
-        if _where_is_bool(where):
-            mask_len = where.shape[0]
-            if mask_len != n:
-                raise IndexError(
-                    f"boolean index did not match indexed array along axis 0; "
-                    f"size of axis is {n} but size of corresponding boolean axis is {mask_len}"
-                )
-            idx = np.flatnonzero(where).astype(np.int64)
-        else:
-            idx = np.atleast_1d(np.asarray(np.arange(n)[where], dtype=np.int64))
-            # normalize negative indices so Rust kernel never receives negatives
-            idx = np.where(idx < 0, idx + n, idx)
-        try:
-            from seqpro.seqpro import _ragged_select  # type: ignore[missing-import]  # compiled Rust extension
-
-            sel_starts, sel_stops = _ragged_select(
-                np.ascontiguousarray(starts, np.int64),
-                np.ascontiguousarray(stops, np.int64),
-                idx,
-            )
-        except ImportError:  # pragma: no cover - fallback
-            sel_starts, sel_stops = starts[idx], stops[idx]
-        sel_starts = np.ascontiguousarray(sel_starts, dtype=OFFSET_TYPE)
-        sel_stops = np.ascontiguousarray(sel_stops, dtype=OFFSET_TYPE)
+        sel_starts, sel_stops = self._row_gather(where)
         new_offsets = np.stack([sel_starts, sel_stops], 0)
         if None not in self._layout.shape:  # string-leaf flat collection
             new_layout = RaggedLayout(
@@ -341,8 +317,61 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return Ragged(field)  # field.offsets[0] is the shared object (zero-copy)
         return self._getitem_record_rows(where)  # Task 8
 
-    def _getitem_record_rows(self, where: Any) -> "Ragged[Any]":
-        raise NotImplementedError("record row-indexing lands in Task 8")
+    def _row_gather(self, where: Any) -> "tuple[NDArray[Any], NDArray[Any]]":
+        """Given a slice/mask/int-array ``where``, return (sel_starts, sel_stops)
+        as contiguous OFFSET_TYPE arrays for the shared ragged axis."""
+        starts, stops = self._starts_stops()
+        n = len(starts)
+        if _where_is_bool(where):
+            if where.shape[0] != n:
+                raise IndexError(
+                    f"boolean index did not match indexed array along axis 0; "
+                    f"size of axis is {n} but size of corresponding boolean axis is {where.shape[0]}"
+                )
+            idx = np.flatnonzero(where).astype(np.int64)
+        else:
+            idx = np.atleast_1d(np.asarray(np.arange(n)[where], dtype=np.int64))
+            idx = np.where(idx < 0, idx + n, idx)
+        try:
+            from seqpro.seqpro import _ragged_select  # type: ignore[missing-import]
+
+            sel_starts, sel_stops = _ragged_select(
+                np.ascontiguousarray(starts, np.int64),
+                np.ascontiguousarray(stops, np.int64),
+                idx,
+            )
+        except ImportError:  # pragma: no cover
+            sel_starts, sel_stops = starts[idx], stops[idx]
+        return (
+            np.ascontiguousarray(sel_starts, dtype=OFFSET_TYPE),
+            np.ascontiguousarray(sel_stops, dtype=OFFSET_TYPE),
+        )
+
+    def _getitem_record_rows(self, where: Any) -> Any:
+        rec = self._layout
+        assert isinstance(rec, RecordLayout)
+        starts, stops = self._starts_stops()
+        if isinstance(where, (int, np.integer)):
+            lo, hi = int(starts[where]), int(stops[where])
+            out: dict[str, Any] = {}
+            for name, fl in rec.fields.items():
+                row = fl.data[lo:hi]
+                out[name] = row
+            return out
+        sel_starts, sel_stops = self._row_gather(where)
+        new_offsets = np.stack([sel_starts, sel_stops], 0)
+        new_shape = (len(sel_starts), *rec.shape[rec.shape.index(None) :])
+        new_fields = {
+            name: RaggedLayout(
+                data=fl.data,
+                offsets=[new_offsets],
+                shape=(len(sel_starts), *fl.shape[fl.shape.index(None) :]),
+            )
+            for name, fl in rec.fields.items()
+        }
+        return Ragged(
+            RecordLayout(offsets=[new_offsets], shape=new_shape, fields=new_fields)
+        )
 
     def __getattr__(self, name: str) -> "Ragged[Any]":
         # Only reached when `name` is not a real attribute/slot.

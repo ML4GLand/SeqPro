@@ -201,3 +201,32 @@ def test_getattr_single_level_unknown_raises_attribute_error():
     )
     with pytest.raises(AttributeError):
         _ = rag.someunknownattr
+
+
+# ---------------------------------------------------------------------------
+# Task 8: record row-axis indexing (slice/mask -> record, int -> dict)
+# ---------------------------------------------------------------------------
+
+
+def test_record_row_slice_returns_record():
+    rag = _record_ragged()
+    sub = rag[1:3]
+    assert sub._is_record is True
+    np.testing.assert_array_equal(sub["a"][0], np.array([2]))  # row 1 of a
+    np.testing.assert_array_equal(sub["b"][1], np.array([3.0, 4.0, 5.0]))  # row 2 of b
+    assert sub["a"].offsets is sub["b"].offsets  # shared gather
+
+
+def test_record_row_mask_returns_record():
+    rag = _record_ragged()
+    sub = rag[np.array([True, False, True])]
+    np.testing.assert_array_equal(sub["a"][0], np.array([0, 1]))
+    np.testing.assert_array_equal(sub["a"][1], np.array([3, 4, 5]))
+
+
+def test_record_row_int_returns_dict():
+    rag = _record_ragged()
+    row = rag[0]
+    assert set(row.keys()) == {"a", "b"}
+    np.testing.assert_array_equal(row["a"], np.array([0, 1], dtype=np.int32))
+    np.testing.assert_array_equal(row["b"], np.array([0.0, 1.0]))
