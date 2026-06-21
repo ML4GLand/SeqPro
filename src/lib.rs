@@ -23,6 +23,7 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(translate::_translate_ohe_drop, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_validate, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_select, m)?)?;
+    m.add_function(wrap_pyfunction!(_ragged_nested_gather, m)?)?;
     Ok(())
 }
 
@@ -58,6 +59,19 @@ fn _k_shuffle<'py>(
 #[pyfunction]
 fn _ragged_validate(offsets: PyReadonlyArray1<i64>, n_data: i64, n_segments: i64) -> PyResult<()> {
     ragged::validate(offsets.as_array(), n_data, n_segments).map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+fn _ragged_nested_gather<'py>(
+    py: Python<'py>,
+    o0_starts: PyReadonlyArray1<'py, i64>,
+    o0_stops: PyReadonlyArray1<'py, i64>,
+    mask: PyReadonlyArray1<'py, bool>,
+) -> RaggedSelectResult<'py> {
+    let (counts, idx) =
+        ragged::nested_gather(o0_starts.as_array(), o0_stops.as_array(), mask.as_array())
+            .map_err(PyValueError::new_err)?;
+    Ok((counts.into_pyarray(py), idx.into_pyarray(py)))
 }
 
 #[pyfunction]
