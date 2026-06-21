@@ -680,3 +680,22 @@ def test_record_nested_to_padded_per_field():
     out = rec.to_padded(-1)  # dict of per-field dense arrays
     assert set(out) == {"a"}
     assert out["a"].shape == (2, 2, 5)  # (L0, M, K), both-dense
+
+
+# ---------------------------------------------------------------------------
+# Task 15: _ingest bridge — record R=2 (oracle interop)
+# ---------------------------------------------------------------------------
+
+
+def test_bridge_r2_record_roundtrip():
+    arr = ak.zip(
+        {
+            "a": ak.Array([[[1, 2], [3]], [[4]]]),
+            "b": ak.Array([[[5, 6], [7]], [[8]]]),
+        },
+        depth_limit=1,
+    )
+    rec = Ragged(arr)
+    assert rec._is_record and rec.shape == (2, None, None)
+    assert rec["a"]._layout.offsets[0] is rec["b"]._layout.offsets[0]  # shared O0
+    assert rec.to_ak().to_list() == arr.to_list()

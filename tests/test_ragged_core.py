@@ -686,3 +686,22 @@ def test_string_under_axis_integer_index():
     )
     assert rag[0] == b"TT"
     assert rag[1] == b"GG"
+
+
+# ---------------------------------------------------------------------------
+# Task 15: _ingest bridge — R=2 + string-under-axis (oracle interop)
+# ---------------------------------------------------------------------------
+
+
+def test_bridge_r2_roundtrip():
+    arr = ak.Array([[[1, 2, 3], [4, 5]], [[6]]])
+    rag = Ragged(arr)
+    assert rag.shape == (2, None, None)
+    assert rag.to_ak().to_list() == arr.to_list()
+
+
+def test_bridge_string_under_axis_roundtrip():
+    arr = ak.Array([[b"AC", b"G"], [b"TTT"]])
+    rag = Ragged(arr)
+    assert rag.is_string and rag.shape == (2, None)
+    assert rag.to_ak().to_list() == arr.to_list()
