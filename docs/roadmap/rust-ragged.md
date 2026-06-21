@@ -120,7 +120,7 @@ doc → implementation plan → build cycle.
    from this path.
 
 2. **Spec B — Core string/char duality + records / struct-of-arrays.**
-   *(Design approved 2026-06-20 —
+   *(Landed 2026-06-20 —
    [design doc](../superpowers/specs/2026-06-20-rust-ragged-records-design.md).)*
    **Prerequisite core refinement (modifies Spec A):** the string/char duality —
    opaque `'S'` strings (`(N,)`, `str_offsets`) vs `'S1'` chars (`(N, ~length)`,
@@ -189,3 +189,16 @@ doc → implementation plan → build cycle.
   shared-offsets-not-shape correction is withdrawn. **Opaque `'S'` strings are
   standalone only in Spec B**; the `'S'`-under-a-ragged-axis leaf (alleles)
   moves to **Spec C**.
+- **2026-06-20** — Spec B landed: string/char duality + native records in
+  `_core.py` — `np.dtype('S')` opaque-string descriptor with zero-copy
+  `to_chars()`/`to_strings()`; `None`-in-shape disambiguates chars vs opaque;
+  `RecordLayout` + `from_fields`/`rag.zip`; record field access/mutation; row
+  indexing (`slice`/`mask` → record, `int` → dict); record
+  `to_packed`/`to_numpy`/`to_padded`; awkward bridge (`layout_from_ak`/`to_ak`);
+  differential-tested vs the awkward oracle. Two in-flight plan corrections:
+  record `is_base` relaxed to the single-level one-indirection rule (dropping a
+  redundant per-field copy in record `to_packed`); `__array__` raises `TypeError`
+  on records (-O-safe) rather than relying on a bare assert. Public
+  `seqpro.rag.Ragged` remains awkward-backed; the swap + tokenize/translate
+  adaptation remain Spec D. `skills/seqpro/SKILL.md` not updated (Spec B is
+  internal-only; skill update is Spec D).
