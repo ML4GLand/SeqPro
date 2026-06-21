@@ -12,6 +12,11 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 type RaggedSelectResult<'py> = PyResult<(&'py PyArray<i64, Ix1>, &'py PyArray<i64, Ix1>)>;
+type NestedPackResult<'py> = PyResult<(
+    &'py PyArray<i64, Ix1>,
+    &'py PyArray<i64, Ix1>,
+    &'py PyArray<u8, Ix1>,
+)>;
 
 #[pymodule]
 fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -24,6 +29,7 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_ragged_validate, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_select, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_nested_gather, m)?)?;
+    m.add_function(wrap_pyfunction!(_ragged_nested_pack, m)?)?;
     Ok(())
 }
 
@@ -74,6 +80,31 @@ fn _ragged_nested_gather<'py>(
     Ok((counts.into_pyarray(py), idx.into_pyarray(py)))
 }
 
+#[pyfunction]
+fn _ragged_nested_pack<'py>(
+    py: Python<'py>,
+    o0_starts: PyReadonlyArray1<'py, i64>,
+    o0_stops: PyReadonlyArray1<'py, i64>,
+    o1_starts: PyReadonlyArray1<'py, i64>,
+    o1_stops: PyReadonlyArray1<'py, i64>,
+    src: PyReadonlyArray1<'py, u8>,
+    elem: i64,
+) -> NestedPackResult<'py> {
+    let (o0, o1, out_bytes) = ragged::nested_pack(
+        o0_starts.as_array(),
+        o0_stops.as_array(),
+        o1_starts.as_array(),
+        o1_stops.as_array(),
+        src.as_array(),
+        elem,
+    )
+    .map_err(PyValueError::new_err)?;
+    Ok((
+        o0.into_pyarray(py),
+        o1.into_pyarray(py),
+        out_bytes.into_pyarray(py),
+    ))
+}
 #[pyfunction]
 fn _ragged_select<'py>(
     py: Python<'py>,

@@ -70,6 +70,46 @@ pub fn validate(offsets: ArrayView1<i64>, n_data: i64, n_segments: i64) -> Resul
     Ok(())
 }
 
+type NestedPackOutput = Result<(Array1<i64>, Array1<i64>, Array1<u8>), String>;
+
+pub fn nested_pack(
+    o0_starts: ArrayView1<i64>,
+    o0_stops: ArrayView1<i64>,
+    o1_starts: ArrayView1<i64>,
+    o1_stops: ArrayView1<i64>,
+    src: ArrayView1<u8>,
+    elem: i64,
+) -> NestedPackOutput {
+    let n_groups = o0_starts.len();
+    let mut o0 = Vec::with_capacity(n_groups + 1);
+    o0.push(0i64);
+    let mut o1 = vec![0i64];
+    let mut out: Vec<u8> = Vec::new();
+    let mut mid_count = 0i64;
+    let src_slice = src.as_slice().ok_or("src must be contiguous")?;
+    for (&a0, &b0) in o0_starts.iter().zip(o0_stops.iter()) {
+        for m in a0..b0 {
+            let mi = m as usize;
+            if mi >= o1_starts.len() || mi >= o1_stops.len() {
+                return Err("middle index out of bounds".into());
+            }
+            let (a, b) = (o1_starts[mi] * elem, o1_stops[mi] * elem);
+            if a < 0 || b < a || b as usize > src_slice.len() {
+                return Err("data span out of bounds".into());
+            }
+            out.extend_from_slice(&src_slice[a as usize..b as usize]);
+            o1.push(out.len() as i64 / elem);
+            mid_count += 1;
+        }
+        o0.push(mid_count);
+    }
+    Ok((
+        Array1::from_vec(o0),
+        Array1::from_vec(o1),
+        Array1::from_vec(out),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,6 +128,13 @@ mod tests {
         let o0_stops = array![3i64];
         let mask = array![true, false]; // mask shorter than middle count
         assert!(nested_gather(o0_starts.view(), o0_stops.view(), mask.view()).is_err());
+    }
+    #[test]
+    fn test_nested_gather_rejects_invalid_range() {
+        let starts = array![3i64];
+        let stops = array![1i64]; // b < a
+        let mask = array![true, true, true, true];
+        assert!(nested_gather(starts.view(), stops.view(), mask.view()).is_err());
     }
     #[test]
     fn test_select_gathers() {
@@ -112,5 +159,26 @@ mod tests {
     #[test]
     fn test_validate_rejects_nonmonotonic() {
         assert!(validate(array![0i64, 3, 2].view(), 10, 2).is_err());
+    }
+    #[test]
+    fn test_nested_pack_two_level() {
+        // group0: middles 0,1 ; group1: middle 2.  middle lens (elem=1): 2,1,3
+        let o0_starts = array![0i64, 2];
+        let o0_stops = array![2i64, 3];
+        let o1_starts = array![0i64, 2, 3];
+        let o1_stops = array![2i64, 3, 6];
+        let src: Array1<u8> = array![10, 11, 20, 30, 31, 32];
+        let (o0, o1, out) = nested_pack(
+            o0_starts.view(),
+            o0_stops.view(),
+            o1_starts.view(),
+            o1_stops.view(),
+            src.view(),
+            1,
+        )
+        .unwrap();
+        assert_eq!(o0, array![0i64, 2, 3]);
+        assert_eq!(o1, array![0i64, 2, 3, 6]);
+        assert_eq!(out, array![10u8, 11, 20, 30, 31, 32]);
     }
 }
