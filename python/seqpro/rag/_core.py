@@ -336,6 +336,14 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def __getitem__(
         self, where: Any
     ) -> "NDArray[Any] | bytes | dict[str, Any] | Ragged[Any]":
+        if (
+            isinstance(where, tuple)
+            and len(where) == 2
+            and not self._is_record
+            and self._rl.n_ragged == 2
+            and self._is_full_slice(where[0])
+        ):
+            return self._getitem_inner(where[1])
         if isinstance(where, tuple):
             result: Any = self
             for k in where:
@@ -417,6 +425,48 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         """Given a slice/mask/int-array ``where``, return (sel_starts, sel_stops)
         as contiguous OFFSET_TYPE arrays for the shared ragged axis."""
         return self._gather_indices(where, *self._starts_stops())
+
+    @staticmethod
+    def _is_full_slice(k: Any) -> bool:
+        return isinstance(k, slice) and k == slice(None)
+
+    def _getitem_inner(self, sel: Any) -> "Ragged[Any]":
+        o0, o1 = self._layout.offsets
+        o0_starts, o0_stops = _level_bounds(o0)
+        o1_starts, o1_stops = _level_bounds(o1)
+        if isinstance(sel, (int, np.integer)):  # k-th middle of each group -> R=1
+            counts = o0_stops - o0_starts
+            if np.any(sel >= counts) or np.any(-sel > counts):
+                raise IndexError(f"inner index {sel} out of range for some group")
+            mid_idx = (o0_starts + (sel if sel >= 0 else counts + sel)).astype(np.int64)
+            ds = np.ascontiguousarray(o1_starts[mid_idx], dtype=OFFSET_TYPE)
+            de = np.ascontiguousarray(o1_stops[mid_idx], dtype=OFFSET_TYPE)
+            trailing = self._layout.shape[self.rag_dim + 2 :]
+            return Ragged(
+                RaggedLayout(
+                    data=self._rl.data,
+                    offsets=[np.stack([ds, de], 0)],
+                    shape=(len(mid_idx), None, *trailing),
+                )
+            )
+        if isinstance(sel, slice):  # local per-group slice -> R=2
+            start, stop, step = sel.indices(1 << 62)
+            if step != 1:
+                raise NotImplementedError("step != 1 inner slices are unsupported")
+            new_starts = np.minimum(o0_starts + start, o0_stops)
+            new_stops = np.minimum(o0_starts + stop, o0_stops)
+            new_o0 = np.stack(
+                [new_starts.astype(OFFSET_TYPE), new_stops.astype(OFFSET_TYPE)], 0
+            )
+            trailing = self._layout.shape[self.rag_dim + 2 :]
+            return Ragged(
+                RaggedLayout(
+                    data=self._rl.data,
+                    offsets=[new_o0, o1],
+                    shape=(len(new_starts), None, None, *trailing),
+                )
+            )
+        return self._getitem_inner_gather(sel)  # type: ignore[attr-defined]  # mask / int-array -> Task 8
 
     def _getitem_r2(self, where: Any) -> "Ragged[Any]":
         """Index an R=2 array on the outer axis.

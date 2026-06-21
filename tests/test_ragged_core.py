@@ -540,3 +540,39 @@ def test_r2_tuple_indexing_and_leaf():
     )  # row0, middle1 -> data 3:5
     np.testing.assert_array_equal(rag[0][1], np.array([3, 4]))  # chaining equivalence
     assert isinstance(rag[2, 0], np.ndarray)
+
+
+# ---------------------------------------------------------------------------
+# Task 6: Per-group inner int / slice indexing (rag[:, k], rag[:, a:b])
+# ---------------------------------------------------------------------------
+
+
+def test_r2_per_group_inner_int():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    got = rag[:, 0]  # 0th middle of each group
+    assert got.shape == (2, None)
+    np.testing.assert_array_equal(got[0], np.array([0, 1, 2]))  # group0 middle0 -> 0:3
+    np.testing.assert_array_equal(got[1], np.array([5, 6, 7]))  # group1 middle0 -> 5:8
+
+
+def test_r2_per_group_inner_int_out_of_range():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 1, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    with pytest.raises(IndexError):
+        rag[:, 2]  # group0 has only 1 middle
+
+
+def test_r2_per_group_inner_slice():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    sub = rag[:, 0:1]  # first middle of each group, keep nesting
+    assert sub.shape == (2, None, None)
+    np.testing.assert_array_equal(sub[0, 0], np.array([0, 1, 2]))
+    np.testing.assert_array_equal(sub[1, 0], np.array([5, 6, 7]))
