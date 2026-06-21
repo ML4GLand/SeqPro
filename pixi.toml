@@ -92,6 +92,7 @@ pytest-codspeed = "*"
 [feature.bench.tasks]
 i-kernel = "ipython kernel install --user --name seqpro-bench"
 bench = "pytest tests/test_bench_tokenize.py --codspeed"
+rag-gate = "python benchmarks/bench_ragged_backends.py"
 
 [feature.bench.dependencies]
 marimo = ">=0.23.5,<0.24"

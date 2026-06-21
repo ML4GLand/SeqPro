@@ -169,6 +169,27 @@ doc → implementation plan → build cycle.
 
 ## Decision log
 
+- **2026-06-21** — Throughput gate ran; `rag-gate` pixi task wired.
+  `pixi run -e bench rag-gate` now runs the full A-vs-B benchmark
+  (`benchmarks/bench_ragged_backends.py`). Result: **18/23 passed
+  (tol=10.00%), exit code 1**. Categories: records ✓ (4/4), nested ✓ (8/8),
+  string ✓ (2/2), single ✗ (4/9). The 5 FAILing ops are all in the
+  single-level category and are **Spec D blockers** — must be optimised before
+  cutover:
+
+  | op | shape | awk (µs) | rust (µs) | rust/awk |
+  |---|---|---|---|---|
+  | construct | 8000×~11-60 i64 | 6.11 | 10.92 | **1.787** |
+  | index[slice] | 8000×~11-60 i64 | 15.76 | 19.07 | **1.211** |
+  | to_packed | 8000×~11-60 i64 | 27.80 | 118.11 | **4.248** |
+  | construct | 8000×~11-60 S1 | 6.79 | 10.80 | **1.590** |
+  | to_packed | 8000×~11-60 S1 | 28.80 | 44.66 | **1.551** |
+
+  Worst regressor: `to_packed` i64 at 4.25× slower. Root cause is
+  likely repeated Python-side offset arithmetic or unoptimised Rust pack
+  kernel for the single-level case. These are the priority targets for
+  the Spec D performance sprint.
+
 - **2026-06-21** — Spec D throughput gate designed
   ([design doc](../superpowers/specs/2026-06-21-ragged-throughput-gate-design.md)).
   A transitional, local A-vs-B benchmark gates the Spec D cutover: rust-native
