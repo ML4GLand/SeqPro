@@ -136,12 +136,19 @@ doc → implementation plan → build cycle.
    fields); `view`/ufunc raise on records. No new Rust kernels.
    *Exit:* genoray + single-level GVL/GVF record cases work (sequences as chars).
 
-3. **Spec C — Arbitrary-depth nested raggedness + `'S'`-under-an-axis.**
-   Generalize to `R ≥ 2`: nested offset list, multi-level indexing/slicing,
-   nested constructors, multi-level `to_packed`/`to_padded`, nested records. Also
-   the opaque-string-**under**-a-ragged-axis leaf (a field carrying both shared
-   `offsets` and its own `str_offsets`), which the alleles case needs.
-   Rust: nested-pack / nested-index kernels.
+3. **Spec C — Nested raggedness (R = 2) + `'S'`-under-an-axis.**
+   *(Design approved 2026-06-20 —
+   [design doc](../superpowers/specs/2026-06-20-rust-ragged-nested-design.md).)*
+   Generalize to **R = 2** (capped; R ≥ 3 → `NotImplementedError` — see decision
+   log): nested offset list `[O0, O1]`, **full numpy-style nested indexing**
+   (incl. per-group inner selection `rag[:, k]`/`rag[:, mask]`), nested
+   constructors, record-aware `to_packed`, **per-axis `to_padded`** (pad chosen
+   ragged axes, leave the rest ragged), nested records. Also the
+   opaque-string-**under**-a-ragged-axis leaf (non-empty `offsets` **and** its own
+   `str_offsets`), **standalone and as a record field** (each field keeps its own
+   `str_offsets`), with nested `to_chars`/`to_strings`. Lazy nested offsets
+   (approach A: inner offsets global, `(2,·)` gather forms, pack only on irregular
+   gathers). Rust: nested-pack + nested-gather kernels.
    *Exit:* the three doubly-ragged cases (alleles, flat windows, codon
    annotations) work.
 
@@ -202,3 +209,23 @@ doc → implementation plan → build cycle.
   `seqpro.rag.Ragged` remains awkward-backed; the swap + tokenize/translate
   adaptation remain Spec D. `skills/seqpro/SKILL.md` not updated (Spec B is
   internal-only; skill update is Spec D). Known latent item: opaque-string detection routes on dtype.kind=='S', which over-accepts multi-byte S4/S100 (no caller constructs it today; tighten to S1-only in Spec D).
+- **2026-06-20** — Spec C design approved (nested raggedness + string-under-axis).
+  Four forks decided during brainstorming:
+  1. **R = 2 cap** — implement exactly two nested ragged levels; R ≥ 3 →
+     `NotImplementedError`. **Divergence from this roadmap's "arbitrary depth"
+     framing**, chosen by YAGNI (every surveyed consumer tops out at R = 2).
+     Algorithms kept generalizable but the contract is R ≤ 2.
+  2. **Full numpy-style nested indexing** — positional logical-axis selectors
+     incl. per-group inner selection (`rag[:, k]`, `rag[:, a:b]`,
+     `rag[:, mask]`/`int_array`); adds a nested-gather Rust kernel.
+  3. **Per-axis `to_padded`** — `axis`/`length` choose which ragged axis/axes to
+     densify (inner → trailing regular dim; outer → uniform count; both → dense),
+     leaving the rest ragged.
+  4. **String-under-axis is standalone + a record field** — non-empty `offsets` +
+     own `str_offsets`; the shared-offsets record invariant covers only counted
+     axes, so each field keeps its private `str_offsets`. `to_chars`/`to_strings`
+     promote/demote the innermost real offset level ↔ `str_offsets`.
+  Layout: lazy nested offsets (inner global, `(2,·)` gather forms, pack only on
+  irregular middle gathers); two new Rust kernels (nested-pack, nested-gather);
+  record-of-record stays out of scope. Spec C stays internal/oracle-tested; public
+  swap + tokenize/translate adaptation remain Spec D.
