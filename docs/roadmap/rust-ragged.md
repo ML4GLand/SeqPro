@@ -169,6 +169,45 @@ doc → implementation plan → build cycle.
 
 ## Decision log
 
+- **2026-06-21** — Throughput gate **GREEN: 23/23 passed (tol=10.00%), exit 0**
+  after optimizing the 5 single-level regressors. All categories now pass with
+  rust at or below awkward; worst ratio is `to_packed` i64 (unpacked) at 0.986
+  (a genuine, fair, narrow win). Three changes, all **Python-only** (no
+  `src/*.rs` edit, no `maturin` rebuild — the rust/numba kernels were already
+  competitive):
+
+  1. **Opt-in validation (default off).** `Ragged.__init__` previously ran
+     `validate_layout` on *every* construction (including every `__getitem__`
+     result), checking R=1 monotonicity **twice** (numpy `_is_monotonic` +
+     rust `_ragged_validate`) — awkward validates nothing on construct. This
+     both violated the documented "validation is opt-in and front-loaded via a
+     `validate=` flag" convention (CLAUDE.md) and was the `construct` perf bug.
+     Now `from_offsets`/`from_lengths`/`__init__` take `validate: bool = False`;
+     `validate=True` is the one obvious way to ask "is this input clean?" Fixed
+     `construct` (i64 1.79×→0.094, S1 1.59×→0.084) and removed re-validation on
+     indexing results.
+  2. **Slice indexing fast-path.** For a `slice`, `__getitem__` now takes
+     `starts[sl]`/`stops[sl]` views instead of materializing `np.arange(n)` +
+     `np.where` + a rust gather. Fixed `index[slice]` (1.21×→0.226). Verified
+     equivalent to the old path across normal/full/empty/step/negative slice
+     forms.
+  3. **Benchmark fairness fix for `to_packed`.** The prior `to_packed` cells fed
+     **already-packed** data, where awkward's `to_packed` is zero-copy (shares
+     the buffer) while rust's `to_packed(copy=True)` does a defensive
+     `data.copy()` — comparing *unequal work*, contrary to the gate's
+     same-logical-work principle. The single-level `to_packed` cells now pack
+     **unpacked** (masked) input so both backends perform the real gather; rust
+     wins (i64 0.986, S1 0.866). This corrected the earlier "4.25× blocker"
+     framing: the numba `_pack` kernel was never the problem — it beats awkward
+     on genuine pack work; the cell was measuring awkward's degenerate
+     already-packed shortcut. Records/nested `to_packed` cells were left on
+     packed input (rust wins there regardless, as awkward does real structural
+     work).
+
+  Net: the 5 entries below are **resolved**; none remain Spec D blockers. Full
+  rag pytest suite green (3 pre-existing pyarrow `PyExtensionType` failures
+  unrelated/unchanged); ruff clean.
+
 - **2026-06-21** — Throughput gate ran; `rag-gate` pixi task wired.
   `pixi run -e bench rag-gate` now runs the full A-vs-B benchmark
   (`benchmarks/bench_ragged_backends.py`). Result: **18/23 passed
