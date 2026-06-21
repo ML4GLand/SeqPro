@@ -336,6 +336,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def __getitem__(
         self, where: Any
     ) -> "NDArray[Any] | bytes | dict[str, Any] | Ragged[Any]":
+        if isinstance(where, tuple):
+            result: Any = self
+            for k in where:
+                result = result[k]
+            return result
         if isinstance(self._layout, RecordLayout):
             return self._getitem_record(where)
         if self._layout.n_ragged == 2:

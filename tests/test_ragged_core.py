@@ -523,3 +523,20 @@ def test_r2_outer_slice_preserves_nesting():
     # row1 had 1 middle (data 5:8), row2 had 1 middle (data 8:10)
     np.testing.assert_array_equal(sub[0][0], np.array([5, 6, 7]))
     np.testing.assert_array_equal(sub[1][0], np.array([8, 9]))
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Tuple indexing + leaf access via peel chaining
+# ---------------------------------------------------------------------------
+
+
+def test_r2_tuple_indexing_and_leaf():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (3, None, None), [np.array([0, 2, 3, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    np.testing.assert_array_equal(
+        rag[0, 1], np.array([3, 4])
+    )  # row0, middle1 -> data 3:5
+    np.testing.assert_array_equal(rag[0][1], np.array([3, 4]))  # chaining equivalence
+    assert isinstance(rag[2, 0], np.ndarray)
