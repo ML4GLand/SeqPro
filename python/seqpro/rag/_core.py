@@ -19,23 +19,28 @@ def _where_is_bool(where: Any) -> bool:
 
 
 def _build_layout(
-    data: NDArray[Any], shape: tuple[int | None, ...], offsets: NDArray[Any]
+    data: NDArray[Any],
+    shape: tuple[int | None, ...],
+    offsets: "NDArray[Any] | list[NDArray[Any]]",
 ) -> RaggedLayout[Any]:
-    """Build a single-level layout under the string/char rule.
+    """Build a ragged layout (R=0, R=1, or R=2) under the string/char rule.
 
-    - ``None`` present in ``shape``  -> counted ragged axis: numeric, or S1 *chars*
-      (length is an axis). ``offsets`` is the ragged axis; ``str_offsets`` is None.
-    - no ``None`` + S1 data          -> opaque *string* leaf: ``offsets`` is stored
+    - ``None`` present in ``shape``  -> counted ragged axis(es): numeric, or S1 *chars*
+      (length is an axis). ``offsets`` is a list of offset arrays; ``str_offsets`` is None.
+    - no ``None`` + S1 data          -> opaque *string* leaf: first offset array is stored
       as ``str_offsets``; the byte-length is not an axis.
     """
-    if None in shape:
-        return RaggedLayout(data=data, offsets=[offsets], shape=shape)
-    if data.dtype.kind == "S":
-        # S1-only by convention; multi-byte S (S4/S100) is unsupported and not tightened here (see Spec D)
-        return RaggedLayout(data=data, offsets=[], shape=shape, str_offsets=offsets)
-    raise ValueError(
-        "shape must have exactly one None ragged dimension for numeric data"
-    )
+    n_none = shape.count(None)
+    off_list = offsets if isinstance(offsets, list) else [offsets]
+    if n_none == 0:
+        if data.dtype.kind == "S":
+            # S1-only by convention; multi-byte S (S4/S100) is unsupported and not tightened here (see Spec D)
+            (off,) = off_list
+            return RaggedLayout(data=data, offsets=[], shape=shape, str_offsets=off)
+        raise ValueError("shape must have a None ragged dimension for numeric data")
+    if len(off_list) != n_none:
+        raise ValueError(f"expected {n_none} offsets arrays, got {len(off_list)}")
+    return RaggedLayout(data=data, offsets=off_list, shape=shape)
 
 
 class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
@@ -75,23 +80,38 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     @staticmethod
     def from_offsets(
-        data: NDArray[Any], shape: tuple[int | None, ...], offsets: NDArray[Any]
+        data: NDArray[Any],
+        shape: tuple[int | None, ...],
+        offsets: "NDArray[Any] | list[NDArray[Any]]",
     ) -> "Ragged[Any]":
-        if shape.count(None) > 1:
-            raise NotImplementedError(
-                "nested raggedness (>1 ragged level) lands in Spec C"
-            )
+        if shape.count(None) >= 3:
+            raise NotImplementedError("nested raggedness with R >= 3 is unsupported")
         if shape.count(None) == 0 and data.dtype.kind != "S":
-            raise ValueError("shape must have exactly one None ragged dimension")
-        offsets = np.ascontiguousarray(offsets, dtype=OFFSET_TYPE)
-        return Ragged(_build_layout(data, shape, offsets))
+            raise ValueError("shape must have a None ragged dimension")
+        off_list = offsets if isinstance(offsets, list) else [offsets]
+        off_list = [np.ascontiguousarray(o, dtype=OFFSET_TYPE) for o in off_list]
+        return Ragged(_build_layout(data, shape, off_list))
 
     @staticmethod
-    def from_lengths(data: NDArray[Any], lengths: NDArray[Any]) -> "Ragged[Any]":
+    def from_lengths(
+        data: NDArray[Any], lengths: "NDArray[Any] | tuple[NDArray[Any], NDArray[Any]]"
+    ) -> "Ragged[Any]":
+        if isinstance(lengths, tuple):
+            outer_counts, inner_lengths = lengths
+            o0 = lengths_to_offsets(np.asarray(outer_counts).reshape(-1))
+            o1 = lengths_to_offsets(np.asarray(inner_lengths).reshape(-1))
+            trailing = data.shape[1:]
+            shape: tuple[int | None, ...] = (
+                *np.asarray(outer_counts).shape,
+                None,
+                None,
+                *trailing,
+            )
+            return Ragged.from_offsets(data, shape, [o0, o1])
         offsets = lengths_to_offsets(lengths)
         if data.dtype.kind == "S" and data.ndim == 1:
             # opaque string collection: (N,), byte-length is not an axis
-            shape: tuple[int | None, ...] = tuple(lengths.shape)
+            shape = tuple(lengths.shape)
             return Ragged.from_offsets(data, shape, offsets)
         trailing = data.shape[1:]
         shape = (*lengths.shape, None, *trailing)

@@ -142,9 +142,40 @@ def test_empty():
     np.testing.assert_array_equal(rag.offsets, np.zeros(4, dtype=np.int64))
 
 
-def test_from_offsets_rejects_two_none():
-    with pytest.raises(NotImplementedError, match="Spec C"):
-        Ragged.from_offsets(np.arange(6), (2, None, None), np.array([0, 6]))
+def test_from_offsets_nested_list():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data,
+        (2, None, None),
+        [np.array([0, 2, 3]), np.array([0, 3, 5, 10])],
+    )
+    assert rag.shape == (2, None, None)
+    assert len(rag._layout.offsets) == 2
+    np.testing.assert_array_equal(rag._layout.offsets[0], np.array([0, 2, 3]))
+    np.testing.assert_array_equal(rag._layout.offsets[1], np.array([0, 3, 5, 10]))
+    assert rag.data is data  # zero-copy
+    # full peel/index verified in Task 4/5
+
+
+def test_from_offsets_rejects_three_none():
+    with pytest.raises(NotImplementedError):
+        Ragged.from_offsets(
+            np.arange(6),
+            (1, None, None, None),
+            [np.array([0, 1]), np.array([0, 2]), np.array([0, 6])],
+        )
+
+
+def test_from_lengths_nested_tuple():
+    data = np.arange(10, dtype=np.int32)
+    outer = np.array([2, 1])  # row0 has 2 middles, row1 has 1
+    inner = np.array([3, 2, 5])  # the 3 middles' leaf lengths
+    rag = Ragged.from_lengths(data, (outer, inner))
+    assert rag.shape == (2, None, None)
+    np.testing.assert_array_equal(rag._layout.offsets[0], np.array([0, 2, 3]))
+    np.testing.assert_array_equal(rag._layout.offsets[1], np.array([0, 3, 5, 10]))
+    assert rag.data is data  # zero-copy
+    # to_ak() parity verified in Task 15/16
 
 
 def test_state_predicates():
