@@ -802,34 +802,102 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return Ragged.from_offsets(packed_data, self._layout.shape, packed_offsets)
 
     def to_padded(
-        self, pad_value: Any, *, length: int | None = None
-    ) -> "NDArray[Any] | dict[str, NDArray[Any]]":
+        self,
+        pad_value: Any,
+        *,
+        length: "int | tuple[int | None, int | None] | None" = None,
+        axis: "int | None" = None,
+    ) -> "NDArray[Any] | Ragged[Any] | dict[str, NDArray[Any]]":
         if isinstance(self._layout, RecordLayout):
             return {  # pyrefly: ignore[bad-return] -- fields are never records; inner calls return NDArray
                 f: cast(
                     "NDArray[Any]",
-                    cast("Ragged[Any]", self[f]).to_padded(pad_value, length=length),
+                    cast("Ragged[Any]", self[f]).to_padded(
+                        pad_value, length=length, axis=axis
+                    ),
                 )
                 for f in self._layout.fields
             }
+        if self._layout.n_ragged == 2:
+            return self._to_padded_nested(pad_value, length=length, axis=axis)
         from ._ops import _to_padded_copy
 
+        # Part A: support trailing regular dims (e.g. (N, None, K) -> (N, out_len, K))
         rag = self if self.is_contiguous else self.to_packed()
         offsets = np.ascontiguousarray(rag.offsets, dtype=OFFSET_TYPE)
         n_rows = offsets.shape[0] - 1
         out_len = (
-            int(length)
+            int(length)  # type: ignore[arg-type]
             if length is not None
             else (int(rag.lengths.max()) if n_rows else 0)
         )
         dtype = rag._rl.data.dtype
-        out = np.full((n_rows, out_len), pad_value, dtype=dtype)
+        trailing = tuple(rag._rl.data.shape[1:])  # regular trailing dims (() for plain)
+        out = np.full((n_rows, out_len, *trailing), pad_value, dtype=dtype)
         if n_rows and out_len:
             data_u1 = np.ascontiguousarray(rag._rl.data).reshape(-1).view(np.uint8)
             out_u1 = out.reshape(-1).view(np.uint8)
-            _to_padded_copy(data_u1, offsets, out_u1, dtype.itemsize, out_len)
+            elem_bytes = (
+                dtype.itemsize * int(np.prod(trailing, dtype=np.int64))
+                if trailing
+                else dtype.itemsize
+            )
+            _to_padded_copy(data_u1, offsets, out_u1, elem_bytes, out_len)
         leading = rag.shape[: rag.rag_dim]
-        return out.reshape((*leading, out_len)) if leading else out  # pyrefly: ignore[no-matching-overload] -- leading dims before rag_dim are always int; numpy stub can't verify this
+        if leading or trailing:
+            return out.reshape((*leading, out_len, *trailing))  # pyrefly: ignore[no-matching-overload] -- leading/trailing dims are always int; numpy stub can't verify this
+        return out
+
+    def _to_padded_nested(
+        self,
+        pad_value: Any,
+        *,
+        length: "int | tuple[int | None, int | None] | None",
+        axis: "int | None",
+    ) -> "NDArray[Any] | Ragged[Any]":
+        """Pad an R=2 Ragged array along one or both ragged axes.
+
+        axis=-1  -> pad inner only; returns R=1 Ragged with shape (*leading, ~M, K)
+        axis=-2  -> deferred (NotImplementedError, Spec C)
+        axis=None -> pad both axes; returns dense ndarray with shape (*leading, M, K)
+        """
+        rag = self if self.is_contiguous else self.to_packed()
+        o0 = rag._layout.offsets[0]
+        o1 = rag._layout.offsets[1]
+        len_m, len_k = length if isinstance(length, tuple) else (length, length)
+        rag_dim = rag.rag_dim
+        trailing = rag._layout.shape[rag_dim + 2 :]
+        # middle-as-rows single-level view over O1, then pad each middle's data to K
+        inner_view = Ragged(
+            RaggedLayout(
+                data=rag._rl.data, offsets=[o1], shape=(len(o1) - 1, None, *trailing)
+            )
+        )
+        padded_raw = inner_view.to_padded(
+            pad_value, length=len_k
+        )  # (M_total, K, *trailing)
+        assert isinstance(
+            padded_raw, np.ndarray
+        )  # inner_view is R=1, never dict or Ragged
+        padded: NDArray[Any] = padded_raw
+        if axis == -2:
+            raise NotImplementedError(
+                "to_padded(axis=-2) (outer-only with ragged inner) is not supported in Spec C"
+            )
+        result_shape: tuple[int | None, ...] = (
+            *rag.shape[:rag_dim],
+            None,
+            *padded.shape[1:],
+        )
+        if axis == -1:  # pad inner only -> Ragged (*leading, ~M, K)
+            return Ragged(RaggedLayout(data=padded, offsets=[o0], shape=result_shape))
+        # axis is None -> pad BOTH -> dense (*leading, M, K)
+        outer_view = Ragged(RaggedLayout(data=padded, offsets=[o0], shape=result_shape))
+        result = outer_view.to_padded(pad_value, length=len_m)
+        assert isinstance(
+            result, np.ndarray
+        )  # outer_view is R=1 with trailing dim, always dense
+        return result
 
     def to_numpy(
         self, allow_missing: bool = False
@@ -841,6 +909,22 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 )
                 for f in self._layout.fields
             }
+        if self._layout.n_ragged == 2:
+            packed = self.to_packed()
+            o0, o1 = packed._layout.offsets  # canonical 1-D after pack
+            grp_lens = np.diff(o0)
+            mid_lens = np.diff(o1)
+            if grp_lens.size and not np.all(grp_lens == grp_lens[0]):
+                raise ValueError("cannot convert a jagged outer axis to a dense array")
+            if mid_lens.size and not np.all(mid_lens == mid_lens[0]):
+                raise ValueError("cannot convert a jagged inner axis to a dense array")
+            result = self.to_padded(
+                np.zeros((), self.dtype)[()]
+            )  # rectangular -> pad is identity (both dense)
+            assert isinstance(
+                result, np.ndarray
+            )  # axis=None on R=2 always returns dense
+            return result
         lengths = self.lengths
         if lengths.size and not np.all(lengths == lengths.flat[0]):
             raise ValueError("cannot convert a jagged Ragged to a dense array")

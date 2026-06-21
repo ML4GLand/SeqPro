@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from seqpro.rag import Ragged, lengths_to_offsets
+from seqpro.rag._core import Ragged as CoreRagged
 from seqpro.rag._ops import to_padded
 
 
@@ -214,3 +215,47 @@ def test_matches_awkward_float32():
     out = to_padded(rag, 0.0)
     expected = _naive_pad_numeric(rag, 0.0, length)
     np.testing.assert_array_equal(out, expected)
+
+
+# --------------------------------------------------------------------------- #
+# R=2 CoreRagged tests (Task 11)
+# --------------------------------------------------------------------------- #
+
+
+def test_r2_to_padded_inner():
+    data = np.arange(10, dtype=np.int32)
+    rag = CoreRagged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 3]), np.array([0, 3, 5, 10])]
+    )
+    out = rag.to_padded(-1, axis=-1)
+    assert out.shape == (2, None, 5)
+    np.testing.assert_array_equal(out[0, 0], np.array([0, 1, 2, -1, -1]))
+
+
+def test_r2_to_padded_both_dense():
+    data = np.arange(10, dtype=np.int32)
+    rag = CoreRagged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 3]), np.array([0, 3, 5, 10])]
+    )
+    dense = rag.to_padded(-1)
+    assert dense.shape == (2, 2, 5)
+    np.testing.assert_array_equal(dense[1, 1], np.full(5, -1))
+
+
+def test_r2_to_padded_axis_minus2_unsupported():
+    data = np.arange(10, dtype=np.int32)
+    rag = CoreRagged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 3]), np.array([0, 3, 5, 10])]
+    )
+    with pytest.raises(NotImplementedError, match="axis=-2"):
+        rag.to_padded(0, axis=-2)
+
+
+def test_r2_to_numpy_rectangular():
+    data = np.arange(12, dtype=np.int32)
+    rag = CoreRagged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 4]), np.array([0, 3, 6, 9, 12])]
+    )
+    arr = rag.to_numpy()
+    assert arr.shape == (2, 2, 3)
+    np.testing.assert_array_equal(arr[1, 1], np.array([9, 10, 11]))
