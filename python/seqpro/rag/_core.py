@@ -563,6 +563,8 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def _getitem_record_rows(self, where: Any) -> Any:
         rec = self._layout
         assert isinstance(rec, RecordLayout)
+        if len(rec.offsets) == 2:
+            return self._getitem_record_rows_r2(where)
         starts, stops = self._starts_stops()
         if isinstance(where, (int, np.integer)):
             lo, hi = int(starts[where]), int(stops[where])
@@ -584,6 +586,78 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         }
         return Ragged(
             RecordLayout(offsets=[new_offsets], shape=new_shape, fields=new_fields)
+        )
+
+    def _getitem_record_rows_r2(self, where: Any) -> Any:
+        rec = self._layout
+        assert isinstance(rec, RecordLayout)
+        o0, o1 = rec.offsets
+        o0_starts, o0_stops = _level_bounds(o0)
+        if isinstance(where, (int, np.integer)):
+            # peel one outer row -> dict of per-field 1-level Rageds
+            return {name: Ragged(fl)[where] for name, fl in rec.fields.items()}
+        sel_starts, sel_stops = self._gather_indices(where, o0_starts, o0_stops)
+        new_o0 = np.stack([sel_starts, sel_stops], 0)
+        new_shared = [new_o0, o1]  # keep O1 global; share across fields
+        rag_dim = rec.shape.index(None)
+        new_shape = (len(sel_starts), None, None, *rec.shape[rag_dim + 2 :])
+        new_fields = {
+            name: RaggedLayout(
+                data=fl.data,
+                offsets=new_shared,
+                shape=(
+                    len(sel_starts),
+                    None,
+                    None,
+                    *fl.shape[fl.shape.index(None) + 2 :],
+                ),
+                str_offsets=fl.str_offsets,
+            )
+            for name, fl in rec.fields.items()
+        }
+        return Ragged(
+            RecordLayout(offsets=new_shared, shape=new_shape, fields=new_fields)
+        )
+
+    def _to_packed_record_r2(self, copy: bool) -> "Ragged[Any]":
+        from ._ops import _nested_pack_parts
+
+        rec = self._layout
+        assert isinstance(rec, RecordLayout)
+        o0, o1 = rec.offsets
+        if not copy:
+            already = (
+                o0.ndim == 1
+                and o1.ndim == 1
+                and (o0.size == 0 or o0[0] == 0)
+                and (o1.size == 0 or o1[0] == 0)
+                and all(
+                    fl.data.flags.c_contiguous and int(o1[-1]) == fl.data.shape[0]
+                    for fl in rec.fields.values()
+                )
+            )
+            if already:
+                return self
+            raise ValueError(
+                "to_packed(copy=False) requires already-packed input; got an unpacked nested record."
+            )
+        shared_packed: list[NDArray[Any]] | None = None
+        new_fields: dict[str, RaggedLayout[Any]] = {}
+        for name, fl in rec.fields.items():
+            pdata, poff = _nested_pack_parts(fl.data, fl.shape, rec.offsets, copy=True)
+            if shared_packed is None:
+                shared_packed = (
+                    poff  # all fields produce identical [o0,o1]; share the first
+                )
+            new_fields[name] = RaggedLayout(
+                data=pdata,
+                offsets=shared_packed,
+                shape=fl.shape,
+                str_offsets=fl.str_offsets,
+            )
+        assert shared_packed is not None
+        return Ragged(
+            RecordLayout(offsets=shared_packed, shape=rec.shape, fields=new_fields)
         )
 
     def __getattr__(self, name: str) -> "Ragged[Any]":
@@ -772,6 +846,8 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
         if isinstance(self._layout, RecordLayout):
             rec = self._layout
+            if len(rec.offsets) == 2:
+                return self._to_packed_record_r2(copy)
             shared = self.offsets
             if not copy:
                 already = (

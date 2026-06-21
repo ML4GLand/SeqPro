@@ -644,3 +644,39 @@ def test_record_string_under_axis_field():
     )  # shared ~variants O0
     assert rec["ref"][0] == b"A"
     assert rec["alt"][0] == b"TT"
+
+
+# ---------------------------------------------------------------------------
+# Task 14: R=2 record row indexing + to_packed + to_padded/to_numpy (Part C)
+# ---------------------------------------------------------------------------
+
+
+def test_record_nested_to_packed_shared_offsets():
+    offs = [np.array([0, 2, 3, 4]), np.array([0, 3, 5, 8, 10])]
+    a = Ragged.from_offsets(np.arange(10, dtype=np.int32), (3, None, None), offs)
+    b = Ragged.from_offsets(np.arange(10, dtype=np.float64), (3, None, None), offs)
+    rec = Ragged.from_fields({"a": a, "b": b})[1:3].to_packed()
+    assert rec["a"]._layout.offsets[0] is rec["b"]._layout.offsets[0]
+    assert rec["a"]._layout.offsets[1] is rec["b"]._layout.offsets[1]
+    np.testing.assert_array_equal(rec["a"][0, 0], np.array([5, 6, 7]))
+
+
+def test_record_nested_row_slice():
+    offs = [np.array([0, 2, 3, 4]), np.array([0, 3, 5, 8, 10])]
+    a = Ragged.from_offsets(np.arange(10, dtype=np.int32), (3, None, None), offs)
+    rec = Ragged.from_fields({"a": a})
+    sub = rec[1:3]
+    assert sub._is_record and sub.shape == (2, None, None)
+    np.testing.assert_array_equal(
+        sub["a"][0, 0], np.array([5, 6, 7])
+    )  # row1 -> middle -> data[5:8]
+
+
+def test_record_nested_to_padded_per_field():
+    # Confirms Part C (per-field dispatch works for R=2)
+    offs = [np.array([0, 2, 3]), np.array([0, 3, 5, 10])]
+    a = Ragged.from_offsets(np.arange(10, dtype=np.int32), (2, None, None), offs)
+    rec = Ragged.from_fields({"a": a})
+    out = rec.to_padded(-1)  # dict of per-field dense arrays
+    assert set(out) == {"a"}
+    assert out["a"].shape == (2, 2, 5)  # (L0, M, K), both-dense
