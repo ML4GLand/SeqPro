@@ -453,6 +453,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             start, stop, step = sel.indices(1 << 62)
             if step != 1:
                 raise NotImplementedError("step != 1 inner slices are unsupported")
+            if (sel.start is not None and sel.start < 0) or (
+                sel.stop is not None and sel.stop < 0
+            ):
+                raise NotImplementedError(
+                    "negative inner-slice bounds (rag[:, -k:]) are unsupported"
+                )
             new_starts = np.minimum(o0_starts + start, o0_stops)
             new_stops = np.minimum(o0_starts + stop, o0_stops)
             new_o0 = np.stack(

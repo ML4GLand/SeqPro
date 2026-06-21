@@ -576,3 +576,14 @@ def test_r2_per_group_inner_slice():
     assert sub.shape == (2, None, None)
     np.testing.assert_array_equal(sub[0, 0], np.array([0, 1, 2]))
     np.testing.assert_array_equal(sub[1, 0], np.array([5, 6, 7]))
+
+
+def test_r2_per_group_inner_slice_negative_raises():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data,
+        (2, None, None),
+        [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])],
+    )
+    with pytest.raises(NotImplementedError, match="negative"):
+        rag[:, -2:]
