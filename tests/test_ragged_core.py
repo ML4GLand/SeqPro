@@ -628,3 +628,45 @@ def test_r2_inner_uniform_int_array():
     np.testing.assert_array_equal(
         sub[2], np.array([6, 7, 8])
     )  # (g1, idx0) -> data[6:9]
+
+
+# ---------------------------------------------------------------------------
+# Task 12: R=2 lengths / squeeze / reshape
+# ---------------------------------------------------------------------------
+
+
+def test_r2_lengths_outer_counts():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 3]), np.array([0, 3, 5, 10])]
+    )
+    np.testing.assert_array_equal(rag.lengths, np.array([2, 1]))  # outer middle counts
+
+
+def test_r2_squeeze_leading_one():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data,
+        (1, 2, None, None),
+        [np.array([0, 2, 3]), np.array([0, 3, 5, 10])],
+    )
+    sq = rag.squeeze(0)
+    assert sq.shape == (2, None, None)
+    assert sq._layout.offsets[0] is rag._layout.offsets[0]  # O0 preserved
+    assert sq._layout.offsets[1] is rag._layout.offsets[1]  # O1 preserved
+
+
+def test_r2_reshape_leading():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 3]), np.array([0, 3, 5, 10])]
+    )
+    r = rag.reshape(1, 2, None, None)  # split the outer axis into leading (1, 2)
+    assert r.shape == (1, 2, None, None)
+    assert (
+        r._layout.offsets[0] is rag._layout.offsets[0]
+    )  # offsets pass through unchanged
+    assert r._layout.offsets[1] is rag._layout.offsets[1]
+    np.testing.assert_array_equal(
+        r.data, rag.data
+    )  # data preserved (reshape view of 1-D)

@@ -681,10 +681,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                     f"cannot squeeze axis {a} of size {self._layout.shape[a]}"
                 )
         shape = tuple(s for i, s in enumerate(self._layout.shape) if i not in axis)
+        inner_axis = self.rag_dim + (1 if self._layout.n_ragged == 2 else 0)
         data_trailing = tuple(
             s
             for i, s in enumerate(self._layout.shape)
-            if i not in axis and i > self.rag_dim
+            if i not in axis and i > inner_axis
         )
         data = self._rl.data.reshape(len(self._rl.data), *data_trailing)
         return Ragged(
@@ -718,8 +719,17 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         new_rag_shape = tuple(
             s if s is not None and s >= 0 else n_rag // n_new for s in new_rag_shape
         )
-        data = self._rl.data.reshape(len(self._rl.data), *shape[rag_dim + 1 :])
-        new_shape: tuple[int | None, ...] = (*new_rag_shape, None, *data.shape[1:])
+        if self._layout.n_ragged == 2:
+            data = self._rl.data.reshape(len(self._rl.data), *shape[rag_dim + 2 :])
+            new_shape: tuple[int | None, ...] = (
+                *new_rag_shape,
+                None,
+                None,
+                *data.shape[1:],
+            )
+        else:
+            data = self._rl.data.reshape(len(self._rl.data), *shape[rag_dim + 1 :])
+            new_shape = (*new_rag_shape, None, *data.shape[1:])
         return Ragged(
             RaggedLayout(
                 data=data,
@@ -731,8 +741,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     @property
     def lengths(self) -> NDArray[Any]:
-        offsets = self.offsets
-        raw = np.diff(offsets) if offsets.ndim == 1 else np.diff(offsets, axis=0)
+        o0: NDArray[Any] = (
+            self._layout.offsets[0] if self._layout.offsets else self._rl.str_offsets  # type: ignore[assignment]
+        )
+        starts, stops = _level_bounds(o0)
+        raw = stops - starts
         rag_dim = (
             self._layout.shape.index(None)
             if None in self._layout.shape
