@@ -80,6 +80,9 @@ pub fn nested_pack(
     src: ArrayView1<u8>,
     elem: i64,
 ) -> NestedPackOutput {
+    if elem <= 0 {
+        return Err("elem must be positive".into());
+    }
     let n_groups = o0_starts.len();
     let mut o0 = Vec::with_capacity(n_groups + 1);
     o0.push(0i64);
@@ -88,12 +91,20 @@ pub fn nested_pack(
     let mut mid_count = 0i64;
     let src_slice = src.as_slice().ok_or("src must be contiguous")?;
     for (&a0, &b0) in o0_starts.iter().zip(o0_stops.iter()) {
+        if a0 < 0 || b0 < a0 {
+            return Err("invalid o0 range".into());
+        }
         for m in a0..b0 {
             let mi = m as usize;
             if mi >= o1_starts.len() || mi >= o1_stops.len() {
                 return Err("middle index out of bounds".into());
             }
-            let (a, b) = (o1_starts[mi] * elem, o1_stops[mi] * elem);
+            let a = o1_starts[mi]
+                .checked_mul(elem)
+                .ok_or("byte offset overflow")?;
+            let b = o1_stops[mi]
+                .checked_mul(elem)
+                .ok_or("byte offset overflow")?;
             if a < 0 || b < a || b as usize > src_slice.len() {
                 return Err("data span out of bounds".into());
             }
@@ -180,5 +191,39 @@ mod tests {
         assert_eq!(o0, array![0i64, 2, 3]);
         assert_eq!(o1, array![0i64, 2, 3, 6]);
         assert_eq!(out, array![10u8, 11, 20, 30, 31, 32]);
+    }
+    #[test]
+    fn test_nested_pack_rejects_zero_elem() {
+        let o0s = array![0i64];
+        let o0e = array![1i64];
+        let o1s = array![0i64];
+        let o1e = array![2i64];
+        let src = array![1u8, 2];
+        assert!(nested_pack(
+            o0s.view(),
+            o0e.view(),
+            o1s.view(),
+            o1e.view(),
+            src.view(),
+            0
+        )
+        .is_err());
+    }
+    #[test]
+    fn test_nested_pack_rejects_invalid_o0_range() {
+        let o0s = array![3i64];
+        let o0e = array![1i64]; // b0 < a0
+        let o1s = array![0i64, 2];
+        let o1e = array![2i64, 4];
+        let src = array![1u8, 2, 3, 4];
+        assert!(nested_pack(
+            o0s.view(),
+            o0e.view(),
+            o1s.view(),
+            o1e.view(),
+            src.view(),
+            1
+        )
+        .is_err());
     }
 }

@@ -105,6 +105,7 @@ fn _ragged_nested_pack<'py>(
         out_bytes.into_pyarray(py),
     ))
 }
+
 #[pyfunction]
 fn _ragged_select<'py>(
     py: Python<'py>,
