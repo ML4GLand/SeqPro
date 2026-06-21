@@ -177,18 +177,20 @@ doc → implementation plan → build cycle.
   single-level category and are **Spec D blockers** — must be optimised before
   cutover:
 
-  | op | shape | awk (µs) | rust (µs) | rust/awk |
-  |---|---|---|---|---|
-  | construct | 8000×~11-60 i64 | 6.11 | 10.92 | **1.787** |
-  | index[slice] | 8000×~11-60 i64 | 15.76 | 19.07 | **1.211** |
-  | to_packed | 8000×~11-60 i64 | 27.80 | 118.11 | **4.248** |
-  | construct | 8000×~11-60 S1 | 6.79 | 10.80 | **1.590** |
-  | to_packed | 8000×~11-60 S1 | 28.80 | 44.66 | **1.551** |
+  | op | shape | awk (µs) | rust (µs) | rust/awk | backing layer |
+  |---|---|---|---|---|---|
+  | construct | 8000×~11-60 i64 | 6.11 | 10.92 | **1.787** | rust ingest (`from_offsets`) |
+  | index[slice] | 8000×~11-60 i64 | 15.76 | 19.07 | **1.211** | rust |
+  | to_packed | 8000×~11-60 i64 | 27.80 | 118.11 | **4.248** | numba `_pack` (via `_pack_parts`) |
+  | construct | 8000×~11-60 S1 | 6.79 | 10.80 | **1.590** | rust ingest (`from_offsets`) |
+  | to_packed | 8000×~11-60 S1 | 28.80 | 44.66 | **1.551** | numba `_pack` (via `_pack_parts`) |
 
-  Worst regressor: `to_packed` i64 at 4.25× slower. Root cause is
-  likely repeated Python-side offset arithmetic or unoptimised Rust pack
-  kernel for the single-level case. These are the priority targets for
-  the Spec D performance sprint.
+  Worst regressor: `to_packed` i64 at 4.25× slower. The single-level
+  `to_packed` regressions are in the **numba** kernel `seqpro.rag._ops._pack`
+  (via `_pack_parts`) — NOT in Rust. (The nested R=2 `to_packed`, backed by the
+  rust `_ragged_nested_pack` extension, passed the gate.) The `construct` and
+  `index[slice]` FAILs are in the rust ingest path. These are the priority
+  targets for the Spec D performance sprint.
 
 - **2026-06-21** — Spec D throughput gate designed
   ([design doc](../superpowers/specs/2026-06-21-ragged-throughput-gate-design.md)).
