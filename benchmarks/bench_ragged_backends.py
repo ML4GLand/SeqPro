@@ -173,9 +173,19 @@ def single_cells() -> list[Cell]:
     mask = np.arange(8000) % 3 == 0
     cells.append(Cell("single", "index[mask]", sh, lambda: akx[mask], lambda: rx[mask]))
 
+    # Use UNPACKED input for to_packed so both backends do real gather work.
+    # On already-packed data: awkward to_packed is zero-copy (shares buffer) while
+    # rust to_packed(copy=True) does a defensive data.copy() — unequal work.
+    # On unpacked (masked) input both backends must gather scattered segments.
+    akx_unpacked = akx[mask]
+    rx_unpacked = rx[mask]
     cells.append(
         Cell(
-            "single", "to_packed", sh, lambda: ak.to_packed(akx), lambda: rx.to_packed()
+            "single",
+            "to_packed",
+            f"{sh} unpacked",
+            lambda: ak.to_packed(akx_unpacked),
+            lambda: rx_unpacked.to_packed(),
         )
     )
 
@@ -207,13 +217,20 @@ def single_cells() -> list[Cell]:
             lambda: RustRagged.from_offsets(bdata, bshape, boff),
         )
     )
+    # Use UNPACKED input for to_packed so both backends do real gather work.
+    # On already-packed data: awkward to_packed is zero-copy (shares buffer) while
+    # rust to_packed(copy=True) does a defensive data.copy() — unequal work.
+    # On unpacked (masked) input both backends must gather scattered segments.
+    bmask = np.arange(8000) % 3 == 0
+    akb_unpacked = akb[bmask]
+    rb_unpacked = rb[bmask]
     cells.append(
         Cell(
             "single",
             "to_packed",
-            bsh,
-            lambda: ak.to_packed(akb),
-            lambda: rb.to_packed(),
+            f"{bsh} unpacked",
+            lambda: ak.to_packed(akb_unpacked),
+            lambda: rb_unpacked.to_packed(),
         )
     )
     return cells
