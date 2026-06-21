@@ -83,13 +83,22 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         data: NDArray[Any],
         shape: tuple[int | None, ...],
         offsets: "NDArray[Any] | list[NDArray[Any]]",
+        *,
+        str_offsets: "NDArray[Any] | None" = None,
     ) -> "Ragged[Any]":
         if shape.count(None) >= 3:
             raise NotImplementedError("nested raggedness with R >= 3 is unsupported")
-        if shape.count(None) == 0 and data.dtype.kind != "S":
-            raise ValueError("shape must have a None ragged dimension")
         off_list = offsets if isinstance(offsets, list) else [offsets]
         off_list = [np.ascontiguousarray(o, dtype=OFFSET_TYPE) for o in off_list]
+        if str_offsets is not None:
+            str_offsets = np.ascontiguousarray(str_offsets, dtype=OFFSET_TYPE)
+            return Ragged(
+                RaggedLayout(
+                    data=data, offsets=off_list, shape=shape, str_offsets=str_offsets
+                )
+            )
+        if shape.count(None) == 0 and data.dtype.kind != "S":
+            raise ValueError("shape must have a None ragged dimension")
         return Ragged(_build_layout(data, shape, off_list))
 
     @staticmethod
@@ -265,8 +274,8 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return Ragged(new_layout)
 
     def to_chars(self) -> "Ragged[Any]":
-        """Zero-copy view of an opaque string ('S', (N,)) as ascii chars
-        ('S1', (N, None)); the byte-length becomes a counted ragged axis."""
+        """Zero-copy view of an opaque string ('S', (..., None?)) as ascii chars
+        ('S1', (..., None?, None)); str_offsets becomes the innermost real axis."""
         if isinstance(self._layout, RecordLayout):
             raise NotImplementedError(
                 "to_chars() is not defined on record Ragged arrays; "
@@ -275,18 +284,22 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         if not self._rl.is_string:
             raise ValueError("to_chars() requires an opaque string Ragged (dtype 'S')")
         assert self._rl.str_offsets is not None
+        new_offsets = [
+            *self._layout.offsets,
+            self._rl.str_offsets,
+        ]  # str_offsets -> innermost real level
         new_shape = (*self._layout.shape, None)
         return Ragged(
             RaggedLayout(
                 data=self._rl.data,
-                offsets=[self._rl.str_offsets],
+                offsets=new_offsets,
                 shape=new_shape,
             )
         )
 
     def to_strings(self) -> "Ragged[Any]":
-        """Zero-copy view of a 1-D ascii-char leaf ('S1', (N, None)) as an opaque
-        string ('S', (N,)); the length axis becomes an uncounted byte leaf."""
+        """Zero-copy view of a 1-D ascii-char leaf ('S1', (..., None)) as an opaque
+        string ('S', (...)); the innermost length axis becomes an uncounted byte leaf."""
         if isinstance(self._layout, RecordLayout):
             raise NotImplementedError(
                 "to_strings() is not defined on record Ragged arrays; "
@@ -296,16 +309,21 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return self
         if self._rl.data.dtype.kind != "S":
             raise ValueError("to_strings() requires an S1 char Ragged")
-        if self._rl.data.ndim != 1 or self._layout.shape[self.rag_dim + 1 :]:
+        inner_none = max(i for i, d in enumerate(self._layout.shape) if d is None)
+        if self._rl.data.ndim != 1 or self._layout.shape[inner_none + 1 :]:
             raise ValueError(
                 "to_strings() requires a 1-D S1 char leaf (no trailing dims)"
             )
+        *outer_offsets, inner = (
+            self._layout.offsets
+        )  # innermost real level -> str_offsets
+        new_shape = self._layout.shape[:-1]  # drop the inner None
         return Ragged(
             RaggedLayout(
                 data=self._rl.data,
-                offsets=[],
-                shape=self._layout.shape[: self.rag_dim],
-                str_offsets=self.offsets,
+                offsets=outer_offsets,
+                shape=new_shape,
+                str_offsets=inner,
             )
         )
 

@@ -471,3 +471,37 @@ def test_to_strings_raises_on_trailing_dims():
     chars_with_trailing = Ragged.from_offsets(data, (2, None, 4), np.array([0, 2, 6]))
     with pytest.raises(ValueError, match="1-D|trailing"):
         chars_with_trailing.to_strings()
+
+
+# ---------------------------------------------------------------------------
+# Task 3: string-under-axis leaf + nested to_chars / to_strings
+# ---------------------------------------------------------------------------
+
+
+def test_string_under_axis_build_and_dtype():
+    data = np.frombuffer(b"ACGTAC", dtype="S1")
+    o0 = np.array([0, 2, 3], dtype=OFFSET_TYPE)  # 2 rows: 2 + 1 variants
+    str_off = np.array([0, 1, 3, 6], dtype=OFFSET_TYPE)  # 3 variants' byte lens
+    rag = Ragged.from_offsets(data, (2, None), o0, str_offsets=str_off)
+    assert rag.is_string is True
+    assert rag.dtype == np.dtype("S")
+    assert rag.shape == (2, None)
+
+
+def test_string_under_axis_to_chars_to_strings_roundtrip():
+    data = np.frombuffer(b"ACGTAC", dtype="S1")
+    o0 = np.array([0, 2, 3], dtype=OFFSET_TYPE)
+    str_off = np.array([0, 1, 3, 6], dtype=OFFSET_TYPE)
+    rag = Ragged.from_offsets(data, (2, None), o0, str_offsets=str_off)
+    chars = rag.to_chars()
+    assert chars.dtype == np.dtype("S1")
+    assert chars.shape == (2, None, None)
+    assert len(chars._layout.offsets) == 2
+    assert (
+        chars._layout.offsets[1] is str_off
+    )  # zero-copy: str_offsets became inner level
+    assert chars.data is data
+    back = chars.to_strings()
+    assert back.dtype == np.dtype("S")
+    assert back.shape == (2, None)
+    assert back._layout.offsets[0] is o0  # outer level preserved

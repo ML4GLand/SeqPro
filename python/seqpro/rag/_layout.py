@@ -152,6 +152,14 @@ def validate_layout(layout: RaggedLayout[Any] | RecordLayout) -> None:
             raise ValueError(
                 f"segment count {n_seg} != product of leading dims {expected}"
             )
+        if layout.str_offsets is not None:
+            if not _is_monotonic(layout.str_offsets):
+                raise ValueError("str_offsets must be monotonic non-decreasing")
+            if layout.str_offsets.ndim == 1 and int(layout.str_offsets[-1]) != int(
+                layout.data.shape[0]
+            ):
+                raise ValueError("str_offsets must end at the data length")
+
         try:
             from seqpro.seqpro import _ragged_validate  # type: ignore[missing-import]  # compiled Rust extension
 
