@@ -705,3 +705,63 @@ def test_bridge_string_under_axis_roundtrip():
     rag = Ragged(arr)
     assert rag.is_string and rag.shape == (2, None)
     assert rag.to_ak().to_list() == arr.to_list()
+
+
+# ---------------------------------------------------------------------------
+# Spec C integration: BUG fixes — is_contiguous inner-mask + string-under-axis guards
+# ---------------------------------------------------------------------------
+
+
+def test_r2_to_padded_after_inner_mask():
+    # Hand-trace:
+    # data=[0..9], O0=[0,2,4] (2 groups), O1=[0,3,5,8,10] (4 middles)
+    #   group0: middles 0,1 -> data[0:3]=[0,1,2], data[3:5]=[3,4]
+    #   group1: middles 2,3 -> data[5:8]=[5,6,7], data[8:10]=[8,9]
+    # mask=[T,F,T,T]: group0 keeps middle0 only; group1 keeps middles 2,3
+    # After to_packed: data=[0,1,2,5,6,7,8,9], O0=[0,1,3], O1=[0,3,8,10]
+    #   packed middle0: [0,1,2], middle1: [5,6,7], middle2: [8,9]
+    # to_padded: max inner=3; group0 has 1 middle->pad to M=2
+    #   dense[0,0]=[0,1,2], dense[0,1]=[-1,-1,-1]
+    #   dense[1,0]=[5,6,7], dense[1,1]=[8,9,-1]
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    masked = rag[:, np.array([True, False, True, True])]  # O0 1-D, O1 (2,n) lazy
+    dense = masked.to_padded(-1)  # must pack first, then dense
+    assert dense.shape == (2, 2, 3)
+    np.testing.assert_array_equal(dense[0, 0], np.array([0, 1, 2]))
+    np.testing.assert_array_equal(dense[0, 1], np.array([-1, -1, -1]))  # padded slot
+    np.testing.assert_array_equal(dense[1, 0], np.array([5, 6, 7]))
+    np.testing.assert_array_equal(dense[1, 1], np.array([8, 9, -1]))
+
+
+def test_r2_to_numpy_after_inner_mask_rectangular():
+    # All middles kept; after mask+pack the layout is rectangular
+    # data=[0..11], O0=[0,2,4], O1=[0,3,6,9,12]
+    #   group0: middles 0,1 -> data[0:3], data[3:6]
+    #   group1: middles 2,3 -> data[6:9], data[9:12]
+    # mask=[T,T,T,T]: keep all -> packed is canonical, shape (2,2,3)
+    data = np.arange(12, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 4]), np.array([0, 3, 6, 9, 12])]
+    )
+    masked = rag[
+        :, np.array([True, True, True, True])
+    ]  # keep all -> rectangular after pack
+    arr = masked.to_numpy()
+    assert arr.shape == (2, 2, 3)
+    np.testing.assert_array_equal(arr[1, 1], np.array([9, 10, 11]))
+
+
+def test_string_under_axis_to_packed_raises():
+    rag = Ragged.from_offsets(
+        np.frombuffer(b"ACGTT", "S1"),
+        (2, None),
+        np.array([0, 2, 3]),
+        str_offsets=np.array([0, 1, 2, 5]),
+    )
+    with pytest.raises(NotImplementedError, match="string-under-axis"):
+        rag.to_packed()
+    with pytest.raises(NotImplementedError, match="string-under-axis"):
+        rag.to_numpy()

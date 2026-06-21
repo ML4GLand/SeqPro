@@ -236,11 +236,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     @property
     def is_contiguous(self) -> bool:
+        all_1d = all(o.ndim == 1 for o in self._layout.offsets)
         if isinstance(self._layout, RecordLayout):
-            return self.offsets.ndim == 1 and all(
+            return all_1d and all(
                 fl.data.flags.c_contiguous for fl in self._layout.fields.values()
             )
-        return self.offsets.ndim == 1 and self._rl.data.flags.c_contiguous
+        return all_1d and self._rl.data.flags.c_contiguous
 
     @property
     def is_base(self) -> bool:
@@ -624,6 +625,13 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
         rec = self._layout
         assert isinstance(rec, RecordLayout)
+        # guard: string-under-axis fields cannot be packed in Spec C
+        for fname, fl in rec.fields.items():
+            if fl.str_offsets is not None:
+                raise NotImplementedError(
+                    f"to_packed() on a record with a string-under-axis field {fname!r} "
+                    "is not supported in Spec C; convert via .to_chars() first, or pack in Spec D."
+                )
         o0, o1 = rec.offsets
         if not copy:
             already = (
@@ -849,6 +857,13 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             if len(rec.offsets) == 2:
                 return self._to_packed_record_r2(copy)
             shared = self.offsets
+            # guard: string-under-axis fields cannot be packed in Spec C
+            for fname, fl in rec.fields.items():
+                if fl.str_offsets is not None and fl.offsets:
+                    raise NotImplementedError(
+                        f"to_packed() on a record with a string-under-axis field {fname!r} "
+                        "is not supported in Spec C; convert via .to_chars() first, or pack in Spec D."
+                    )
             if not copy:
                 already = (
                     shared.ndim == 1
@@ -893,6 +908,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 return self
             return Ragged.from_offsets(n2_data, self._layout.shape, n2_offsets)
 
+        if self._rl.str_offsets is not None and self._layout.offsets:
+            raise NotImplementedError(
+                "to_packed() on a string-under-axis Ragged is not supported in Spec C; "
+                "convert via .to_chars() first, or pack in Spec D."
+            )
         packed_data, packed_offsets = _pack_parts(
             self._rl.data, self._layout.shape, self.offsets, copy
         )
@@ -1009,6 +1029,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 for f in self._layout.fields
             }
         if self._layout.n_ragged == 2:
+            if self._rl.str_offsets is not None:
+                raise NotImplementedError(
+                    "to_numpy() on a string-under-axis Ragged is not supported in Spec C; "
+                    "convert via .to_chars() first."
+                )
             packed = self.to_packed()
             o0, o1 = packed._layout.offsets  # canonical 1-D after pack
             grp_lens = np.diff(o0)
@@ -1017,13 +1042,18 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 raise ValueError("cannot convert a jagged outer axis to a dense array")
             if mid_lens.size and not np.all(mid_lens == mid_lens[0]):
                 raise ValueError("cannot convert a jagged inner axis to a dense array")
-            result = self.to_padded(
+            result = packed.to_padded(
                 np.zeros((), self.dtype)[()]
             )  # rectangular -> pad is identity (both dense)
             assert isinstance(
                 result, np.ndarray
             )  # axis=None on R=2 always returns dense
             return result
+        if self._rl.str_offsets is not None and self._layout.offsets:
+            raise NotImplementedError(
+                "to_numpy() on a string-under-axis Ragged is not supported in Spec C; "
+                "convert via .to_chars() first."
+            )
         lengths = self.lengths
         if lengths.size and not np.all(lengths == lengths.flat[0]):
             raise ValueError("cannot convert a jagged Ragged to a dense array")
