@@ -1,7 +1,12 @@
+import awkward as ak
 import numpy as np
 import pytest
-from seqpro.rag._utils import lengths_to_offsets
+from hypothesis import given, strategies as st
+from hypothesis.extra.numpy import arrays
+from seqpro.rag._core import Ragged
 from seqpro.rag._layout import RaggedLayout, RecordLayout, validate_layout
+from seqpro.rag._utils import lengths_to_offsets
+from seqpro.rag._array import Ragged as AkRagged
 
 
 def _two_field_record():
@@ -51,7 +56,6 @@ def test_record_layout_rejects_opaque_field():
 # ---------------------------------------------------------------------------
 # Task 5: Ragged.from_fields + _is_record + rag.zip
 # ---------------------------------------------------------------------------
-from seqpro.rag._core import Ragged  # noqa: E402
 
 
 def _record_ragged():
@@ -344,8 +348,6 @@ def test_record_array_raises():
 # Task 12: _ingest bridge — record layout_from_ak + to_ak
 # ---------------------------------------------------------------------------
 
-import awkward as ak  # noqa: E402
-
 
 def test_ingest_record_from_ak():
     arr = ak.Array(
@@ -363,3 +365,215 @@ def test_record_to_ak_roundtrips():
     out = rag.to_ak()
     assert set(ak.fields(out)) == {"a", "b"}
     np.testing.assert_array_equal(ak.to_numpy(ak.flatten(out["a"])), rag["a"].data)
+
+
+# ---------------------------------------------------------------------------
+# Task 13: Differential Hypothesis suite + char-record alignment
+# ---------------------------------------------------------------------------
+
+
+@st.composite
+def _record_inputs(draw):
+    n = draw(st.integers(1, 6))
+    lengths = draw(st.lists(st.integers(0, 5), min_size=n, max_size=n).map(np.array))
+    total = int(lengths.sum())
+    a = draw(arrays(np.int64, (total,), elements=st.integers(-50, 50)))
+    b = draw(arrays(np.float64, (total,), elements=st.floats(-50, 50, allow_nan=False)))
+    return lengths.astype(np.uint32), a, b
+
+
+@given(_record_inputs())
+def test_diff_record_properties(inp):
+    lengths, a, b = inp
+    new = Ragged.from_fields(
+        {"a": Ragged.from_lengths(a, lengths), "b": Ragged.from_lengths(b, lengths)}
+    )
+    old = AkRagged(
+        ak.zip({"a": ak.unflatten(a, lengths), "b": ak.unflatten(b, lengths)})
+    )
+    np.testing.assert_array_equal(new.offsets, old.offsets)
+    assert new.shape == old.shape
+    assert new.fields == list(ak.fields(old))
+    np.testing.assert_array_equal(new["a"].data, old["a"].data)
+    np.testing.assert_array_equal(new["b"].data, old["b"].data)
+
+
+@given(_record_inputs())
+def test_diff_record_to_packed_after_slice(inp):
+    lengths, a, b = inp
+    if len(lengths) < 2:
+        return
+    new = Ragged.from_fields(
+        {"a": Ragged.from_lengths(a, lengths), "b": Ragged.from_lengths(b, lengths)}
+    )[::-1].to_packed()
+    old = AkRagged(
+        ak.zip({"a": ak.unflatten(a, lengths), "b": ak.unflatten(b, lengths)})
+    )[::-1].to_packed()
+    np.testing.assert_array_equal(new["a"].data, old["a"].data)
+    np.testing.assert_array_equal(new.offsets, old.offsets)
+
+
+def test_char_field_record_aligns_on_length():
+    # annotated-haplotypes shape: chars + per-base numeric, one shared offsets
+    lens = np.array([3, 2], dtype=np.uint32)
+    hap = Ragged.from_lengths(np.frombuffer(b"ATGCG", "S1"), lens).to_chars()
+    annot = Ragged.from_lengths(np.arange(5, dtype=np.float32), lens)
+    rec = Ragged.from_fields({"hap": hap, "annot": annot})
+    assert rec.dtype == np.dtype([("hap", "S1"), ("annot", np.float32)])
+    assert rec["hap"].offsets is rec["annot"].offsets
+    np.testing.assert_array_equal(rec["hap"][0], np.frombuffer(b"ATG", "S1"))
+
+
+# ---------------------------------------------------------------------------
+# Task 13: Port legacy record tests (TestRecordRagged + TestToPackedRecord)
+# ---------------------------------------------------------------------------
+
+
+def _legacy_record():
+    """Mirrors test_ragged.py::TestRecordRagged fixture: two fields [2,1,3]."""
+    lengths = np.array([2, 1, 3], dtype=np.uint32)
+    field0_data = np.array([1, 2, 3, 4, 5, 6], dtype=np.int64)
+    field1_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype=np.float64)
+    f0 = Ragged.from_lengths(field0_data, lengths)
+    f1 = Ragged.from_lengths(field1_data, lengths)
+    return Ragged.from_fields({"field0": f0, "field1": f1})
+
+
+def test_legacy_record_offsets():
+    rag = _legacy_record()
+    expected = np.array([0, 2, 3, 6], dtype=np.uint32)
+    np.testing.assert_array_equal(rag.offsets, expected)
+
+
+def test_legacy_record_data_dict():
+    rag = _legacy_record()
+    d = rag.data
+    assert isinstance(d, dict)
+    assert list(d.keys()) == ["field0", "field1"]
+    np.testing.assert_array_equal(d["field0"], np.array([1, 2, 3, 4, 5, 6]))
+    np.testing.assert_array_equal(d["field1"], np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+
+
+def test_legacy_record_field_access_by_key():
+    rag = _legacy_record()
+    np.testing.assert_array_equal(rag["field0"].data, np.array([1, 2, 3, 4, 5, 6]))
+    np.testing.assert_array_equal(
+        rag["field1"].data, np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    )
+
+
+def test_legacy_record_field_access_by_attr():
+    rag = _legacy_record()
+    np.testing.assert_array_equal(rag.field0.data, rag["field0"].data)
+    np.testing.assert_array_equal(rag.field1.data, rag["field1"].data)
+
+
+def test_legacy_record_offsets_shared_with_field():
+    rag = _legacy_record()
+    assert rag["field0"].offsets is rag.offsets
+
+
+def test_legacy_record_offsets_shared_across_fields():
+    rag = _legacy_record()
+    assert rag["field0"].offsets is rag["field1"].offsets
+
+
+def test_legacy_record_field_returns_ragged():
+    rag = _legacy_record()
+    assert isinstance(rag["field0"], Ragged)
+    assert isinstance(rag["field1"], Ragged)
+
+
+def test_legacy_record_dtype_structured():
+    rag = _legacy_record()
+    dt = rag.dtype
+    assert isinstance(dt, np.dtype)
+    assert dt.names == ("field0", "field1")
+    assert dt["field0"] == np.dtype(np.int64)
+    assert dt["field1"] == np.dtype(np.float64)
+
+
+def test_legacy_record_dtype_field_order_preserved():
+    lens = np.array([2, 1, 3], dtype=np.uint32)
+    r1 = Ragged.from_lengths(np.arange(6, dtype=np.int64), lens)
+    r2 = Ragged.from_lengths(np.arange(6, dtype=np.float64), lens)
+    rag = Ragged.from_fields({"zeta": r1, "alpha": r2})
+    assert list(rag.dtype.names) == ["zeta", "alpha"]
+
+
+def test_legacy_record_field_setitem_roundtrip():
+    rag = _legacy_record()
+    original = rag["field0"].data.copy()
+    rag["field0"] = rag["field0"].view(np.uint64)
+    np.testing.assert_array_equal(rag["field0"].data.view(np.int64), original)
+
+
+def test_legacy_record_squeeze():
+    lens = np.array([2, 1, 3], dtype=np.uint32)
+    f0 = Ragged.from_lengths(np.arange(6, dtype=np.int64).reshape(6, 1), lens)
+    f1 = Ragged.from_lengths(np.arange(6, dtype=np.float64).reshape(6, 1), lens)
+    rag = Ragged.from_fields({"a": f0, "b": f1})
+    sq = rag.squeeze()
+    assert isinstance(sq, Ragged)
+    assert sq.shape == (3, None)
+    np.testing.assert_array_equal(sq["a"].data, np.arange(6))
+    assert sq["a"].offsets is sq.offsets
+
+
+def test_legacy_record_reshape():
+    lengths = np.array([2, 1, 3, 1, 2, 1], dtype=np.uint32)
+    data_a = np.arange(10, dtype=np.int64)
+    data_b = np.arange(10, dtype=np.float64)
+    f0 = Ragged.from_lengths(data_a, lengths)
+    f1 = Ragged.from_lengths(data_b, lengths)
+    rag = Ragged.from_fields({"a": f0, "b": f1})
+    re = rag.reshape(2, 3, None)
+    assert isinstance(re, Ragged)
+    assert re.shape == (2, 3, None)
+    assert re["a"].offsets is re.offsets
+    np.testing.assert_array_equal(re["a"].data, data_a)
+
+
+# Ported from test_rag_to_packed.py::TestToPackedRecord
+
+
+def _to_packed_record():
+    """Mirrors test_rag_to_packed.py::TestToPackedRecord._record."""
+    lengths = np.array([3, 2, 4], dtype=np.uint32)
+    scores = np.arange(9, dtype=np.float64)
+    flags = np.arange(9, dtype=np.int8)
+    return Ragged.from_fields(
+        {
+            "score": Ragged.from_lengths(scores, lengths),
+            "flag": Ragged.from_lengths(flags, lengths),
+        }
+    )
+
+
+def test_legacy_record_to_packed_all_fields():
+    rec = _to_packed_record()[::-1]  # reorder -> unpacked
+    out = rec.to_packed()
+    assert out.offsets.ndim == 1
+    assert out.offsets[0] == 0
+    # fields share one offsets object (zero-copy SoA contract)
+    assert out["score"].offsets is out["flag"].offsets
+    # reversed data: lengths [3,2,4] reversed -> [4,2,3]
+    np.testing.assert_array_equal(out.offsets, np.array([0, 4, 6, 9]))
+    np.testing.assert_array_equal(
+        out["score"].data, np.array([5.0, 6.0, 7.0, 8.0, 3.0, 4.0, 0.0, 1.0, 2.0])
+    )
+    np.testing.assert_array_equal(
+        out["flag"].data, np.array([5, 6, 7, 8, 3, 4, 0, 1, 2], dtype=np.int8)
+    )
+
+
+def test_legacy_record_to_packed_shared_offsets():
+    rec = _to_packed_record()[::-1]
+    out = rec.to_packed()
+    assert out["score"].offsets is out["flag"].offsets
+
+
+def test_legacy_record_to_packed_copy_false_passthrough():
+    rec = _to_packed_record()
+    out = rec.to_packed(copy=False)
+    assert out is rec
