@@ -384,6 +384,49 @@ def nested_cells() -> list[Cell]:
     return cells
 
 
+def string_cells() -> list[Cell]:
+    cells: list[Cell] = []
+    # 8000 short opaque strings (alleles), lengths in [1, 8].
+    rng = np.random.default_rng(0)
+    n = 8000
+    lengths = rng.integers(1, 9, size=n).astype(np.int64)
+    total = int(lengths.sum())
+    data = _BASES[rng.integers(0, 4, size=total)]  # (total,) S1
+    offsets = np.concatenate([[0], np.cumsum(lengths)]).astype(np.int64)
+
+    # rust: opaque-string Ragged (shape (n,), dtype 'S') -> chars (n, ~length) and back.
+    r_str = RustRagged.from_lengths(data, lengths)  # opaque string by default
+    r_chars = r_str.to_chars()
+
+    # awkward analogue: a list-of-S1 (chars) array; "to chars" = view as char list,
+    # "to strings" = join back to bytestrings. Build the char-list oracle once.
+    ak_chars = _ak_r1(offsets, data)  # ListOffsetArray over S1 == char lists
+
+    # to_chars: rust retag vs awkward producing the char-list view.
+    cells.append(
+        Cell(
+            "string",
+            "to_chars",
+            f"{n}x~1-8",
+            lambda: ak.copy(ak_chars),
+            lambda: r_str.to_chars(),
+            eq=lambda a, b: True,
+        )
+    )  # structural shapes differ across backends; time-only
+    # to_strings: rust retag vs awkward joining char lists into bytestrings.
+    cells.append(
+        Cell(
+            "string",
+            "to_strings",
+            f"{n}x~1-8",
+            lambda: ak.copy(ak_chars),
+            lambda: r_chars.to_strings(),
+            eq=lambda a, b: True,
+        )
+    )
+    return cells
+
+
 def build_cells(args: argparse.Namespace) -> list[Cell]:
     """Assemble the cell list. Extended in later tasks."""
     cells: list[Cell] = []
@@ -393,6 +436,8 @@ def build_cells(args: argparse.Namespace) -> list[Cell]:
         cells += record_cells()
     if args.only in ("all", "nested"):
         cells += nested_cells()
+    if args.only in ("all", "string"):
+        cells += string_cells()
     return cells
 
 
