@@ -10,8 +10,6 @@ from ._utils import OFFSET_TYPE  # noqa: F401  (re-exported convenience)
 
 DTYPE_co = TypeVar("DTYPE_co", covariant=True)
 
-_SPEC_C_MSG = "nested raggedness (>1 ragged level) lands in Spec C"
-
 
 @define
 class RaggedLayout(Generic[DTYPE_co]):
@@ -49,6 +47,13 @@ def _is_monotonic(offsets: NDArray[Any]) -> bool:
         # (2, M) gather layout: each column is [start, stop]; stop >= start required
         return bool(np.all(offsets[1] >= offsets[0])) if offsets.size else True
     return bool(np.all(np.diff(offsets) >= 0)) if offsets.size else True
+
+
+def _level_bounds(entry: NDArray[Any]) -> tuple[NDArray[Any], NDArray[Any]]:
+    """Return (starts, stops) for one offsets entry (1-D canonical or (2, n) gather)."""
+    if entry.ndim == 2:
+        return entry[0], entry[1]
+    return entry[:-1], entry[1:]
 
 
 @define
@@ -98,12 +103,40 @@ def validate_layout(layout: RaggedLayout[Any] | RecordLayout) -> None:
     if isinstance(layout, RecordLayout):
         _validate_record_layout(layout)
         return
-    if layout.n_ragged > 1:
-        raise NotImplementedError(_SPEC_C_MSG)
+    if layout.n_ragged > 2:
+        raise NotImplementedError(
+            "nested raggedness with 3 or more levels (R >= 3) is unsupported"
+        )
 
     for off in layout.offsets:
         if not _is_monotonic(off):
             raise ValueError("offsets must be monotonic non-decreasing")
+
+    if layout.n_ragged == 2:
+        if len(layout.offsets) != 2:
+            raise ValueError(
+                f"expected 2 offsets arrays for 2 ragged axes, got {len(layout.offsets)}"
+            )
+        o0, o1 = layout.offsets
+        o0_starts, o0_stops = _level_bounds(o0)
+        rag_dim = layout.shape.index(None)
+        leading = [d for d in layout.shape[:rag_dim] if d is not None]
+        expected_l0 = int(np.prod(np.array(leading, dtype=np.int64))) if leading else 1
+        if len(o0_starts) != expected_l0:
+            raise ValueError(
+                f"outer segment count {len(o0_starts)} != product of leading dims {expected_l0}"
+            )
+        n_middle = len(o1) - 1 if o1.ndim == 1 else o1.shape[1]
+        max_mid = int(o0_stops.max()) if len(o0_stops) else 0
+        if o0.ndim == 1 and int(o0[-1]) != n_middle:
+            raise ValueError(
+                f"O0 references {int(o0[-1])} middle segments but O1 has {n_middle}"
+            )
+        if max_mid > n_middle:
+            raise ValueError(
+                f"O0 middle index {max_mid} exceeds O1 segment count {n_middle}"
+            )
+        return
 
     if layout.n_ragged == 1:
         if len(layout.offsets) != 1:

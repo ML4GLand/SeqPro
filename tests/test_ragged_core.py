@@ -30,9 +30,47 @@ def test_layout_string_flat_collection():
 
 def test_layout_rejects_multiple_none():
     data = np.arange(6)
-    with pytest.raises(NotImplementedError, match="Spec C"):
+    with pytest.raises(NotImplementedError, match="R >= 3|3 or more"):
         validate_layout(
-            RaggedLayout(data=data, offsets=[np.array([0, 6])], shape=(2, None, None))
+            RaggedLayout(
+                data=data,
+                offsets=[np.array([0, 1]), np.array([0, 2]), np.array([0, 6])],
+                shape=(2, None, None, None),
+            )
+        )
+
+
+def test_layout_nested_r2_valid():
+    data = np.arange(10, dtype=np.int32)
+    o0 = np.array([0, 2, 3], dtype=OFFSET_TYPE)  # 2 outer rows -> 2,1 middles
+    o1 = np.array([0, 3, 5, 10], dtype=OFFSET_TYPE)  # 3 middles -> data
+    layout = RaggedLayout(data=data, offsets=[o0, o1], shape=(2, None, None))
+    validate_layout(layout)
+    assert layout.n_ragged == 2
+
+
+def test_layout_nested_rejects_r3():
+    with pytest.raises(NotImplementedError, match="3 or more|R >= 3|three"):
+        validate_layout(
+            RaggedLayout(
+                data=np.arange(6),
+                offsets=[np.array([0, 1]), np.array([0, 2]), np.array([0, 6])],
+                shape=(1, None, None, None),
+            )
+        )
+
+
+def test_layout_nested_rejects_inner_segment_mismatch():
+    with pytest.raises(ValueError, match="segment|middle"):
+        validate_layout(
+            RaggedLayout(
+                data=np.arange(10),
+                offsets=[
+                    np.array([0, 2, 3], dtype=OFFSET_TYPE),
+                    np.array([0, 3, 5], dtype=OFFSET_TYPE),
+                ],  # only 2 middles, O0 needs 3
+                shape=(2, None, None),
+            )
         )
 
 
