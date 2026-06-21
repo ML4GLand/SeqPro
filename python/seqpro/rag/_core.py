@@ -7,7 +7,7 @@ from numpy.lib.mixins import NDArrayOperatorsMixin
 from numpy.typing import NDArray
 from typing_extensions import override
 
-from ._layout import RaggedLayout, RecordLayout, validate_layout
+from ._layout import RaggedLayout, RecordLayout, _level_bounds, validate_layout
 from ._utils import OFFSET_TYPE, lengths_to_offsets
 
 RDTYPE_co = TypeVar("RDTYPE_co", covariant=True)
@@ -338,6 +338,8 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     ) -> "NDArray[Any] | bytes | dict[str, Any] | Ragged[Any]":
         if isinstance(self._layout, RecordLayout):
             return self._getitem_record(where)
+        if self._layout.n_ragged == 2:
+            return self._getitem_r2(where)
         starts, stops = self._starts_stops()
         if isinstance(where, (int, np.integer)):
             lo, hi = int(starts[where]), int(stops[where])
@@ -375,10 +377,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return Ragged(field)  # field.offsets[0] is the shared object (zero-copy)
         return self._getitem_record_rows(where)  # Task 8
 
-    def _row_gather(self, where: Any) -> "tuple[NDArray[Any], NDArray[Any]]":
-        """Given a slice/mask/int-array ``where``, return (sel_starts, sel_stops)
-        as contiguous OFFSET_TYPE arrays for the shared ragged axis."""
-        starts, stops = self._starts_stops()
+    def _gather_indices(
+        self, where: Any, starts: "NDArray[Any]", stops: "NDArray[Any]"
+    ) -> "tuple[NDArray[Any], NDArray[Any]]":
+        """Resolve ``where`` (slice/mask/int-array) against ``starts``/``stops`` and
+        return ``(sel_starts, sel_stops)`` as contiguous OFFSET_TYPE arrays."""
         n = len(starts)
         if _where_is_bool(where):
             if where.shape[0] != n:
@@ -403,6 +406,47 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return (
             np.ascontiguousarray(sel_starts, dtype=OFFSET_TYPE),
             np.ascontiguousarray(sel_stops, dtype=OFFSET_TYPE),
+        )
+
+    def _row_gather(self, where: Any) -> "tuple[NDArray[Any], NDArray[Any]]":
+        """Given a slice/mask/int-array ``where``, return (sel_starts, sel_stops)
+        as contiguous OFFSET_TYPE arrays for the shared ragged axis."""
+        return self._gather_indices(where, *self._starts_stops())
+
+    def _getitem_r2(self, where: Any) -> "Ragged[Any]":
+        """Index an R=2 array on the outer axis.
+
+        - ``int`` → peel one outer row to a 1-level ``Ragged`` (zero-copy inner slice).
+        - ``slice`` / bool mask / int-array → lazy gather: build a ``(2, L0')`` outer
+          offset that references ranges in the global O1; no data or O1 movement.
+        """
+        o0, o1 = self._layout.offsets
+        o0_starts, o0_stops = _level_bounds(o0)
+        if isinstance(where, (int, np.integer)):
+            # peel one outer row -> 1-level Ragged
+            a, b = int(o0_starts[where]), int(o0_stops[where])
+            if o1.ndim == 1:
+                inner = o1[a : b + 1]  # contiguous slice, zero-copy
+            else:
+                inner = np.stack([o1[0][a:b], o1[1][a:b]], 0)
+            trailing = self._layout.shape[self.rag_dim + 2 :]
+            return Ragged(
+                RaggedLayout(
+                    data=self._rl.data,
+                    offsets=[inner],
+                    shape=(b - a, None, *trailing),
+                )
+            )
+        # slice / mask / int-array on the outer axis: gather O0 ranges, keep O1 global
+        sel_starts, sel_stops = self._gather_indices(where, o0_starts, o0_stops)
+        new_o0 = np.stack([sel_starts, sel_stops], 0)
+        trailing = self._layout.shape[self.rag_dim + 2 :]
+        return Ragged(
+            RaggedLayout(
+                data=self._rl.data,
+                offsets=[new_o0, o1],
+                shape=(len(sel_starts), None, None, *trailing),
+            )
         )
 
     def _getitem_record_rows(self, where: Any) -> Any:

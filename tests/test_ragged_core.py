@@ -505,3 +505,21 @@ def test_string_under_axis_to_chars_to_strings_roundtrip():
     assert back.dtype == np.dtype("S")
     assert back.shape == (2, None)
     assert back._layout.offsets[0] is o0  # outer level preserved
+
+
+# ---------------------------------------------------------------------------
+# Task 4: R=2 outer-row indexing (lazy gather, peel to 1-level)
+# ---------------------------------------------------------------------------
+
+
+def test_r2_outer_slice_preserves_nesting():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (3, None, None), [np.array([0, 2, 3, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    sub = rag[1:3]  # outer rows 1,2
+    assert sub.shape == (2, None, None)
+    assert len(sub._layout.offsets) == 2
+    # row1 had 1 middle (data 5:8), row2 had 1 middle (data 8:10)
+    np.testing.assert_array_equal(sub[0][0], np.array([5, 6, 7]))
+    np.testing.assert_array_equal(sub[1][0], np.array([8, 9]))
