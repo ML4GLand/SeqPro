@@ -1,0 +1,145 @@
+"""Local, transitional A-vs-B throughput gate: rust-native Ragged vs awkward.
+
+Proves seqpro.rag._core.Ragged is at least as fast as awkward's native layout
+algebra before the Spec D cutover drops awkward. NOT a permanent CI fixture —
+deleted at cutover (see docs/superpowers/specs/2026-06-21-ragged-throughput-gate-design.md).
+
+Run: pixi run -e bench rag-gate   (or: python benchmarks/bench_ragged_backends.py --tol 0.10)
+"""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+from time import perf_counter
+from typing import Any, Callable
+
+import awkward as ak
+import numpy as np
+
+from seqpro.rag._core import Ragged as RustRagged
+
+
+@dataclass
+class Cell:
+    category: str
+    op: str
+    shape: str
+    awk: Callable[[], Any]
+    rust: Callable[[], Any]
+    eq: "Callable[[Any, Any], bool] | None" = None
+
+
+def time_callable(
+    fn: Callable[[], Any], *, repeats: int = 7, min_batch_s: float = 0.005
+) -> float:
+    """Seconds per call: warm up, autoscale a batch past min_batch_s, take min of repeats."""
+    for _ in range(3):
+        fn()
+    iters = 1
+    while True:
+        t0 = perf_counter()
+        for _ in range(iters):
+            fn()
+        if perf_counter() - t0 >= min_batch_s:
+            break
+        iters *= 2
+    best = float("inf")
+    for _ in range(repeats):
+        t0 = perf_counter()
+        for _ in range(iters):
+            fn()
+        best = min(best, (perf_counter() - t0) / iters)
+    return best
+
+
+def to_list(x: Any) -> Any:
+    """Canonicalize a result to a comparable structure for equivalence checks."""
+    if isinstance(x, RustRagged):
+        return to_list(x.to_ak())
+    if isinstance(x, ak.Array):
+        return ak.to_list(x)
+    if isinstance(x, dict):
+        return {k: to_list(v) for k, v in x.items()}
+    if isinstance(x, np.ndarray):
+        return x.tolist()
+    if isinstance(x, (np.integer, np.floating)):
+        return x.item()
+    return x
+
+
+def default_eq(a: Any, b: Any) -> bool:
+    return to_list(a) == to_list(b)
+
+
+def run_cells(cells: list[Cell], tol: float) -> int:
+    rows: list[tuple[str, str, str, float, float, float, bool]] = []
+    failures = 0
+    for c in cells:
+        eq = c.eq or default_eq
+        if not eq(c.awk(), c.rust()):
+            raise AssertionError(
+                f"equivalence check failed for {c.category}/{c.op} ({c.shape}); "
+                "the comparison would be unfair — fix the cell before timing."
+            )
+        t_awk = time_callable(c.awk)
+        t_rust = time_callable(c.rust)
+        ratio = t_rust / t_awk if t_awk > 0 else float("inf")
+        ok = ratio <= 1.0 + tol
+        failures += not ok
+        rows.append((c.category, c.op, c.shape, t_awk, t_rust, ratio, ok))
+
+    w_cat = max(len("category"), *(len(r[0]) for r in rows))
+    w_op = max(len("op"), *(len(r[1]) for r in rows))
+    w_sh = max(len("shape"), *(len(r[2]) for r in rows))
+    header = (
+        f"{'category':<{w_cat}}  {'op':<{w_op}}  {'shape':<{w_sh}}  "
+        f"{'awk (us)':>10}  {'rust (us)':>10}  {'rust/awk':>9}  verdict"
+    )
+    print(header)
+    print("-" * len(header))
+    for cat, op, sh, ta, tr, ratio, ok in rows:
+        print(
+            f"{cat:<{w_cat}}  {op:<{w_op}}  {sh:<{w_sh}}  "
+            f"{ta * 1e6:>10.2f}  {tr * 1e6:>10.2f}  {ratio:>9.3f}  "
+            f"{'PASS' if ok else 'FAIL'}"
+        )
+    n = len(rows)
+    print("-" * len(header))
+    print(f"{n - failures}/{n} passed (tol={tol:.2%})")
+    return 1 if failures else 0
+
+
+def build_cells(args: argparse.Namespace) -> list[Cell]:
+    """Assemble the cell list. Extended in later tasks; Task 1 ships a self-test."""
+    cells: list[Cell] = []
+    if args.only in ("all", "single"):
+        # Self-test cell proving the harness + gate wiring (identical work both sides).
+        x = np.arange(1000, dtype=np.int64)
+        cells.append(
+            Cell("selftest", "sum", "1000", lambda: int(x.sum()), lambda: int(x.sum()))
+        )
+    return cells
+
+
+def main(argv: "list[str] | None" = None) -> int:
+    p = argparse.ArgumentParser(
+        description="rust-native vs awkward Ragged throughput gate"
+    )
+    p.add_argument("--tol", type=float, default=0.10)
+    p.add_argument(
+        "--only",
+        choices=["single", "records", "nested", "string", "all"],
+        default="all",
+    )
+    p.add_argument("--repeats", type=int, default=7)
+    args = p.parse_args(argv)
+    cells = build_cells(args)
+    if not cells:
+        print(f"no cells for --only {args.only}")
+        return 0
+    return run_cells(cells, args.tol)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
