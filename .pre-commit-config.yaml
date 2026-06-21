@@ -33,3 +33,21 @@ repos:
     language: system
     stages: [pre-push]
     pass_filenames: false
+  - id: cargo-check
+    name: Type-check Rust with cargo check
+    entry: cargo check --all-targets --all-features
+    language: system
+    types: [rust]
+    pass_filenames: false
+  - id: cargo-fmt
+    name: Format Rust with cargo fmt
+    entry: cargo fmt --all
+    language: system
+    types: [rust]
+    pass_filenames: false
+  - id: cargo-clippy
+    name: Lint Rust with cargo clippy
+    entry: cargo clippy --all-targets -- -D warnings
+    language: system
+    types: [rust]
+    pass_filenames: false

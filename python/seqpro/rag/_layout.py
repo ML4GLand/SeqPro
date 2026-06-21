@@ -51,7 +51,53 @@ def _is_monotonic(offsets: NDArray[Any]) -> bool:
     return bool(np.all(np.diff(offsets) >= 0)) if offsets.size else True
 
 
-def validate_layout(layout: RaggedLayout[Any]) -> None:
+@define
+class RecordLayout:
+    """Struct-of-arrays: named numeric/char fields sharing one ragged offsets object.
+
+    offsets
+        The single shared ragged offsets object (Spec B: ``len == 1``); identical
+        object to every field's ``offsets[0]``.
+    shape
+        Canonical ragged shape ``(*leading, None, *trailing?)`` (the first field's).
+    fields
+        Insertion-ordered field name -> single-level ``RaggedLayout`` (numeric or
+        S1 chars). Opaque-string fields are out of scope (Spec C).
+    """
+
+    offsets: list[NDArray[Any]]
+    shape: tuple[int | None, ...]
+    fields: dict[str, RaggedLayout[Any]]
+
+
+def _validate_record_layout(layout: RecordLayout) -> None:
+    if not layout.fields:
+        raise ValueError("record layout must have at least one field (got empty)")
+    if not layout.offsets:
+        raise ValueError("record layout must have a shared offsets array")
+    shared = layout.offsets[0]
+    rag_dim = layout.shape.index(None)
+    ragged_shape = layout.shape[: rag_dim + 1]
+    for name, fld in layout.fields.items():
+        if fld.is_string:
+            raise NotImplementedError(
+                f"opaque-string record field {name!r} (S-under-axis) lands in Spec C"
+            )
+        if not fld.offsets or fld.offsets[0] is not shared:
+            raise ValueError(
+                f"field {name!r} must use the shared offsets object (zero-copy SoA)"
+            )
+        if fld.shape[: fld.shape.index(None) + 1] != ragged_shape:
+            raise ValueError(
+                f"field {name!r} ragged shape {fld.shape} disagrees with record {layout.shape}"
+            )
+        validate_layout(fld)
+
+
+def validate_layout(layout: RaggedLayout[Any] | RecordLayout) -> None:
+    if isinstance(layout, RecordLayout):
+        _validate_record_layout(layout)
+        return
     if layout.n_ragged > 1:
         raise NotImplementedError(_SPEC_C_MSG)
 

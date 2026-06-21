@@ -86,7 +86,7 @@ def test_from_lengths_string_collapses_to_leaf():
     lengths = np.array([3, 2, 5], dtype=np.uint32)
     rag = Ragged.from_lengths(data, lengths)
     assert rag.shape == (3,)
-    assert rag.dtype == np.dtype("S1")
+    assert rag.dtype == np.dtype("S")  # opaque string descriptor (string/char duality)
     np.testing.assert_array_equal(rag.offsets, np.array([0, 3, 5, 10]))
 
 
@@ -241,10 +241,14 @@ def test_to_ak_roundtrips_values():
     np.testing.assert_array_equal(ak.to_numpy(ak.flatten(rag.to_ak())), rag.data)
 
 
-def test_ingest_record_raises_spec_b():
+def test_ingest_record_from_ak_works():
+    # Task 12: record ingest is now implemented (Spec B landed); verify basic round-trip
     arr = ak.Array({"a": [[1, 2], [3]], "b": [[1.0, 2.0], [3.0]]})
-    with pytest.raises(NotImplementedError, match="Spec B"):
-        Ragged(arr)
+    rag = Ragged(arr)
+    assert rag._is_record is True
+    assert rag.fields == ["a", "b"]
+    np.testing.assert_array_equal(rag["a"].data, np.array([1, 2, 3]))
+    assert rag["a"].offsets is rag["b"].offsets
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +324,14 @@ def test_getitem_uses_rust_select_intarray():
     np.testing.assert_array_equal(sub_neg[1], np.array([0, 1, 2]))
 
 
+def test_opaque_string_dtype_is_flexible_bytes():
+    rag = Ragged.from_lengths(np.frombuffer(b"cathithere", "S1"), np.array([3, 2, 5]))
+    assert rag.dtype == np.dtype("S")
+    assert rag.dtype.itemsize == 0
+    # storage is still S1 bytes
+    assert rag.data.dtype == np.dtype("S1")
+
+
 def test_getitem_oversized_bool_mask_raises():
     rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
     # length-4 mask on 3-row Ragged must raise IndexError, not panic
@@ -332,3 +344,61 @@ def test_getitem_undersized_bool_mask_raises():
     # length-2 mask on 3-row Ragged must raise IndexError
     with pytest.raises(IndexError):
         rag[np.array([True, False])]
+
+
+def test_is_string_predicate():
+    s = Ragged.from_lengths(np.frombuffer(b"catdog", "S1"), np.array([3, 3]))
+    n = Ragged.from_lengths(np.arange(6, dtype=np.int32), np.array([3, 3]))
+    assert s.is_string is True
+    assert n.is_string is False
+
+
+def test_from_offsets_S1_with_none_is_chars_not_opaque():
+    data = np.frombuffer(b"cathithere", "S1")
+    offsets = np.array([0, 3, 5, 10])
+    chars = Ragged.from_offsets(data, (3, None), offsets)
+    assert chars.is_string is False  # counted axis => chars
+    assert chars.dtype == np.dtype("S1")
+    assert chars.shape == (3, None)
+
+
+def test_from_offsets_S1_without_none_is_opaque():
+    data = np.frombuffer(b"cathithere", "S1")
+    str_offsets = np.array([0, 3, 5, 10])
+    opaque = Ragged.from_offsets(data, (3,), str_offsets)
+    assert opaque.is_string is True
+    assert opaque.dtype == np.dtype("S")
+    assert opaque.shape == (3,)
+
+
+def test_to_chars_zero_copy_and_shape():
+    s = Ragged.from_lengths(np.frombuffer(b"cathithere", "S1"), np.array([3, 2, 5]))
+    c = s.to_chars()
+    assert c.dtype == np.dtype("S1")
+    assert c.shape == (3, None)
+    assert c.is_string is False
+    assert c.data is s.data  # zero-copy buffer
+    np.testing.assert_array_equal(c.offsets, s.offsets)  # str_offsets promoted
+    np.testing.assert_array_equal(c[0], np.frombuffer(b"cat", "S1"))
+
+
+def test_to_strings_roundtrip():
+    s = Ragged.from_lengths(np.frombuffer(b"cathithere", "S1"), np.array([3, 2, 5]))
+    back = s.to_chars().to_strings()
+    assert back.dtype == np.dtype("S")
+    assert back.shape == (3,)
+    assert back[0] == b"cat"
+    assert back.data is s.data
+
+
+def test_to_chars_raises_on_non_opaque():
+    n = Ragged.from_lengths(np.arange(6, dtype=np.int32), np.array([3, 3]))
+    with pytest.raises(ValueError, match="opaque"):
+        n.to_chars()
+
+
+def test_to_strings_raises_on_trailing_dims():
+    data = np.zeros((6, 4), dtype="S1")
+    chars_with_trailing = Ragged.from_offsets(data, (2, None, 4), np.array([0, 2, 6]))
+    with pytest.raises(ValueError, match="1-D|trailing"):
+        chars_with_trailing.to_strings()

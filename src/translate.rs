@@ -23,10 +23,14 @@ pub fn pack_codon_index(b0: u8, b1: u8, b2: u8) -> usize {
 
 const fn build_is_acgt() -> [bool; 256] {
     let mut t = [false; 256];
-    t[b'A' as usize] = true; t[b'a' as usize] = true;
-    t[b'C' as usize] = true; t[b'c' as usize] = true;
-    t[b'G' as usize] = true; t[b'g' as usize] = true;
-    t[b'T' as usize] = true; t[b't' as usize] = true;
+    t[b'A' as usize] = true;
+    t[b'a' as usize] = true;
+    t[b'C' as usize] = true;
+    t[b'c' as usize] = true;
+    t[b'G' as usize] = true;
+    t[b'g' as usize] = true;
+    t[b'T' as usize] = true;
+    t[b't' as usize] = true;
     t
 }
 static IS_ACGT: [bool; 256] = build_is_acgt();
@@ -37,12 +41,14 @@ static IS_ACGT: [bool; 256] = build_is_acgt();
 /// the index computation via `(b >> 1) & 3` produces the same result for upper/lower pairs.
 #[inline]
 fn translate_codon_lut(codon: &[u8], lut: &[u8], marker: u8) -> u8 {
-    let b0 = codon[0]; let b1 = codon[1]; let b2 = codon[2];
+    let b0 = codon[0];
+    let b1 = codon[1];
+    let b2 = codon[2];
     // non-short-circuit `&` avoids extra branches; 3 table lookups replace ~12 comparisons.
     if IS_ACGT[b0 as usize] & IS_ACGT[b1 as usize] & IS_ACGT[b2 as usize] {
         let idx = (((b0 >> 1) & 3) as usize) << 4
-                | (((b1 >> 1) & 3) as usize) << 2
-                |  ((b2 >> 1) & 3) as usize;
+            | (((b1 >> 1) & 3) as usize) << 2
+            | ((b2 >> 1) & 3) as usize;
         lut[idx]
     } else {
         marker
@@ -51,7 +57,13 @@ fn translate_codon_lut(codon: &[u8], lut: &[u8], marker: u8) -> u8 {
 
 /// Translate a single codon by linear scan against `keys`/`values`. No match → `marker`.
 #[inline]
-fn translate_codon_scan(codon: &[u8], codon_size: usize, keys: &[u8], values: &[u8], marker: u8) -> u8 {
+fn translate_codon_scan(
+    codon: &[u8],
+    codon_size: usize,
+    keys: &[u8],
+    values: &[u8],
+    marker: u8,
+) -> u8 {
     let n_codons_table = values.len();
     let mut hit = marker;
     'keys: for i in 0..n_codons_table {
@@ -92,7 +104,13 @@ pub fn translate_scan_into(
 /// Parallel LUT translate using rayon. Bit-identical to `translate_lut_into`.
 /// Uses coarse-grained chunking (8192 codons per task) to amortize rayon scheduling
 /// overhead — per-codon parallelism has prohibitive dispatch cost at ~3 bytes/item.
-pub fn translate_lut_into_par(buf: &[u8], codon_size: usize, lut: &[u8], marker: u8, out: &mut [u8]) {
+pub fn translate_lut_into_par(
+    buf: &[u8],
+    codon_size: usize,
+    lut: &[u8],
+    marker: u8,
+    out: &mut [u8],
+) {
     use rayon::prelude::*;
     const CHUNK_CODONS: usize = 8192;
     out.par_chunks_mut(CHUNK_CODONS)
@@ -286,7 +304,7 @@ pub fn _translate_drop<'py>(
             let mut keep = true;
             for j in 0..k {
                 let b = codons[[c, j]] & 0xDF;
-                if !valid.iter().any(|&v| v == b) {
+                if !valid.contains(&b) {
                     keep = false;
                     break;
                 }
@@ -312,7 +330,10 @@ fn decode_ohe_rows(data: ndarray::ArrayView2<u8>, nuc: &[u8]) -> Vec<u8> {
     for r in 0..total {
         let mut found = 0u8;
         for c in 0..n_nuc {
-            if data[[r, c]] == 1 { found = nuc[c]; break; }
+            if data[[r, c]] == 1 {
+                found = nuc[c];
+                break;
+            }
         }
         nuc_buf[r] = found;
     }
@@ -323,6 +344,7 @@ fn decode_ohe_rows(data: ndarray::ArrayView2<u8>, nuc: &[u8]) -> Vec<u8> {
 /// round-trip through the Numba-backed ohe/decode_ohe. `data` is (total, n_nuc);
 /// returns (total/codon_size, n_aa).
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (data, nuc_bytes, codon_size, lut=None, keys=None, values=None, aa_bytes=None, marker=88))]
 pub fn _translate_ohe<'py>(
     py: Python<'py>,
@@ -337,12 +359,11 @@ pub fn _translate_ohe<'py>(
 ) -> PyResult<&'py PyArray2<u8>> {
     let data = data.as_array(); // (total, n_nuc)
     let nuc = nuc_bytes.as_slice()?;
-    let aa_bytes = aa_bytes
-        .ok_or_else(|| PyValueError::new_err("aa_bytes required"))?;
+    let aa_bytes = aa_bytes.ok_or_else(|| PyValueError::new_err("aa_bytes required"))?;
     let aa_bytes = aa_bytes.as_slice()?;
     let total = data.shape()[0];
     let n_aa = aa_bytes.len();
-    if codon_size == 0 || total % codon_size != 0 {
+    if codon_size == 0 || !total.is_multiple_of(codon_size) {
         return Err(PyValueError::new_err(
             "total rows must be a positive multiple of codon_size",
         ));
@@ -392,6 +413,7 @@ pub fn _translate_ohe<'py>(
 /// valid). Returns the compacted (n_kept, n_aa) OHE array and codon-indexed new
 /// offsets. `offsets` are nucleotide-row offsets (multiples of codon_size).
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (data, nuc_bytes, codon_size, valid_upper, offsets, lut=None, keys=None, values=None, aa_bytes=None, marker=88))]
 pub fn _translate_ohe_drop<'py>(
     py: Python<'py>,
@@ -414,7 +436,7 @@ pub fn _translate_ohe_drop<'py>(
     let aa_bytes = aa_bytes.as_slice()?;
     let total = data.shape()[0];
     let n_aa = aa_bytes.len();
-    if codon_size == 0 || total % codon_size != 0 {
+    if codon_size == 0 || !total.is_multiple_of(codon_size) {
         return Err(PyValueError::new_err(
             "total rows must be a positive multiple of codon_size",
         ));
@@ -435,7 +457,12 @@ pub fn _translate_ohe_drop<'py>(
             let values =
                 values.ok_or_else(|| PyValueError::new_err("values required without lut"))?;
             translate_scan_into(
-                &nuc_buf, codon_size, keys.as_slice()?, values.as_slice()?, marker, &mut aa,
+                &nuc_buf,
+                codon_size,
+                keys.as_slice()?,
+                values.as_slice()?,
+                marker,
+                &mut aa,
             );
         }
     }
@@ -453,7 +480,7 @@ pub fn _translate_ohe_drop<'py>(
             let mut keep = true;
             for j in 0..codon_size {
                 let b = nuc_buf[c * codon_size + j] & 0xDF;
-                if !valid.iter().any(|&v| v == b) {
+                if !valid.contains(&b) {
                     keep = false;
                     break;
                 }

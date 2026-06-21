@@ -14,7 +14,11 @@ const MAX_LUT: u32 = 16_384;
 /// Returns `Some(α^(k-1))` if `DirectLut` fits, else `None`.
 fn lut_size(alphabet_size: usize, k_minus_1: u32) -> Option<u32> {
     let n = (alphabet_size as u32).checked_pow(k_minus_1)?;
-    if n <= MAX_LUT { Some(n) } else { None }
+    if n <= MAX_LUT {
+        Some(n)
+    } else {
+        None
+    }
 }
 
 /// Per-thread reusable storage for one row of k-shuffle work.
@@ -113,12 +117,7 @@ impl ShuffleBuffers {
 
     /// Build the hash-based index. Fills `self.codes`. Returns `n_vertices`.
     /// Fallback for protein / large k where `α^(k-1) > MAX_LUT`.
-    fn build_hash_index(
-        &mut self,
-        seq: &[u8],
-        k_minus_1: usize,
-        max_uniq_lets: u32,
-    ) -> u32 {
+    fn build_hash_index(&mut self, seq: &[u8], k_minus_1: usize, max_uniq_lets: u32) -> u32 {
         self.codes.clear();
         let n_windows = seq.len() - k_minus_1 + 1;
         self.codes.reserve(n_windows);
@@ -145,7 +144,6 @@ impl ShuffleBuffers {
     }
 }
 
-
 #[derive(thiserror::Error, Debug)]
 pub enum KShuffleError {
     #[error("k must be greater than 0")]
@@ -159,7 +157,7 @@ pub enum KShuffleError {
 #[derive(Clone, Default)]
 struct Vertex {
     idx_offset: u32,
-    n_indices: u32,   // 0 = sentinel
+    n_indices: u32, // 0 = sentinel
     i_indices: u32,
     next: u32,
     i_sequence: u32,
@@ -195,7 +193,15 @@ pub fn k_shuffle<D: Dimension>(
         .map_init(
             ShuffleBuffers::new,
             |buffers, ((out_row, row), row_seed)| {
-                k_shuffle1(row, k, Some(row_seed), out_row, alphabet_size, alphabet_bytes, buffers)
+                k_shuffle1(
+                    row,
+                    k,
+                    Some(row_seed),
+                    out_row,
+                    alphabet_size,
+                    alphabet_bytes,
+                    buffers,
+                )
             },
         )
         .collect();
@@ -219,8 +225,13 @@ fn k_shuffle1(
     let mut rng = SmallRng::seed_from_u64(seed);
     let l = seq.len();
 
-    if k >= l { seq.assign_to(out); return Ok(()); }
-    if k < 1 { bail!(KShuffleError::KLessThanOne); }
+    if k >= l {
+        seq.assign_to(out);
+        return Ok(());
+    }
+    if k < 1 {
+        bail!(KShuffleError::KLessThanOne);
+    }
     assert!(alphabet_size >= 2, "alphabet_size must be >= 2");
 
     if k == 1 {
@@ -230,10 +241,26 @@ fn k_shuffle1(
     }
 
     if seq.is_standard_layout() {
-        k_shuffle1_inner(seq, k, &mut rng, out, alphabet_size, alphabet_bytes, buffers)
+        k_shuffle1_inner(
+            seq,
+            k,
+            &mut rng,
+            out,
+            alphabet_size,
+            alphabet_bytes,
+            buffers,
+        )
     } else {
         let owned: ndarray::Array1<u8> = seq.to_owned();
-        k_shuffle1_inner(owned.view(), k, &mut rng, out, alphabet_size, alphabet_bytes, buffers)
+        k_shuffle1_inner(
+            owned.view(),
+            k,
+            &mut rng,
+            out,
+            alphabet_size,
+            alphabet_bytes,
+            buffers,
+        )
     }
 }
 
@@ -247,7 +274,9 @@ fn k_shuffle1_inner(
     buffers: &mut ShuffleBuffers,
 ) -> Result<()> {
     let l = seq.len();
-    let seq_slice = seq.as_slice().expect("k_shuffle1_inner requires contiguous row");
+    let seq_slice = seq
+        .as_slice()
+        .expect("k_shuffle1_inner requires contiguous row");
     let k_minus_1 = k - 1;
     let n_lets = l - k + 2;
     let max_uniq_lets = n_lets.min(alphabet_size.pow(k_minus_1 as u32)) as u32;
@@ -256,15 +285,17 @@ fn k_shuffle1_inner(
 
     // Phase 1: build the index, fills buffers.codes (vertex id per window).
     let n_vertices: u32 = match lut_size(alphabet_size, k_minus_1 as u32) {
-        Some(cap) => buffers.build_direct_index(
-            seq_slice, k_minus_1, alpha_u32, &b2c, cap, max_uniq_lets,
-        ),
+        Some(cap) => {
+            buffers.build_direct_index(seq_slice, k_minus_1, alpha_u32, &b2c, cap, max_uniq_lets)
+        }
         None => buffers.build_hash_index(seq_slice, k_minus_1, max_uniq_lets),
     };
 
     // Phase 2: vertices.
     buffers.vertices.clear();
-    buffers.vertices.resize_with(n_vertices as usize, Vertex::default);
+    buffers
+        .vertices
+        .resize_with(n_vertices as usize, Vertex::default);
     for (i, &v) in buffers.codes.iter().enumerate() {
         let vertex = &mut buffers.vertices[v as usize];
         if i < (n_lets - 1) {
@@ -296,7 +327,15 @@ fn k_shuffle1_inner(
     // Phase 4: Wilson + random_walk.
     let root_idx = buffers.codes[buffers.codes.len() - 1] as usize;
     wilson_random_spanning_tree(&mut buffers.vertices, &buffers.indices, root_idx, rng);
-    random_walk(&mut buffers.vertices, &mut buffers.indices, root_idx, rng, seq, k, out);
+    random_walk(
+        &mut buffers.vertices,
+        &mut buffers.indices,
+        root_idx,
+        rng,
+        seq,
+        k,
+        out,
+    );
 
     Ok(())
 }
@@ -496,9 +535,7 @@ mod test {
             }
         }
 
-        let run = || {
-            super::k_shuffle(seqs.view(), k, Some(42), alphabet_size, b"ACGT")
-        };
+        let run = || super::k_shuffle(seqs.view(), k, Some(42), alphabet_size, b"ACGT");
         let a = run();
         let b = run();
         assert_eq!(a, b, "k_shuffle must be deterministic with a fixed seed");
@@ -513,34 +550,34 @@ mod test {
         );
     }
 
-#[test]
-fn shuffle_buffers_sparse_reset_only_touches_written_positions() {
-    let mut buf = ShuffleBuffers::new();
-    // Initially all u32::MAX.
-    assert!(buf.lut.iter().all(|&x| x == u32::MAX));
-    // Write a few positions.
-    buf.lut[3] = 7;
-    buf.lut[100] = 9;
-    buf.lut_written.extend_from_slice(&[3, 100]);
-    // Sparse reset.
-    buf.reset_lut();
-    // Restored at those positions.
-    assert_eq!(buf.lut[3], u32::MAX);
-    assert_eq!(buf.lut[100], u32::MAX);
-    // lut_written cleared.
-    assert!(buf.lut_written.is_empty());
-    // Second reset is a no-op (regression check on a missing clear).
-    buf.lut[42] = 5;
-    buf.lut_written.push(42);
-    buf.reset_lut();
-    assert_eq!(buf.lut[42], u32::MAX);
-    assert!(buf.lut_written.is_empty());
-}
+    #[test]
+    fn shuffle_buffers_sparse_reset_only_touches_written_positions() {
+        let mut buf = ShuffleBuffers::new();
+        // Initially all u32::MAX.
+        assert!(buf.lut.iter().all(|&x| x == u32::MAX));
+        // Write a few positions.
+        buf.lut[3] = 7;
+        buf.lut[100] = 9;
+        buf.lut_written.extend_from_slice(&[3, 100]);
+        // Sparse reset.
+        buf.reset_lut();
+        // Restored at those positions.
+        assert_eq!(buf.lut[3], u32::MAX);
+        assert_eq!(buf.lut[100], u32::MAX);
+        // lut_written cleared.
+        assert!(buf.lut_written.is_empty());
+        // Second reset is a no-op (regression check on a missing clear).
+        buf.lut[42] = 5;
+        buf.lut_written.push(42);
+        buf.reset_lut();
+        assert_eq!(buf.lut[42], u32::MAX);
+        assert!(buf.lut_written.is_empty());
+    }
     #[test]
     fn equivalence_with_reference_impl_for_k_2_through_8() {
         use ndarray::Array1;
-        use rand::{Rng, SeedableRng};
         use rand::rngs::SmallRng;
+        use rand::{Rng, SeedableRng};
 
         let alphabet_size = 4;
         let alphabet_bytes = b"ACGT";
@@ -548,9 +585,13 @@ fn shuffle_buffers_sparse_reset_only_touches_written_positions() {
 
         for &len in &[16usize, 64, 256, 1024] {
             for &k in &[2usize, 3, 4, 5, 6, 7, 8] {
-                if k >= len { continue; }
+                if k >= len {
+                    continue;
+                }
                 // Random DNA sequence.
-                let seq: Vec<u8> = (0..len).map(|_| alphabet_bytes[seedgen.gen_range(0..4)]).collect();
+                let seq: Vec<u8> = (0..len)
+                    .map(|_| alphabet_bytes[seedgen.gen_range(0..4)])
+                    .collect();
                 let seq_arr = Array1::from(seq.clone());
                 let row_seed: u64 = seedgen.gen();
 
@@ -560,19 +601,30 @@ fn shuffle_buffers_sparse_reset_only_touches_written_positions() {
                 // New impl
                 let mut buffers = super::ShuffleBuffers::new();
                 super::k_shuffle1(
-                    seq_arr.view(), k, Some(row_seed),
-                    out_new.view_mut(), alphabet_size, alphabet_bytes, &mut buffers,
-                ).unwrap();
+                    seq_arr.view(),
+                    k,
+                    Some(row_seed),
+                    out_new.view_mut(),
+                    alphabet_size,
+                    alphabet_bytes,
+                    &mut buffers,
+                )
+                .unwrap();
 
                 // Reference impl
                 crate::kshuffle_ref::k_shuffle1_ref(
-                    seq_arr.view(), k, Some(row_seed),
-                    out_ref.view_mut(), alphabet_size,
-                ).unwrap();
+                    seq_arr.view(),
+                    k,
+                    Some(row_seed),
+                    out_ref.view_mut(),
+                    alphabet_size,
+                )
+                .unwrap();
 
                 assert_eq!(
                     out_new, out_ref,
-                    "mismatch at len={} k={} seed={}", len, k, row_seed
+                    "mismatch at len={} k={} seed={}",
+                    len, k, row_seed
                 );
             }
         }
@@ -581,8 +633,8 @@ fn shuffle_buffers_sparse_reset_only_touches_written_positions() {
     #[test]
     fn buffer_reuse_matches_fresh_buffer_output() {
         use ndarray::Array1;
-        use rand::{Rng, SeedableRng};
         use rand::rngs::SmallRng;
+        use rand::{Rng, SeedableRng};
 
         let alphabet_size = 4;
         let alphabet_bytes = b"ACGT";
@@ -592,7 +644,9 @@ fn shuffle_buffers_sparse_reset_only_touches_written_positions() {
         let mut cases: Vec<(Vec<u8>, usize, u64)> = Vec::new();
         for &len in &[16usize, 64, 256] {
             for &k in &[2usize, 3, 4, 6, 8] {
-                if k >= len { continue; }
+                if k >= len {
+                    continue;
+                }
                 for _ in 0..5 {
                     let seq: Vec<u8> = (0..len)
                         .map(|_| alphabet_bytes[seedgen.gen_range(0..4)])
@@ -611,19 +665,32 @@ fn shuffle_buffers_sparse_reset_only_touches_written_positions() {
             let mut out_fresh = Array1::<u8>::zeros(len);
             let mut fresh = ShuffleBuffers::new();
             super::k_shuffle1(
-                seq_arr.view(), *k, Some(*seed),
-                out_fresh.view_mut(), alphabet_size, alphabet_bytes, &mut fresh,
-            ).unwrap();
+                seq_arr.view(),
+                *k,
+                Some(*seed),
+                out_fresh.view_mut(),
+                alphabet_size,
+                alphabet_bytes,
+                &mut fresh,
+            )
+            .unwrap();
 
             let mut out_reused = Array1::<u8>::zeros(len);
             super::k_shuffle1(
-                seq_arr.view(), *k, Some(*seed),
-                out_reused.view_mut(), alphabet_size, alphabet_bytes, &mut reused,
-            ).unwrap();
+                seq_arr.view(),
+                *k,
+                Some(*seed),
+                out_reused.view_mut(),
+                alphabet_size,
+                alphabet_bytes,
+                &mut reused,
+            )
+            .unwrap();
 
             assert_eq!(
                 out_fresh, out_reused,
-                "mismatch at len={} k={} seed={}", len, k, seed
+                "mismatch at len={} k={} seed={}",
+                len, k, seed
             );
         }
     }
