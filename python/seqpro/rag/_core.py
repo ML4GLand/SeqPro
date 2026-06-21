@@ -129,32 +129,38 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     @staticmethod
     def from_fields(fields: "dict[str, Ragged[Any]]") -> "Ragged[Any]":
         """Build a record (struct-of-arrays) from named single-field Ragged inputs
-        that share one ragged axis. Sequence fields must be chars (see to_chars)."""
+        that share one ragged axis. Supports numeric, char, string-under-axis, and
+        R=2 fields; record-of-record and R>=3 fields are not supported."""
         if not fields:
             raise ValueError("from_fields requires at least one field (got empty)")
         items = list(fields.items())
         for name, f in items:
             if f._is_record:
                 raise NotImplementedError(
-                    f"record-of-record field {name!r} lands in Spec C"
+                    f"record-of-record field {name!r} is unsupported"
                 )
-            if f.is_string:
-                raise NotImplementedError(
-                    f"opaque-string field {name!r} is Spec C; pass chars via .to_chars()"
-                )
-        shared = items[0][1].offsets
+            if f._rl.n_ragged >= 3:
+                raise NotImplementedError(f"R>=3 field {name!r} is unsupported")
+        shared = items[0][1]._layout.offsets  # the FULL list (not public .offsets)
         for name, f in items[1:]:
-            if not np.array_equal(f.offsets, shared):
+            fo = f._layout.offsets
+            if len(fo) != len(shared) or any(
+                not np.array_equal(a, b) for a, b in zip(fo, shared)
+            ):
                 raise ValueError(
                     f"field {name!r} offsets are not equal to the first field's"
                 )
         rec_shape = items[0][1].shape
-        rebound: dict[str, RaggedLayout[Any]] = {}
-        for name, f in items:
-            rebound[name] = RaggedLayout(
-                data=f._rl.data, offsets=[shared], shape=f._layout.shape
+        rebound: dict[str, RaggedLayout[Any]] = {
+            name: RaggedLayout(
+                data=f._rl.data,
+                offsets=shared,
+                shape=f._layout.shape,
+                str_offsets=f._rl.str_offsets,
             )
-        return Ragged(RecordLayout(offsets=[shared], shape=rec_shape, fields=rebound))
+            for name, f in items
+        }
+        return Ragged(RecordLayout(offsets=shared, shape=rec_shape, fields=rebound))
 
     @classmethod
     def empty(cls, shape: int | tuple[int | None, ...], dtype: Any) -> "Ragged[Any]":
@@ -356,6 +362,10 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         starts, stops = self._starts_stops()
         if isinstance(where, (int, np.integer)):
             lo, hi = int(starts[where]), int(stops[where])
+            if self._rl.str_offsets is not None and self._layout.offsets:
+                # string-under-axis: outer offsets index variants -> map to bytes via str_offsets
+                so = self._rl.str_offsets
+                return self._rl.data[int(so[lo]) : int(so[hi])].tobytes()
             row = self._rl.data[lo:hi]
             if self._rl.is_string:
                 return row.tobytes()

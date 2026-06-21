@@ -670,3 +670,19 @@ def test_r2_reshape_leading():
     np.testing.assert_array_equal(
         r.data, rag.data
     )  # data preserved (reshape view of 1-D)
+
+
+# ---------------------------------------------------------------------------
+# Task 13: string-under-axis integer indexing fix
+# ---------------------------------------------------------------------------
+
+
+def test_string_under_axis_integer_index():
+    rag = Ragged.from_offsets(
+        np.frombuffer(b"TTGG", "S1"),
+        (2, None),
+        np.array([0, 1, 2]),
+        str_offsets=np.array([0, 2, 4]),
+    )
+    assert rag[0] == b"TT"
+    assert rag[1] == b"GG"

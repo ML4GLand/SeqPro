@@ -80,17 +80,15 @@ def _validate_record_layout(layout: RecordLayout) -> None:
         raise ValueError("record layout must have at least one field (got empty)")
     if not layout.offsets:
         raise ValueError("record layout must have a shared offsets array")
-    shared = layout.offsets[0]
+    shared = layout.offsets  # the full shared list
     rag_dim = layout.shape.index(None)
     ragged_shape = layout.shape[: rag_dim + 1]
     for name, fld in layout.fields.items():
-        if fld.is_string:
-            raise NotImplementedError(
-                f"opaque-string record field {name!r} (S-under-axis) lands in Spec C"
-            )
-        if not fld.offsets or fld.offsets[0] is not shared:
+        if len(fld.offsets) != len(shared) or any(
+            fo is not so for fo, so in zip(fld.offsets, shared)
+        ):
             raise ValueError(
-                f"field {name!r} must use the shared offsets object (zero-copy SoA)"
+                f"field {name!r} must use the shared offsets list (zero-copy SoA)"
             )
         if fld.shape[: fld.shape.index(None) + 1] != ragged_shape:
             raise ValueError(
