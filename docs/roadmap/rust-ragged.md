@@ -156,10 +156,32 @@ doc → implementation plan → build cycle.
    Remove `awkward` from dependencies entirely; adapt `tokenize`/`translate` to
    string-leaf shapes; benchmark vs the old awkward path; rewrite
    `docs/ragged.md`; update `skills/seqpro/SKILL.md`; downstream migration notes.
-   *Exit:* `import awkward` gone, full suite green, docs/skill current.
+   **Gated by the throughput milestone** ([design
+   doc](../superpowers/specs/2026-06-21-ragged-throughput-gate-design.md)): a
+   transitional, local A-vs-B benchmark (`benchmarks/bench_ragged_backends.py`,
+   `pixi run -e bench rag-gate`) must show rust-native `Ragged` ≥ awkward (per-op
+   wall-clock, `rust <= awkward * (1 + tol)`, default `tol = 0.10`) across Core +
+   records + nested R=2 ops **before** `awkward` is dropped. The gate runs during
+   the coexistence window, is retired at cutover, and its rust-side timings fold
+   into the CodSpeed bench for forward regression tracking.
+   *Exit:* throughput gate green, `import awkward` gone, full suite green,
+   docs/skill current.
 
 ## Decision log
 
+- **2026-06-21** — Spec D throughput gate designed
+  ([design doc](../superpowers/specs/2026-06-21-ragged-throughput-gate-design.md)).
+  A transitional, local A-vs-B benchmark gates the Spec D cutover: rust-native
+  `Ragged` must be ≥ awkward (per-op wall-clock, `rust <= awkward * (1 + tol)`,
+  `tol = 0.10` default) across Core + records + nested R=2 ops. Decided during
+  brainstorming: standalone script (`benchmarks/bench_ragged_backends.py` +
+  `rag-gate` pixi task) over a pytest test, since the gate is one-time/throwaway;
+  per-op-with-tolerance pass bar over strict/aggregate; min-of-repeats
+  wall-clock with warmup + autoscaled batches; records/R=2 rows compare
+  awkward-native (`ak.*`) vs
+  rust-native (public awkward wrapper is 1-level only). Not a permanent CI fixture
+  — CodSpeed keeps tracking forward regressions of the rust path; the gate is
+  retired at cutover and its rust-side timings migrate into the CodSpeed bench.
 - **2026-06-19** — Epic kicked off. Locked the four design decisions above after
   surveying consumer shapes. Chose to decompose into 4 sequential specs rather
   than front-load all specs before proving the core model.
