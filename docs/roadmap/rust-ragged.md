@@ -204,7 +204,9 @@ doc → implementation plan → build cycle.
      packed input (rust wins there regardless, as awkward does real structural
      work).
 
-  Net: the 5 entries below are **resolved**; none remain Spec D blockers. Full
+  Net: all 5 earlier single-level regressors (construct i64/S1, index[slice],
+  to_packed i64/S1 — see the prior gate-ran entry) are **resolved**; none remain
+  Spec D blockers. Full
   rag pytest suite green (3 pre-existing pyarrow `PyExtensionType` failures
   unrelated/unchanged); ruff clean.
 
