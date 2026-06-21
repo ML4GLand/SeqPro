@@ -782,6 +782,18 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 )
             )
 
+        if self._layout.n_ragged == 2:
+            from ._ops import _nested_pack_parts
+
+            n2_data, n2_offsets = _nested_pack_parts(
+                self._rl.data, self._layout.shape, self._layout.offsets, copy
+            )
+            if n2_data is self._rl.data and all(
+                po is so for po, so in zip(n2_offsets, self._layout.offsets)
+            ):
+                return self
+            return Ragged.from_offsets(n2_data, self._layout.shape, n2_offsets)
+
         packed_data, packed_offsets = _pack_parts(
             self._rl.data, self._layout.shape, self.offsets, copy
         )

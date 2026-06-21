@@ -219,6 +219,65 @@ def _pack_parts(
     return out_data, out_offsets
 
 
+def _nested_pack_parts(
+    data: NDArray[Any],
+    shape: tuple[int | None, ...],
+    offsets_list: list[NDArray[Any]],
+    copy: bool,
+) -> tuple[NDArray[Any], list[NDArray[Any]]]:
+    """Pack a nested R=2 ragged array into canonical zero-based contiguous layout.
+
+    Returns ``(packed_data, [o0_out, o1_out])`` where both offset arrays are 1-D
+    and zero-based, and ``packed_data`` is contiguous.
+
+    When ``copy=False`` and the input is already packed, returns the original
+    objects unchanged (identity-preserving); raises ``ValueError`` otherwise.
+    """
+    from ._layout import _level_bounds
+
+    if len(offsets_list) != 2:
+        raise ValueError("_nested_pack_parts expects exactly 2 offset levels")
+    o0, o1 = offsets_list
+    o0_starts, o0_stops = _level_bounds(o0)
+    o1_starts, o1_stops = _level_bounds(o1)
+    rag_dim = shape.index(None)
+    trailing = shape[rag_dim + 2 :]
+    elem = (
+        int(np.prod([d for d in trailing if d is not None], dtype=np.int64))
+        * data.dtype.itemsize
+    )
+    already = (
+        o0.ndim == 1
+        and o1.ndim == 1
+        and (o0.size == 0 or o0[0] == 0)
+        and (o1.size == 0 or o1[0] == 0)
+        and data.flags.c_contiguous
+        and int(o1[-1]) == data.shape[0]
+    )
+    if already and not copy:
+        return data, [o0, o1]
+    if not copy:
+        raise ValueError(
+            "to_packed(copy=False) requires already-packed input; "
+            "got an unpacked nested array."
+        )
+    from seqpro.seqpro import _ragged_nested_pack  # type: ignore[missing-import]
+
+    src = np.ascontiguousarray(data).reshape(-1).view(np.uint8)
+    out_o0, out_o1, out_bytes = _ragged_nested_pack(
+        np.ascontiguousarray(o0_starts, np.int64),
+        np.ascontiguousarray(o0_stops, np.int64),
+        np.ascontiguousarray(o1_starts, np.int64),
+        np.ascontiguousarray(o1_stops, np.int64),
+        src,
+        elem,
+    )
+    out_data = out_bytes.view(data.dtype)
+    if trailing:
+        out_data = out_data.reshape(-1, *trailing)
+    return out_data, [out_o0.astype(OFFSET_TYPE), out_o1.astype(OFFSET_TYPE)]
+
+
 def to_packed(rag: Ragged[Any], *, copy: bool = True) -> Ragged[Any]:
     """Pack a Ragged array's data into a fresh contiguous, zero-based buffer.
 
