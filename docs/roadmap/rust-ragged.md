@@ -201,4 +201,4 @@ doc → implementation plan → build cycle.
   on records (-O-safe) rather than relying on a bare assert. Public
   `seqpro.rag.Ragged` remains awkward-backed; the swap + tokenize/translate
   adaptation remain Spec D. `skills/seqpro/SKILL.md` not updated (Spec B is
-  internal-only; skill update is Spec D).
+  internal-only; skill update is Spec D). Known latent item: opaque-string detection routes on dtype.kind=='S', which over-accepts multi-byte S4/S100 (no caller constructs it today; tighten to S1-only in Spec D).

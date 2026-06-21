@@ -577,3 +577,25 @@ def test_legacy_record_to_packed_copy_false_passthrough():
     rec = _to_packed_record()
     out = rec.to_packed(copy=False)
     assert out is rec
+
+
+# ---------------------------------------------------------------------------
+# -O-safe record guards on string-duality methods (is_string / to_chars / to_strings)
+# ---------------------------------------------------------------------------
+
+
+def test_record_is_string_is_false():
+    rag = _record_ragged()
+    assert rag.is_string is False
+
+
+def test_record_to_chars_raises():
+    rag = _record_ragged()
+    with pytest.raises(NotImplementedError, match="to_chars"):
+        rag.to_chars()
+
+
+def test_record_to_strings_raises():
+    rag = _record_ragged()
+    with pytest.raises(NotImplementedError, match="to_strings"):
+        rag.to_strings()

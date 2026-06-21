@@ -31,6 +31,7 @@ def _build_layout(
     if None in shape:
         return RaggedLayout(data=data, offsets=[offsets], shape=shape)
     if data.dtype.kind == "S":
+        # S1-only by convention; multi-byte S (S4/S100) is unsupported and not tightened here (see Spec D)
         return RaggedLayout(data=data, offsets=[], shape=shape, str_offsets=offsets)
     raise ValueError(
         "shape must have exactly one None ragged dimension for numeric data"
@@ -183,6 +184,8 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     @property
     def is_string(self) -> bool:
         """True for an opaque variable-width string Ragged (dtype 'S', shape (N,))."""
+        if isinstance(self._layout, RecordLayout):
+            return False
         return self._rl.is_string
 
     @property
@@ -244,6 +247,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def to_chars(self) -> "Ragged[Any]":
         """Zero-copy view of an opaque string ('S', (N,)) as ascii chars
         ('S1', (N, None)); the byte-length becomes a counted ragged axis."""
+        if isinstance(self._layout, RecordLayout):
+            raise NotImplementedError(
+                "to_chars() is not defined on record Ragged arrays; "
+                "convert individual fields instead."
+            )
         if not self._rl.is_string:
             raise ValueError("to_chars() requires an opaque string Ragged (dtype 'S')")
         assert self._rl.str_offsets is not None
@@ -259,6 +267,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def to_strings(self) -> "Ragged[Any]":
         """Zero-copy view of a 1-D ascii-char leaf ('S1', (N, None)) as an opaque
         string ('S', (N,)); the length axis becomes an uncounted byte leaf."""
+        if isinstance(self._layout, RecordLayout):
+            raise NotImplementedError(
+                "to_strings() is not defined on record Ragged arrays; "
+                "convert individual fields instead."
+            )
         if self._rl.is_string:
             return self
         if self._rl.data.dtype.kind != "S":
@@ -572,6 +585,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             packed_offsets: NDArray[Any] | None = None
             new_fields: dict[str, RaggedLayout[Any]] = {}
             for name, fl in rec.fields.items():
+                # copy is always True here; the copy=False path returns/raises above
                 pdata, poff = _pack_parts(fl.data, fl.shape, shared, copy=True)
                 if packed_offsets is None:
                     packed_offsets = poff
