@@ -137,7 +137,7 @@ doc → implementation plan → build cycle.
    *Exit:* genoray + single-level GVL/GVF record cases work (sequences as chars).
 
 3. **Spec C — Nested raggedness (R = 2) + `'S'`-under-an-axis.**
-   *(Design approved 2026-06-20 —
+   *(Landed 2026-06-21 —
    [design doc](../superpowers/specs/2026-06-20-rust-ragged-nested-design.md).)*
    Generalize to **R = 2** (capped; R ≥ 3 → `NotImplementedError` — see decision
    log): nested offset list `[O0, O1]`, **full numpy-style nested indexing**
@@ -229,3 +229,52 @@ doc → implementation plan → build cycle.
   irregular middle gathers); two new Rust kernels (nested-pack, nested-gather);
   record-of-record stays out of scope. Spec C stays internal/oracle-tested; public
   swap + tokenize/translate adaptation remain Spec D.
+- **2026-06-21** — Spec C landed: nested raggedness (R = 2) + string-under-axis in
+  `_core.py` / `_layout.py` / `_ops.py` / `src/ragged.rs`. What shipped:
+  - **R = 2 cap**: `shape.count(None) >= 3` → `NotImplementedError`; record-of-record
+    and R ≥ 3 fields rejected at construction time.
+  - **Full nested indexing**: outer `slice`/`mask`/`int` (lazy gather, no data copy);
+    `rag[i, j]` tuple chaining (chains single-key `__getitem__` calls); `rag[:, k]`
+    (uniform int — k-th middle of each group, R=1 result); `rag[:, a:b]` (per-group
+    slice, R=2 result); `rag[:, mask]` (mask over global middle axis, R=2 result);
+    `rag[:, idx]` (uniform int-array, multi-column gather, R=2 result).
+  - **String-under-axis leaf** — standalone (`from_offsets(..., str_offsets=...)`) and
+    as a record field (each field retains its own `str_offsets`; shared-offsets
+    record invariant covers only counted ragged axes). Zero-copy `to_chars()` /
+    `to_strings()` promote/demote the innermost real offset level ↔ `str_offsets`.
+    Bug fixed: string-under-axis integer indexing correctly uses `str_offsets` to
+    locate byte boundaries when a real `offsets` level is also present.
+  - **Nested records** — `from_fields` accepts R=2 fields; fields share the full
+    `[O0, O1]` offsets list (same object, zero-copy SoA). Per-field `str_offsets`
+    live in each field's `RaggedLayout`, not in the shared record list.
+  - **Two new Rust kernels**: `nested_gather` (mask over global middle axis, returns
+    per-group counts + selected indices) and `nested_pack` (pack scattered R=2
+    layout to contiguous canonical `[O0_1D, O1_1D]`).
+  - **`to_packed` / `to_padded` / `to_numpy`** for R=2: `to_packed` calls
+    `_nested_pack_parts` (Rust `nested_pack`) per field, sharing the packed offsets
+    list across fields. **`to_padded(axis=None, both)` composes two single-level
+    pads** (no third "nested pad" kernel): inner R=1 view padded to dense
+    `(M_total, K)`, then outer R=1 view (with trailing `K` dim) padded to
+    `(*leading, M, K)`. `to_padded(axis=-1)` pads inner only → R=1 result.
+    Single-level `to_padded` was generalized to support a trailing regular dim
+    (needed for the outer pad step). `to_numpy` for R=2 delegates to
+    `to_padded(axis=None)` after confirming both axes are uniform.
+  - **`_ingest` bridge** updated: R=2 layouts and string-under-axis layouts handled
+    in `layout_from_ak` / `to_ak`.
+  - **Differential Hypothesis suite** (`tests/test_ragged_nested_diff.py`): R=2
+    construct/index/pack (8 property tests covering all indexing forms, records,
+    string-under-axis) vs the awkward oracle.
+  - **Consumer-case exit tests** (`tests/test_ragged_nested_consumers.py`): the three
+    doubly-ragged shapes from the survey — alleles string-under-axis, flat variant
+    windows (dense tensor), codon annotations record.
+  - **Deliberately deferred to Spec D / follow-up (NOT shipped)**:
+    (a) `to_padded(axis=-2)` outer-only-with-ragged-inner structural pad — currently
+    raises `NotImplementedError("to_padded(axis=-2) ... not supported in Spec C")`;
+    its result would require feature (b).
+    (b) Multi-leading-dim grid integer indexing (`rag[i, j]` peeling a leading int
+    dim on `(d0, d1, ..., None)` arrays) — core flattens leading dims today; a
+    proper grid peel would need a new outer-slice path.
+    (c) Public swap + `tokenize`/`translate` adaptation — Spec D (unchanged).
+  - `skills/seqpro/SKILL.md` not updated (Spec C is internal-only, consistent with
+    Spec B; skill update is Spec D). Known latent item: S4/S100 dtype
+    over-acceptance carries forward to Spec D.
