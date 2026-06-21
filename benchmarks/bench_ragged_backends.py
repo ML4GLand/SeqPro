@@ -110,15 +110,120 @@ def run_cells(cells: list[Cell], tol: float, repeats: int = 7) -> int:
     return 1 if failures else 0
 
 
+_BASES = np.frombuffer(b"ACGT", dtype="S1")
+
+
+def _r1_buffers(n: int, low: int, high: int, *, bytes_: bool = False):
+    """Return (data, lengths, offsets) for n segments with lengths in [low, high]."""
+    rng = np.random.default_rng(0)
+    lengths = rng.integers(low, high + 1, size=n).astype(np.int64)
+    total = int(lengths.sum())
+    if bytes_:
+        data = _BASES[rng.integers(0, 4, size=total)]  # (total,) S1
+    else:
+        data = np.arange(total, dtype=np.int64)
+    offsets = np.concatenate([[0], np.cumsum(lengths)]).astype(np.int64)
+    return data, lengths, offsets
+
+
+def _ak_r1(offsets, data):
+    arr = np.asarray(data)
+    if arr.dtype.kind == "S":
+        # awkward does not support S1 dtype; view as uint8 bytes with "byte" parameter
+        leaf = ak.contents.NumpyArray(
+            arr.view(np.uint8), parameters={"__array__": "byte"}
+        )
+    else:
+        leaf = ak.contents.NumpyArray(arr)
+    return ak.Array(
+        ak.contents.ListOffsetArray(
+            ak.index.Index64(np.asarray(offsets, np.int64)),
+            leaf,
+        )
+    )
+
+
+def single_cells() -> list[Cell]:
+    cells: list[Cell] = []
+    # Primary numeric workload: flanked alleles (8000 x ~11-60).
+    data, lengths, offsets = _r1_buffers(8000, 11, 60)
+    shape = (8000, None)
+    sh = "8000x~11-60 i64"
+
+    cells.append(
+        Cell(
+            "single",
+            "construct",
+            sh,
+            lambda: _ak_r1(offsets, data),
+            lambda: RustRagged.from_offsets(data, shape, offsets),
+        )
+    )
+
+    akx = _ak_r1(offsets, data)
+    rx = RustRagged.from_offsets(data, shape, offsets)
+
+    cells.append(Cell("single", "index[int]", sh, lambda: akx[1234], lambda: rx[1234]))
+    cells.append(
+        Cell(
+            "single", "index[slice]", sh, lambda: akx[1000:5000], lambda: rx[1000:5000]
+        )
+    )
+
+    mask = np.arange(8000) % 3 == 0
+    cells.append(Cell("single", "index[mask]", sh, lambda: akx[mask], lambda: rx[mask]))
+
+    cells.append(
+        Cell(
+            "single", "to_packed", sh, lambda: ak.to_packed(akx), lambda: rx.to_packed()
+        )
+    )
+
+    L = int(lengths.max())
+    cells.append(
+        Cell(
+            "single",
+            "to_padded",
+            f"{sh} L={L}",
+            lambda: ak.to_numpy(ak.fill_none(ak.pad_none(akx, L, clip=True), 0)),
+            lambda: rx.to_padded(0, length=L),
+        )
+    )
+
+    cells.append(Cell("single", "ufunc(+1)", sh, lambda: akx + 1, lambda: rx + 1))
+
+    # S1 byte workload: construct + to_packed (the kernel-relevant ops).
+    bdata, blen, boff = _r1_buffers(8000, 11, 60, bytes_=True)
+    bshape = (8000, None)
+    bsh = "8000x~11-60 S1"
+    akb = _ak_r1(boff, bdata)
+    rb = RustRagged.from_offsets(bdata, bshape, boff)
+    cells.append(
+        Cell(
+            "single",
+            "construct",
+            bsh,
+            lambda: _ak_r1(boff, bdata),
+            lambda: RustRagged.from_offsets(bdata, bshape, boff),
+        )
+    )
+    cells.append(
+        Cell(
+            "single",
+            "to_packed",
+            bsh,
+            lambda: ak.to_packed(akb),
+            lambda: rb.to_packed(),
+        )
+    )
+    return cells
+
+
 def build_cells(args: argparse.Namespace) -> list[Cell]:
-    """Assemble the cell list. Extended in later tasks; Task 1 ships a self-test."""
+    """Assemble the cell list. Extended in later tasks."""
     cells: list[Cell] = []
     if args.only in ("all", "single"):
-        # Self-test cell proving the harness + gate wiring (identical work both sides).
-        x = np.arange(1000, dtype=np.int64)
-        cells.append(
-            Cell("selftest", "sum", "1000", lambda: int(x.sum()), lambda: int(x.sum()))
-        )
+        cells += single_cells()
     return cells
 
 
