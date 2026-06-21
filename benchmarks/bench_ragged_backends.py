@@ -72,7 +72,7 @@ def default_eq(a: Any, b: Any) -> bool:
     return to_list(a) == to_list(b)
 
 
-def run_cells(cells: list[Cell], tol: float) -> int:
+def run_cells(cells: list[Cell], tol: float, repeats: int = 7) -> int:
     rows: list[tuple[str, str, str, float, float, float, bool]] = []
     failures = 0
     for c in cells:
@@ -82,8 +82,8 @@ def run_cells(cells: list[Cell], tol: float) -> int:
                 f"equivalence check failed for {c.category}/{c.op} ({c.shape}); "
                 "the comparison would be unfair — fix the cell before timing."
             )
-        t_awk = time_callable(c.awk)
-        t_rust = time_callable(c.rust)
+        t_awk = time_callable(c.awk, repeats=repeats)
+        t_rust = time_callable(c.rust, repeats=repeats)
         ratio = t_rust / t_awk if t_awk > 0 else float("inf")
         ok = ratio <= 1.0 + tol
         failures += not ok
@@ -138,7 +138,7 @@ def main(argv: "list[str] | None" = None) -> int:
     if not cells:
         print(f"no cells for --only {args.only}")
         return 0
-    return run_cells(cells, args.tol)
+    return run_cells(cells, args.tol, args.repeats)
 
 
 if __name__ == "__main__":
