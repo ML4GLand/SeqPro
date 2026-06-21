@@ -48,14 +48,15 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     __slots__ = ("_layout",)
 
-    def __init__(self, data: Any):
+    def __init__(self, data: Any, *, validate: bool = False):
         if isinstance(data, Ragged):
             data = data._layout
         if not isinstance(data, (RaggedLayout, RecordLayout)):
             from ._ingest import layout_from_ak
 
             data = layout_from_ak(data)
-        validate_layout(data)
+        if validate:
+            validate_layout(data)
         self._layout = data
 
     @property
@@ -85,6 +86,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         offsets: "NDArray[Any] | list[NDArray[Any]]",
         *,
         str_offsets: "NDArray[Any] | None" = None,
+        validate: bool = False,
     ) -> "Ragged[Any]":
         if shape.count(None) >= 3:
             raise NotImplementedError("nested raggedness with R >= 3 is unsupported")
@@ -95,15 +97,19 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return Ragged(
                 RaggedLayout(
                     data=data, offsets=off_list, shape=shape, str_offsets=str_offsets
-                )
+                ),
+                validate=validate,
             )
         if shape.count(None) == 0 and data.dtype.kind != "S":
             raise ValueError("shape must have a None ragged dimension")
-        return Ragged(_build_layout(data, shape, off_list))
+        return Ragged(_build_layout(data, shape, off_list), validate=validate)
 
     @staticmethod
     def from_lengths(
-        data: NDArray[Any], lengths: "NDArray[Any] | tuple[NDArray[Any], NDArray[Any]]"
+        data: NDArray[Any],
+        lengths: "NDArray[Any] | tuple[NDArray[Any], NDArray[Any]]",
+        *,
+        validate: bool = False,
     ) -> "Ragged[Any]":
         if isinstance(lengths, tuple):
             outer_counts, inner_lengths = lengths
@@ -116,15 +122,15 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 None,
                 *trailing,
             )
-            return Ragged.from_offsets(data, shape, [o0, o1])
+            return Ragged.from_offsets(data, shape, [o0, o1], validate=validate)
         offsets = lengths_to_offsets(lengths)
         if data.dtype.kind == "S" and data.ndim == 1:
             # opaque string collection: (N,), byte-length is not an axis
             shape = tuple(lengths.shape)
-            return Ragged.from_offsets(data, shape, offsets)
+            return Ragged.from_offsets(data, shape, offsets, validate=validate)
         trailing = data.shape[1:]
         shape = (*lengths.shape, None, *trailing)
-        return Ragged.from_offsets(data, shape, offsets)
+        return Ragged.from_offsets(data, shape, offsets, validate=validate)
 
     @staticmethod
     def from_fields(fields: "dict[str, Ragged[Any]]") -> "Ragged[Any]":
@@ -407,6 +413,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         """Resolve ``where`` (slice/mask/int-array) against ``starts``/``stops`` and
         return ``(sel_starts, sel_stops)`` as contiguous OFFSET_TYPE arrays."""
         n = len(starts)
+        # Fast-path: plain slice — numpy slicing is an O(1) view; skip arange/where/rust
+        if isinstance(where, slice):
+            sel_starts = np.ascontiguousarray(starts[where], dtype=OFFSET_TYPE)
+            sel_stops = np.ascontiguousarray(stops[where], dtype=OFFSET_TYPE)
+            return sel_starts, sel_stops
         if _where_is_bool(where):
             if where.shape[0] != n:
                 raise IndexError(
