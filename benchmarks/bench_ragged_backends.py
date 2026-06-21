@@ -219,11 +219,75 @@ def single_cells() -> list[Cell]:
     return cells
 
 
+def record_cells() -> list[Cell]:
+    cells: list[Cell] = []
+    # genoray-like: 400 segments (samples*ploidy), ~variants in [0, 200), 3 numeric fields.
+    rng = np.random.default_rng(0)
+    n = 400
+    lengths = rng.integers(0, 200, size=n).astype(np.int64)
+    total = int(lengths.sum())
+    offsets = np.concatenate([[0], np.cumsum(lengths)]).astype(np.int64)
+    genos = rng.integers(0, 2, size=total).astype(np.int8)
+    dosages = rng.random(total).astype(np.float32)
+    mutcat = rng.integers(0, 5, size=total).astype(np.int32)
+    shape = (n, None)
+    sh = "400x~0-200 3fld"
+
+    fields = {"genos": genos, "dosages": dosages, "mutcat": mutcat}
+
+    def _ak_rec():
+        return ak.zip({k: _ak_r1(offsets, v) for k, v in fields.items()}, depth_limit=1)
+
+    def _rust_rec():
+        return RustRagged.from_fields(
+            {k: RustRagged.from_offsets(v, shape, offsets) for k, v in fields.items()}
+        )
+
+    cells.append(Cell("records", "zip/from_fields", sh, _ak_rec, _rust_rec))
+
+    akr = _ak_rec()
+    rr = _rust_rec()
+    cells.append(
+        Cell("records", "field[a]", sh, lambda: akr["dosages"], lambda: rr["dosages"])
+    )
+    cells.append(
+        Cell(
+            "records",
+            "to_packed",
+            sh,
+            lambda: ak.to_packed(akr),
+            lambda: rr.to_packed(),
+        )
+    )
+
+    # Per-field dense: awkward pads each field; rust returns a dict.
+    L = int(lengths.max())
+
+    def _ak_padded_dict():
+        return {
+            k: ak.to_numpy(ak.fill_none(ak.pad_none(akr[k], L, clip=True), 0))
+            for k in fields
+        }
+
+    cells.append(
+        Cell(
+            "records",
+            "to_padded(dict)",
+            f"{sh} L={L}",
+            _ak_padded_dict,
+            lambda: rr.to_padded(0, length=L),
+        )
+    )
+    return cells
+
+
 def build_cells(args: argparse.Namespace) -> list[Cell]:
     """Assemble the cell list. Extended in later tasks."""
     cells: list[Cell] = []
     if args.only in ("all", "single"):
         cells += single_cells()
+    if args.only in ("all", "records"):
+        cells += record_cells()
     return cells
 
 
