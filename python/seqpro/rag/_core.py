@@ -470,7 +470,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                     "negative inner-slice bounds (rag[:, -k:]) are unsupported"
                 )
             new_starts = np.minimum(o0_starts + start, o0_stops)
-            new_stops = np.minimum(o0_starts + stop, o0_stops)
+            new_stops = np.maximum(np.minimum(o0_starts + stop, o0_stops), new_starts)
             new_o0 = np.stack(
                 [new_starts.astype(OFFSET_TYPE), new_stops.astype(OFFSET_TYPE)], 0
             )
