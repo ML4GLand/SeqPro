@@ -281,6 +281,109 @@ def record_cells() -> list[Cell]:
     return cells
 
 
+def _r2_buffers(n_outer: int, mid_low: int, mid_high: int, in_low: int, in_high: int):
+    """Return (data, o0, o1, outer_counts, inner_lengths) for an R=2 structure."""
+    rng = np.random.default_rng(0)
+    outer_counts = rng.integers(mid_low, mid_high + 1, size=n_outer).astype(np.int64)
+    n_mid = int(outer_counts.sum())
+    inner_lengths = rng.integers(in_low, in_high + 1, size=n_mid).astype(np.int64)
+    total = int(inner_lengths.sum())
+    data = np.arange(total, dtype=np.int64)
+    o0 = np.concatenate([[0], np.cumsum(outer_counts)]).astype(np.int64)
+    o1 = np.concatenate([[0], np.cumsum(inner_lengths)]).astype(np.int64)
+    return data, o0, o1, outer_counts, inner_lengths
+
+
+def _ak_r2(o0, o1, data):
+    return ak.Array(
+        ak.contents.ListOffsetArray(
+            ak.index.Index64(np.asarray(o0, np.int64)),
+            ak.contents.ListOffsetArray(
+                ak.index.Index64(np.asarray(o1, np.int64)),
+                ak.contents.NumpyArray(np.asarray(data)),
+            ),
+        )
+    )
+
+
+def nested_cells() -> list[Cell]:
+    cells: list[Cell] = []
+    # flat-variant-windows-like: 64 outer groups, ~variants in [1,30], ~window in [1,20].
+    data, o0, o1, outer_counts, inner_lengths = _r2_buffers(64, 1, 30, 1, 20)
+    shape = (64, None, None)
+    sh = "64x~1-30x~1-20 i64"
+
+    cells.append(
+        Cell(
+            "nested",
+            "construct",
+            sh,
+            lambda: _ak_r2(o0, o1, data),
+            lambda: RustRagged.from_offsets(data, shape, [o0, o1]),
+        )
+    )
+
+    akx = _ak_r2(o0, o1, data)
+    rx = RustRagged.from_offsets(data, shape, [o0, o1])
+
+    cells.append(Cell("nested", "index[int]", sh, lambda: akx[7], lambda: rx[7]))
+    cells.append(
+        Cell("nested", "index[slice]", sh, lambda: akx[8:40], lambda: rx[8:40])
+    )
+    # rag[:, k]: k-th middle of each outer group. Use k=0 so every group is non-empty
+    # (outer_counts >= 1 by construction).
+    cells.append(Cell("nested", "index[:,k]", sh, lambda: akx[:, 0], lambda: rx[:, 0]))
+    cells.append(
+        Cell("nested", "index[:,a:b]", sh, lambda: akx[:, 0:2], lambda: rx[:, 0:2])
+    )
+
+    # rag[:, mask]: rust takes a flat boolean over the global middle axis; awkward takes
+    # the same mask regrouped under the outer counts (a ragged boolean of matching shape).
+    n_mid = int(outer_counts.sum())
+    flat_mask = np.arange(n_mid) % 2 == 0
+    ak_mask = ak.unflatten(flat_mask, list(outer_counts))
+    cells.append(
+        Cell(
+            "nested",
+            "index[:,mask]",
+            sh,
+            lambda: akx[ak_mask],
+            lambda: rx[:, flat_mask],
+        )
+    )
+
+    cells.append(
+        Cell(
+            "nested", "to_packed", sh, lambda: ak.to_packed(akx), lambda: rx.to_packed()
+        )
+    )
+
+    # Dense both axes: M = max middles per group, K = max inner length.
+    M = int(outer_counts.max())
+    K = int(inner_lengths.max()) if inner_lengths.size else 0
+
+    def _ak_dense():
+        padded_inner = ak.fill_none(ak.pad_none(akx, K, axis=2, clip=True), 0)
+        padded_outer = ak.pad_none(padded_inner, M, axis=1, clip=True)
+        # fill_none with a length-K array fills axis=1 None slots; to_numpy returns a masked
+        # array because awkward retains the option type — call .filled(0) to materialise zeros.
+        fill_val = np.zeros(K, dtype=np.int64)
+        return ak.to_numpy(
+            ak.fill_none(padded_outer, fill_val), allow_missing=True
+        ).filled(0)
+
+    cells.append(
+        Cell(
+            "nested",
+            "to_padded(both)",
+            f"{sh} M={M},K={K}",
+            _ak_dense,
+            lambda: rx.to_padded(0, axis=None),
+        )
+    )
+    return cells
+
+
 def build_cells(args: argparse.Namespace) -> list[Cell]:
     """Assemble the cell list. Extended in later tasks."""
     cells: list[Cell] = []
@@ -288,6 +391,8 @@ def build_cells(args: argparse.Namespace) -> list[Cell]:
         cells += single_cells()
     if args.only in ("all", "records"):
         cells += record_cells()
+    if args.only in ("all", "nested"):
+        cells += nested_cells()
     return cells
 
 
