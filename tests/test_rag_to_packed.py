@@ -187,3 +187,22 @@ class TestIndexedLayouts:
         # offsets extraction (via _extract_list_offsets) must not crash
         assert rag.offsets is not None
         assert ak.to_list(rag["a"]) == ak.to_list(rec["a"])
+
+
+class TestToPackedNested:
+    def test_to_packed_nested_after_outer_slice(self):
+        from seqpro.rag._core import Ragged as CoreRagged
+
+        data = np.arange(10, dtype=np.int32)
+        rag = CoreRagged.from_offsets(
+            data,
+            (3, None, None),
+            [np.array([0, 2, 3, 4]), np.array([0, 3, 5, 8, 10])],
+        )
+        packed = rag[1:3].to_packed()
+        assert packed._layout.offsets[0].ndim == 1 and packed._layout.offsets[0][0] == 0
+        assert packed._layout.offsets[1].ndim == 1 and packed._layout.offsets[1][0] == 0
+        assert packed.data.flags.c_contiguous
+        np.testing.assert_array_equal(packed[0, 0], np.array([5, 6, 7]))
+        np.testing.assert_array_equal(packed[1, 0], np.array([8, 9]))
+        np.testing.assert_array_equal(packed.data, np.array([5, 6, 7, 8, 9]))

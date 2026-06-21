@@ -30,9 +30,47 @@ def test_layout_string_flat_collection():
 
 def test_layout_rejects_multiple_none():
     data = np.arange(6)
-    with pytest.raises(NotImplementedError, match="Spec C"):
+    with pytest.raises(NotImplementedError, match="R >= 3|3 or more"):
         validate_layout(
-            RaggedLayout(data=data, offsets=[np.array([0, 6])], shape=(2, None, None))
+            RaggedLayout(
+                data=data,
+                offsets=[np.array([0, 1]), np.array([0, 2]), np.array([0, 6])],
+                shape=(2, None, None, None),
+            )
+        )
+
+
+def test_layout_nested_r2_valid():
+    data = np.arange(10, dtype=np.int32)
+    o0 = np.array([0, 2, 3], dtype=OFFSET_TYPE)  # 2 outer rows -> 2,1 middles
+    o1 = np.array([0, 3, 5, 10], dtype=OFFSET_TYPE)  # 3 middles -> data
+    layout = RaggedLayout(data=data, offsets=[o0, o1], shape=(2, None, None))
+    validate_layout(layout)
+    assert layout.n_ragged == 2
+
+
+def test_layout_nested_rejects_r3():
+    with pytest.raises(NotImplementedError, match="3 or more|R >= 3|three"):
+        validate_layout(
+            RaggedLayout(
+                data=np.arange(6),
+                offsets=[np.array([0, 1]), np.array([0, 2]), np.array([0, 6])],
+                shape=(1, None, None, None),
+            )
+        )
+
+
+def test_layout_nested_rejects_inner_segment_mismatch():
+    with pytest.raises(ValueError, match="segment|middle"):
+        validate_layout(
+            RaggedLayout(
+                data=np.arange(10),
+                offsets=[
+                    np.array([0, 2, 3], dtype=OFFSET_TYPE),
+                    np.array([0, 3, 5], dtype=OFFSET_TYPE),
+                ],  # only 2 middles, O0 needs 3
+                shape=(2, None, None),
+            )
         )
 
 
@@ -104,9 +142,40 @@ def test_empty():
     np.testing.assert_array_equal(rag.offsets, np.zeros(4, dtype=np.int64))
 
 
-def test_from_offsets_rejects_two_none():
-    with pytest.raises(NotImplementedError, match="Spec C"):
-        Ragged.from_offsets(np.arange(6), (2, None, None), np.array([0, 6]))
+def test_from_offsets_nested_list():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data,
+        (2, None, None),
+        [np.array([0, 2, 3]), np.array([0, 3, 5, 10])],
+    )
+    assert rag.shape == (2, None, None)
+    assert len(rag._layout.offsets) == 2
+    np.testing.assert_array_equal(rag._layout.offsets[0], np.array([0, 2, 3]))
+    np.testing.assert_array_equal(rag._layout.offsets[1], np.array([0, 3, 5, 10]))
+    assert rag.data is data  # zero-copy
+    # full peel/index verified in Task 4/5
+
+
+def test_from_offsets_rejects_three_none():
+    with pytest.raises(NotImplementedError):
+        Ragged.from_offsets(
+            np.arange(6),
+            (1, None, None, None),
+            [np.array([0, 1]), np.array([0, 2]), np.array([0, 6])],
+        )
+
+
+def test_from_lengths_nested_tuple():
+    data = np.arange(10, dtype=np.int32)
+    outer = np.array([2, 1])  # row0 has 2 middles, row1 has 1
+    inner = np.array([3, 2, 5])  # the 3 middles' leaf lengths
+    rag = Ragged.from_lengths(data, (outer, inner))
+    assert rag.shape == (2, None, None)
+    np.testing.assert_array_equal(rag._layout.offsets[0], np.array([0, 2, 3]))
+    np.testing.assert_array_equal(rag._layout.offsets[1], np.array([0, 3, 5, 10]))
+    assert rag.data is data  # zero-copy
+    # to_ak() parity verified in Task 15/16
 
 
 def test_state_predicates():
@@ -402,3 +471,297 @@ def test_to_strings_raises_on_trailing_dims():
     chars_with_trailing = Ragged.from_offsets(data, (2, None, 4), np.array([0, 2, 6]))
     with pytest.raises(ValueError, match="1-D|trailing"):
         chars_with_trailing.to_strings()
+
+
+# ---------------------------------------------------------------------------
+# Task 3: string-under-axis leaf + nested to_chars / to_strings
+# ---------------------------------------------------------------------------
+
+
+def test_string_under_axis_build_and_dtype():
+    data = np.frombuffer(b"ACGTAC", dtype="S1")
+    o0 = np.array([0, 2, 3], dtype=OFFSET_TYPE)  # 2 rows: 2 + 1 variants
+    str_off = np.array([0, 1, 3, 6], dtype=OFFSET_TYPE)  # 3 variants' byte lens
+    rag = Ragged.from_offsets(data, (2, None), o0, str_offsets=str_off)
+    assert rag.is_string is True
+    assert rag.dtype == np.dtype("S")
+    assert rag.shape == (2, None)
+
+
+def test_string_under_axis_to_chars_to_strings_roundtrip():
+    data = np.frombuffer(b"ACGTAC", dtype="S1")
+    o0 = np.array([0, 2, 3], dtype=OFFSET_TYPE)
+    str_off = np.array([0, 1, 3, 6], dtype=OFFSET_TYPE)
+    rag = Ragged.from_offsets(data, (2, None), o0, str_offsets=str_off)
+    chars = rag.to_chars()
+    assert chars.dtype == np.dtype("S1")
+    assert chars.shape == (2, None, None)
+    assert len(chars._layout.offsets) == 2
+    assert (
+        chars._layout.offsets[1] is str_off
+    )  # zero-copy: str_offsets became inner level
+    assert chars.data is data
+    back = chars.to_strings()
+    assert back.dtype == np.dtype("S")
+    assert back.shape == (2, None)
+    assert back._layout.offsets[0] is o0  # outer level preserved
+
+
+# ---------------------------------------------------------------------------
+# Task 4: R=2 outer-row indexing (lazy gather, peel to 1-level)
+# ---------------------------------------------------------------------------
+
+
+def test_r2_outer_slice_preserves_nesting():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (3, None, None), [np.array([0, 2, 3, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    sub = rag[1:3]  # outer rows 1,2
+    assert sub.shape == (2, None, None)
+    assert len(sub._layout.offsets) == 2
+    # row1 had 1 middle (data 5:8), row2 had 1 middle (data 8:10)
+    np.testing.assert_array_equal(sub[0][0], np.array([5, 6, 7]))
+    np.testing.assert_array_equal(sub[1][0], np.array([8, 9]))
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Tuple indexing + leaf access via peel chaining
+# ---------------------------------------------------------------------------
+
+
+def test_r2_tuple_indexing_and_leaf():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (3, None, None), [np.array([0, 2, 3, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    np.testing.assert_array_equal(
+        rag[0, 1], np.array([3, 4])
+    )  # row0, middle1 -> data 3:5
+    np.testing.assert_array_equal(rag[0][1], np.array([3, 4]))  # chaining equivalence
+    assert isinstance(rag[2, 0], np.ndarray)
+
+
+# ---------------------------------------------------------------------------
+# Task 6: Per-group inner int / slice indexing (rag[:, k], rag[:, a:b])
+# ---------------------------------------------------------------------------
+
+
+def test_r2_per_group_inner_int():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    got = rag[:, 0]  # 0th middle of each group
+    assert got.shape == (2, None)
+    np.testing.assert_array_equal(got[0], np.array([0, 1, 2]))  # group0 middle0 -> 0:3
+    np.testing.assert_array_equal(got[1], np.array([5, 6, 7]))  # group1 middle0 -> 5:8
+
+
+def test_r2_per_group_inner_int_out_of_range():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 1, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    with pytest.raises(IndexError):
+        rag[:, 2]  # group0 has only 1 middle
+
+
+def test_r2_per_group_inner_slice():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    sub = rag[:, 0:1]  # first middle of each group, keep nesting
+    assert sub.shape == (2, None, None)
+    np.testing.assert_array_equal(sub[0, 0], np.array([0, 1, 2]))
+    np.testing.assert_array_equal(sub[1, 0], np.array([5, 6, 7]))
+
+
+def test_r2_per_group_inner_slice_negative_raises():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data,
+        (2, None, None),
+        [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])],
+    )
+    with pytest.raises(NotImplementedError, match="negative"):
+        rag[:, -2:]
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Per-group inner mask / int-array indexing
+# ---------------------------------------------------------------------------
+
+
+def test_r2_inner_mask():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data,
+        (2, None, None),
+        [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])],
+    )
+    mask = np.array([True, False, True, True])  # over the 4 middles
+    sub = rag[:, mask]
+    assert sub.shape == (2, None, None)
+    np.testing.assert_array_equal(
+        sub.lengths.tolist(), [1, 2]
+    )  # group counts after mask
+    np.testing.assert_array_equal(sub[0, 0], np.array([0, 1, 2]))
+    np.testing.assert_array_equal(sub[1, 0], np.array([5, 6, 7]))
+
+
+def test_r2_inner_uniform_int_array():
+    data = np.arange(12, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data,
+        (2, None, None),
+        [np.array([0, 2, 4]), np.array([0, 3, 6, 9, 12])],
+    )
+    sub = rag[:, np.array([0, 1])]  # middles 0 and 1 of each group
+    assert sub.shape == (2, 2, None)
+    # (L0, len(idx), None): leading dims flatten row-major to 4 segments:
+    #   flat 0=(g0,i0), 1=(g0,i1), 2=(g1,i0), 3=(g1,i1)
+    np.testing.assert_array_equal(
+        sub[1], np.array([3, 4, 5])
+    )  # (g0, idx1) -> data[3:6]
+    np.testing.assert_array_equal(
+        sub[2], np.array([6, 7, 8])
+    )  # (g1, idx0) -> data[6:9]
+
+
+# ---------------------------------------------------------------------------
+# Task 12: R=2 lengths / squeeze / reshape
+# ---------------------------------------------------------------------------
+
+
+def test_r2_lengths_outer_counts():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 3]), np.array([0, 3, 5, 10])]
+    )
+    np.testing.assert_array_equal(rag.lengths, np.array([2, 1]))  # outer middle counts
+
+
+def test_r2_squeeze_leading_one():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data,
+        (1, 2, None, None),
+        [np.array([0, 2, 3]), np.array([0, 3, 5, 10])],
+    )
+    sq = rag.squeeze(0)
+    assert sq.shape == (2, None, None)
+    assert sq._layout.offsets[0] is rag._layout.offsets[0]  # O0 preserved
+    assert sq._layout.offsets[1] is rag._layout.offsets[1]  # O1 preserved
+
+
+def test_r2_reshape_leading():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 3]), np.array([0, 3, 5, 10])]
+    )
+    r = rag.reshape(1, 2, None, None)  # split the outer axis into leading (1, 2)
+    assert r.shape == (1, 2, None, None)
+    assert (
+        r._layout.offsets[0] is rag._layout.offsets[0]
+    )  # offsets pass through unchanged
+    assert r._layout.offsets[1] is rag._layout.offsets[1]
+    np.testing.assert_array_equal(
+        r.data, rag.data
+    )  # data preserved (reshape view of 1-D)
+
+
+# ---------------------------------------------------------------------------
+# Task 13: string-under-axis integer indexing fix
+# ---------------------------------------------------------------------------
+
+
+def test_string_under_axis_integer_index():
+    rag = Ragged.from_offsets(
+        np.frombuffer(b"TTGG", "S1"),
+        (2, None),
+        np.array([0, 1, 2]),
+        str_offsets=np.array([0, 2, 4]),
+    )
+    assert rag[0] == b"TT"
+    assert rag[1] == b"GG"
+
+
+# ---------------------------------------------------------------------------
+# Task 15: _ingest bridge — R=2 + string-under-axis (oracle interop)
+# ---------------------------------------------------------------------------
+
+
+def test_bridge_r2_roundtrip():
+    arr = ak.Array([[[1, 2, 3], [4, 5]], [[6]]])
+    rag = Ragged(arr)
+    assert rag.shape == (2, None, None)
+    assert rag.to_ak().to_list() == arr.to_list()
+
+
+def test_bridge_string_under_axis_roundtrip():
+    arr = ak.Array([[b"AC", b"G"], [b"TTT"]])
+    rag = Ragged(arr)
+    assert rag.is_string and rag.shape == (2, None)
+    assert rag.to_ak().to_list() == arr.to_list()
+
+
+# ---------------------------------------------------------------------------
+# Spec C integration: BUG fixes — is_contiguous inner-mask + string-under-axis guards
+# ---------------------------------------------------------------------------
+
+
+def test_r2_to_padded_after_inner_mask():
+    # Hand-trace:
+    # data=[0..9], O0=[0,2,4] (2 groups), O1=[0,3,5,8,10] (4 middles)
+    #   group0: middles 0,1 -> data[0:3]=[0,1,2], data[3:5]=[3,4]
+    #   group1: middles 2,3 -> data[5:8]=[5,6,7], data[8:10]=[8,9]
+    # mask=[T,F,T,T]: group0 keeps middle0 only; group1 keeps middles 2,3
+    # After to_packed: data=[0,1,2,5,6,7,8,9], O0=[0,1,3], O1=[0,3,8,10]
+    #   packed middle0: [0,1,2], middle1: [5,6,7], middle2: [8,9]
+    # to_padded: max inner=3; group0 has 1 middle->pad to M=2
+    #   dense[0,0]=[0,1,2], dense[0,1]=[-1,-1,-1]
+    #   dense[1,0]=[5,6,7], dense[1,1]=[8,9,-1]
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])]
+    )
+    masked = rag[:, np.array([True, False, True, True])]  # O0 1-D, O1 (2,n) lazy
+    dense = masked.to_padded(-1)  # must pack first, then dense
+    assert dense.shape == (2, 2, 3)
+    np.testing.assert_array_equal(dense[0, 0], np.array([0, 1, 2]))
+    np.testing.assert_array_equal(dense[0, 1], np.array([-1, -1, -1]))  # padded slot
+    np.testing.assert_array_equal(dense[1, 0], np.array([5, 6, 7]))
+    np.testing.assert_array_equal(dense[1, 1], np.array([8, 9, -1]))
+
+
+def test_r2_to_numpy_after_inner_mask_rectangular():
+    # All middles kept; after mask+pack the layout is rectangular
+    # data=[0..11], O0=[0,2,4], O1=[0,3,6,9,12]
+    #   group0: middles 0,1 -> data[0:3], data[3:6]
+    #   group1: middles 2,3 -> data[6:9], data[9:12]
+    # mask=[T,T,T,T]: keep all -> packed is canonical, shape (2,2,3)
+    data = np.arange(12, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data, (2, None, None), [np.array([0, 2, 4]), np.array([0, 3, 6, 9, 12])]
+    )
+    masked = rag[
+        :, np.array([True, True, True, True])
+    ]  # keep all -> rectangular after pack
+    arr = masked.to_numpy()
+    assert arr.shape == (2, 2, 3)
+    np.testing.assert_array_equal(arr[1, 1], np.array([9, 10, 11]))
+
+
+def test_string_under_axis_to_packed_raises():
+    rag = Ragged.from_offsets(
+        np.frombuffer(b"ACGTT", "S1"),
+        (2, None),
+        np.array([0, 2, 3]),
+        str_offsets=np.array([0, 1, 2, 5]),
+    )
+    with pytest.raises(NotImplementedError, match="string-under-axis"):
+        rag.to_packed()
+    with pytest.raises(NotImplementedError, match="string-under-axis"):
+        rag.to_numpy()
