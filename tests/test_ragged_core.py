@@ -587,3 +587,44 @@ def test_r2_per_group_inner_slice_negative_raises():
     )
     with pytest.raises(NotImplementedError, match="negative"):
         rag[:, -2:]
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Per-group inner mask / int-array indexing
+# ---------------------------------------------------------------------------
+
+
+def test_r2_inner_mask():
+    data = np.arange(10, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data,
+        (2, None, None),
+        [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])],
+    )
+    mask = np.array([True, False, True, True])  # over the 4 middles
+    sub = rag[:, mask]
+    assert sub.shape == (2, None, None)
+    np.testing.assert_array_equal(
+        sub.lengths.tolist(), [1, 2]
+    )  # group counts after mask
+    np.testing.assert_array_equal(sub[0, 0], np.array([0, 1, 2]))
+    np.testing.assert_array_equal(sub[1, 0], np.array([5, 6, 7]))
+
+
+def test_r2_inner_uniform_int_array():
+    data = np.arange(12, dtype=np.int32)
+    rag = Ragged.from_offsets(
+        data,
+        (2, None, None),
+        [np.array([0, 2, 4]), np.array([0, 3, 6, 9, 12])],
+    )
+    sub = rag[:, np.array([0, 1])]  # middles 0 and 1 of each group
+    assert sub.shape == (2, 2, None)
+    # (L0, len(idx), None): leading dims flatten row-major to 4 segments:
+    #   flat 0=(g0,i0), 1=(g0,i1), 2=(g1,i0), 3=(g1,i1)
+    np.testing.assert_array_equal(
+        sub[1], np.array([3, 4, 5])
+    )  # (g0, idx1) -> data[3:6]
+    np.testing.assert_array_equal(
+        sub[2], np.array([6, 7, 8])
+    )  # (g1, idx0) -> data[6:9]

@@ -472,7 +472,47 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                     shape=(len(new_starts), None, None, *trailing),
                 )
             )
-        return self._getitem_inner_gather(sel)  # type: ignore[attr-defined]  # mask / int-array -> Task 8
+        return self._getitem_inner_gather(sel)  # mask / int-array -> Task 8
+
+    def _getitem_inner_gather(self, sel: Any) -> "Ragged[Any]":
+        o0, o1 = self._layout.offsets
+        o0_starts, o0_stops = _level_bounds(o0)
+        o1_starts, o1_stops = _level_bounds(o1)
+        trailing = self._layout.shape[self.rag_dim + 2 :]
+        if _where_is_bool(sel):  # mask over the global middle axis -> R=2
+            from seqpro.seqpro import _ragged_nested_gather  # type: ignore[missing-import]
+
+            counts, sel_idx = _ragged_nested_gather(
+                np.ascontiguousarray(o0_starts, np.int64),
+                np.ascontiguousarray(o0_stops, np.int64),
+                np.ascontiguousarray(sel, np.bool_),
+            )
+            new_o0 = lengths_to_offsets(counts.astype(np.uint32))
+            ds = np.ascontiguousarray(o1_starts[sel_idx], dtype=OFFSET_TYPE)
+            de = np.ascontiguousarray(o1_stops[sel_idx], dtype=OFFSET_TYPE)
+            return Ragged(
+                RaggedLayout(
+                    data=self._rl.data,
+                    offsets=[new_o0, np.stack([ds, de], 0)],
+                    shape=(len(o0_starts), None, None, *trailing),
+                )
+            )
+        idx = np.atleast_1d(
+            np.asarray(sel, dtype=np.int64)
+        )  # uniform per-group int array
+        counts = o0_stops - o0_starts
+        if np.any(idx.max() >= counts) or np.any(idx.min() < -counts.min()):
+            raise IndexError("uniform inner index out of range for some group")
+        cols = [self._getitem_inner(int(k)) for k in idx]  # each is (L0, ~K) R=1
+        ds = np.stack([c._layout.offsets[0][0] for c in cols], 1).reshape(-1)
+        de = np.stack([c._layout.offsets[0][1] for c in cols], 1).reshape(-1)
+        return Ragged(
+            RaggedLayout(
+                data=self._rl.data,
+                offsets=[np.stack([ds, de], 0)],
+                shape=(len(counts), len(idx), None, *trailing),
+            )
+        )
 
     def _getitem_r2(self, where: Any) -> "Ragged[Any]":
         """Index an R=2 array on the outer axis.
