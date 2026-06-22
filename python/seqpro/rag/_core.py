@@ -392,9 +392,17 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return self._getitem_record(where)
         if self._layout.n_ragged == 2:
             return self._getitem_r2(where)
-        # Multi-dim leading shape: when rag_dim > 1 (e.g. shape (d0, d1, ..., None)),
-        # index the first axis treating each "row" as a block of n_inner segments.
-        if self.rag_dim > 1:
+        # Multi-dim leading shape: when rag_dim > 1 (e.g. shape (d0, d1, ..., None))
+        # AND the offsets are canonical (1-D), index the first axis treating each
+        # "row" as a block of n_inner contiguous segments.
+        # NOTE: opaque string leaves have no None in shape (rag_dim would crash), and
+        # lazy-gather results (offsets[0].ndim == 2) must use the flat path below.
+        if (
+            None in self._layout.shape
+            and self.rag_dim > 1
+            and self._layout.offsets
+            and self._layout.offsets[0].ndim == 1
+        ):
             return self._getitem_multidim(where)
         starts, stops = self._starts_stops()
         if isinstance(where, (int, np.integer)):
