@@ -1337,10 +1337,16 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         self, allow_missing: bool = False
     ) -> "NDArray[Any] | dict[str, NDArray[Any]]":
         if isinstance(self._layout, RecordLayout):
-            raise NotImplementedError(
-                "record-layout Ragged cannot be converted to a single dense array; "
-                "access fields individually."
-            )
+            # _core contract: return a dict of dense per-field arrays.
+            return {
+                field: cast(
+                    "NDArray[Any]",
+                    cast("Ragged[Any]", self[field]).to_numpy(
+                        allow_missing=allow_missing
+                    ),
+                )
+                for field in self._layout.fields
+            }
         if self._layout.n_ragged == 2:
             if self._rl.str_offsets is not None:
                 raise NotImplementedError(

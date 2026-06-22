@@ -158,9 +158,18 @@ class TestRecordRagged:
         with pytest.raises(NotImplementedError, match="record"):
             _ = rag.view(np.float32)
 
-    def test_to_numpy_raises_on_record(self, rag: Ragged):
-        with pytest.raises(NotImplementedError, match="record"):
-            _ = rag.to_numpy()
+    def test_to_numpy_raises_on_record(self):
+        # _core contract (replaces _array-era NotImplementedError): to_numpy on a
+        # record returns a dict of dense per-field arrays, not a single ndarray.
+        lens = np.array([2, 2, 2], dtype=np.uint32)
+        f0 = Ragged.from_lengths(np.arange(6, dtype=np.int64), lens)
+        f1 = Ragged.from_lengths(np.arange(6, dtype=np.float64), lens)
+        rec = rag_zip({"field0": f0, "field1": f1})
+        out = rec.to_numpy()
+        assert isinstance(out, dict)
+        assert set(out.keys()) == {"field0", "field1"}
+        assert isinstance(out["field0"], np.ndarray)
+        assert isinstance(out["field1"], np.ndarray)
 
     def test_field_setitem_roundtrip(self, rag: Ragged):
         original = rag["field0"].data.copy()
