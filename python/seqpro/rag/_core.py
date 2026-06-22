@@ -125,6 +125,19 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             )
         if shape.count(None) == 0 and data.dtype.kind != "S":
             raise ValueError("shape must have a None ragged dimension")
+        # Eager data-size check for the R=1 / 1-D offsets path (parity with _array backend).
+        n_none = shape.count(None)
+        if n_none == 1 and len(off_list) == 1 and off_list[0].ndim == 1:
+            rag_dim = shape.index(None)
+            trailing = shape[rag_dim + 1 :]
+            # trailing cannot contain None here (n_none == 1 and rag_dim is the only None).
+            trailing_ints: list[int] = [d for d in trailing if d is not None]
+            trailing_size = int(np.prod(trailing_ints)) if trailing_ints else 1
+            expected_size = int(off_list[0][-1]) * trailing_size
+            if data.size != expected_size:
+                raise ValueError(
+                    f"Data size {data.size} does not match size implied by shape and contiguous offsets: {expected_size}"
+                )
         return Ragged(_build_layout(data, shape, off_list), validate=validate)
 
     @staticmethod
