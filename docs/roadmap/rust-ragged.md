@@ -169,6 +169,28 @@ doc → implementation plan → build cycle.
 
 ## Decision log
 
+- **2026-06-21** — Rust single-level pack kernel; single-level `to_packed` now
+  has headroom (was at parity). The single-level pack path was the numba `_pack`
+  kernel, which only *matched* awkward on a bandwidth-bound gather (rust/awk ≈
+  1.0). Added `ragged::pack_into` (exposed as `_ragged_pack`) — a Rust gather
+  mirroring the existing nested `_ragged_nested_pack`: a single-pass sequential
+  copy for small outputs and a chunked **rayon-parallel** gather (safe
+  `split_at_mut` into disjoint per-chunk slices, no `unsafe`) for outputs ≥ 4 MB.
+  Wired into `_pack_parts`'s gather branch with the numba `_pack` retained as an
+  `ImportError` fallback; `out_offsets` and the `is_packed` copy branches are
+  unchanged, so output is byte-identical to the numba path. Result: single-level
+  `to_packed` **i64 ≈ 0.26**, **S1 ≈ 0.19** rust/awk (was ≈ 1.0). Reviewed on
+  Opus (memory-soundness of the disjoint parallel chunks verified; equivalence
+  with numba confirmed). 31 cargo tests (incl. a forced parallel-path test),
+  clippy `-D warnings` + fmt clean.
+
+  **Build-mode note (important for anyone running the gate):** the gate must be
+  run against a **release** build of the extension — `pixi run -e dev maturin
+  develop --release --uv` (plain `maturin develop` builds an unoptimized debug
+  `.so` that slows *every* Rust kernel ~5–10×, e.g. `index[mask]` and nested
+  `to_packed` fail the gate in debug). All ratios in this log are release-build
+  numbers.
+
 - **2026-06-21** — Throughput gate **GREEN: 23/23 passed (tol=10.00%), exit 0**
   after optimizing the 5 single-level regressors. All categories now pass with
   rust at or below awkward; worst ratio is `to_packed` i64 (unpacked) at 0.986
