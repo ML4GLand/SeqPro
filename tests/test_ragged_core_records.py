@@ -706,24 +706,21 @@ def test_bridge_r2_record_roundtrip():
 # ---------------------------------------------------------------------------
 
 
-def test_record_string_under_axis_to_packed_raises():
-    # A record with a string-under-axis field must raise NotImplementedError on to_packed.
-    # Note: slicing a record via _getitem_record_rows currently drops str_offsets from the
-    # rebuilt field layouts (existing behavior), so we test on the un-sliced record which
-    # still has str_offsets intact in its fields.
+def test_record_string_under_axis_to_packed():
+    # to_packed() now works on records with string-under-axis fields.
     ref = Ragged.from_offsets(
-        np.frombuffer(b"ACG", "S1"),
+        np.frombuffer(b"ACG", "S1").copy(),
         (2, None),
         np.array([0, 1, 2]),
         str_offsets=np.array([0, 1, 3]),
     )
     alt = Ragged.from_offsets(
-        np.frombuffer(b"TTGG", "S1"),
+        np.frombuffer(b"TTGG", "S1").copy(),
         (2, None),
         np.array([0, 1, 2]),
         str_offsets=np.array([0, 2, 4]),
     )
     rec = Ragged.from_fields({"ref": ref, "alt": alt})
-    # The un-sliced record's fields retain str_offsets; the guard fires here
-    with pytest.raises(NotImplementedError, match="string-under-axis"):
-        rec.to_packed()
+    packed = rec.to_packed()
+    assert packed["ref"].to_ak().to_list() == [[b"A"], [b"CG"]]
+    assert packed["alt"].to_ak().to_list() == [[b"TT"], [b"GG"]]

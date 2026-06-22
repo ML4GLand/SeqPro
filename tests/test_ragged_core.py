@@ -790,15 +790,16 @@ def test_r2_to_numpy_after_inner_mask_rectangular():
     np.testing.assert_array_equal(arr[1, 1], np.array([9, 10, 11]))
 
 
-def test_string_under_axis_to_packed_raises():
+def test_string_under_axis_to_packed_and_numpy():
+    # to_packed() now works on string-under-axis; to_numpy() still raises (Spec C).
     rag = Ragged.from_offsets(
-        np.frombuffer(b"ACGTT", "S1"),
+        np.frombuffer(b"ACGTT", "S1").copy(),
         (2, None),
         np.array([0, 2, 3]),
         str_offsets=np.array([0, 1, 2, 5]),
     )
-    with pytest.raises(NotImplementedError, match="string-under-axis"):
-        rag.to_packed()
+    packed = rag.to_packed()
+    assert packed.to_ak().to_list() == [[b"A", b"C"], [b"GTT"]]
     with pytest.raises(NotImplementedError, match="string-under-axis"):
         rag.to_numpy()
 

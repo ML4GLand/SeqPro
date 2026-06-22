@@ -221,3 +221,34 @@ class TestToPackedNested:
         np.testing.assert_array_equal(packed[0, 0], np.array([5, 6, 7]))
         np.testing.assert_array_equal(packed[1, 0], np.array([8, 9]))
         np.testing.assert_array_equal(packed.data, np.array([5, 6, 7, 8, 9]))
+
+
+def _record(var_off, char_off, chars):
+    alt = Ragged.from_offsets(
+        chars, (len(var_off) - 1, None, None), [var_off, char_off]
+    ).to_strings()
+    start = Ragged.from_offsets(
+        np.arange(int(var_off[-1]), dtype=np.int32),
+        (len(var_off) - 1, None),
+        alt.offsets,
+    )
+    return Ragged.from_fields({"alt": alt, "start": start}), alt
+
+
+def test_to_packed_opaque_string_under_axis():
+    var_off = np.array([0, 2, 3], dtype=np.int64)
+    char_off = np.array([0, 2, 3, 6], dtype=np.int64)
+    rv, alt = _record(var_off, char_off, np.frombuffer(b"ACGTTT", "S1").copy())
+    sl = alt[np.array([1, 0])]  # produces (2,N) gather offsets
+    packed = sl.to_packed()  # must not raise
+    assert packed.to_ak().to_list() == [[b"TTT"], [b"AC", b"G"]]
+
+
+def test_to_packed_record_with_string_field():
+    var_off = np.array([0, 2, 3], dtype=np.int64)
+    char_off = np.array([0, 2, 3, 6], dtype=np.int64)
+    rv, _ = _record(var_off, char_off, np.frombuffer(b"ACGTTT", "S1").copy())
+    sl = rv[np.array([1, 0])]
+    packed = sl.to_packed()  # must not raise
+    assert packed["alt"].to_ak().to_list() == [[b"TTT"], [b"AC", b"G"]]
+    assert packed["start"].to_ak().to_list() == [[2], [0, 1]]

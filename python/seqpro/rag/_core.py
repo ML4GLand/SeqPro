@@ -1008,6 +1008,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 data=fl.data,
                 offsets=[new_offsets],
                 shape=(len(sel_starts), *fl.shape[fl.shape.index(None) :]),
+                str_offsets=fl.str_offsets,
             )
             for name, fl in rec.fields.items()
         }
@@ -1283,20 +1284,25 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             if len(rec.offsets) == 2:
                 return self._to_packed_record_r2(copy)
             shared = self.offsets
-            # guard: string-under-axis fields cannot be packed in Spec C
-            for fname, fl in rec.fields.items():
-                if fl.str_offsets is not None and fl.offsets:
-                    raise NotImplementedError(
-                        f"to_packed() on a record with a string-under-axis field {fname!r} "
-                        "is not supported in Spec C; convert via .to_chars() first, or pack in Spec D."
-                    )
             if not copy:
                 already = (
                     shared.ndim == 1
                     and (shared.size == 0 or shared[0] == 0)
                     and all(
                         fl.data.flags.c_contiguous
-                        and int(shared[-1]) == fl.data.shape[0]
+                        and (
+                            # numeric/char field: data length matches outer offsets
+                            (
+                                fl.str_offsets is None
+                                and int(shared[-1]) == fl.data.shape[0]
+                            )
+                            # string-under-axis: str_offsets must also be 1-D and zero-based
+                            or (
+                                fl.str_offsets is not None
+                                and fl.str_offsets.ndim == 1
+                                and (fl.str_offsets.size == 0 or fl.str_offsets[0] == 0)
+                            )
+                        )
                         for fl in rec.fields.values()
                     )
                 )
@@ -1305,16 +1311,35 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 raise ValueError(
                     "to_packed(copy=False) requires already-packed input; got an unpacked record."
                 )
+            from ._ops import _nested_pack_parts
+
             packed_offsets: NDArray[Any] | None = None
             new_fields: dict[str, RaggedLayout[Any]] = {}
             for name, fl in rec.fields.items():
                 # copy is always True here; the copy=False path returns/raises above
-                pdata, poff = _pack_parts(fl.data, fl.shape, shared, copy=True)
-                if packed_offsets is None:
-                    packed_offsets = poff
-                new_fields[name] = RaggedLayout(
-                    data=pdata, offsets=[packed_offsets], shape=fl.shape
-                )
+                if fl.str_offsets is not None and fl.offsets:
+                    # String-under-axis field: treat as R=2 (outer offsets + char offsets)
+                    r2_shape = (*fl.shape, None)
+                    pdata, poff2 = _nested_pack_parts(
+                        fl.data, r2_shape, [shared, fl.str_offsets], copy=True
+                    )
+                    new_o0 = poff2[0]
+                    new_str_off = poff2[1]
+                    if packed_offsets is None:
+                        packed_offsets = new_o0
+                    new_fields[name] = RaggedLayout(
+                        data=pdata,
+                        offsets=[packed_offsets],
+                        shape=fl.shape,
+                        str_offsets=new_str_off,
+                    )
+                else:
+                    pdata, poff = _pack_parts(fl.data, fl.shape, shared, copy=True)
+                    if packed_offsets is None:
+                        packed_offsets = poff
+                    new_fields[name] = RaggedLayout(
+                        data=pdata, offsets=[packed_offsets], shape=fl.shape
+                    )
             assert packed_offsets is not None
             return Ragged(
                 RecordLayout(
@@ -1335,9 +1360,24 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return Ragged.from_offsets(n2_data, self._layout.shape, n2_offsets)
 
         if self._rl.str_offsets is not None and self._layout.offsets:
-            raise NotImplementedError(
-                "to_packed() on a string-under-axis Ragged is not supported in Spec C; "
-                "convert via .to_chars() first, or pack in Spec D."
+            # Opaque-string-under-axis: shape (…, None), offsets=[o0], str_offsets=char_off.
+            # Structurally R=2 — pack both levels via _nested_pack_parts.
+            from ._ops import _nested_pack_parts
+
+            o0 = self._layout.offsets[0]
+            str_off = self._rl.str_offsets
+            # Build a temporary R=2 shape for _nested_pack_parts: append a second None
+            r2_shape = (*self._layout.shape, None)
+            str_packed_data, str_packed_offs = _nested_pack_parts(
+                self._rl.data, r2_shape, [o0, str_off], copy
+            )
+            return Ragged(
+                RaggedLayout(
+                    data=str_packed_data,
+                    offsets=[str_packed_offs[0]],
+                    shape=self._layout.shape,
+                    str_offsets=str_packed_offs[1],
+                )
             )
         if self._rl.is_string:
             # Opaque-string layout: str_offsets IS the packed dimension; there is
