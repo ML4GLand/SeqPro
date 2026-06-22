@@ -765,3 +765,74 @@ def test_string_under_axis_to_packed_raises():
         rag.to_packed()
     with pytest.raises(NotImplementedError, match="string-under-axis"):
         rag.to_numpy()
+
+
+# ---------------------------------------------------------------------------
+# Spec D: opt-in validation (Fix 1) + slice fast-path (Fix 2)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_true_raises_on_nonmonotonic_offsets():
+    """validate=True must reject non-monotonic offsets (opt-in validation)."""
+    with pytest.raises(ValueError, match="monotonic"):
+        Ragged.from_offsets(
+            np.arange(5),
+            (3, None),
+            np.array([0, 3, 2, 5], dtype=OFFSET_TYPE),
+            validate=True,
+        )
+
+
+def test_validate_default_does_not_raise_on_nonmonotonic_offsets():
+    """Default (validate=False) must NOT raise on non-monotonic offsets — opt-in confirmed."""
+    # This must not raise — trust-the-buffers model matches awkward's default
+    Ragged.from_offsets(
+        np.arange(5),
+        (3, None),
+        np.array([0, 3, 2, 5], dtype=OFFSET_TYPE),
+    )
+
+
+def test_validate_true_raises_on_segment_count_mismatch():
+    """validate=True must catch segment count != product of leading dims."""
+    with pytest.raises(ValueError, match="segment"):
+        Ragged.from_offsets(
+            np.arange(10),
+            (4, None),
+            lengths_to_offsets(np.array([3, 2, 5])),  # 3 segments but shape claims 4
+            validate=True,
+        )
+
+
+def test_validate_false_default_no_raise_on_bad_segment_count():
+    """validate=False (default) must NOT raise on segment count mismatch."""
+    Ragged.from_offsets(
+        np.arange(10),
+        (4, None),
+        lengths_to_offsets(np.array([3, 2, 5])),
+    )
+
+
+def test_getitem_slice_fast_path_returns_correct_values():
+    """Slice indexing fast-path returns same values as int-array path."""
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    sub_slice = rag[1:3]
+    sub_intarr = rag[np.array([1, 2])]
+    np.testing.assert_array_equal(sub_slice[0], sub_intarr[0])
+    np.testing.assert_array_equal(sub_slice[1], sub_intarr[1])
+
+
+def test_getitem_slice_returns_2d_offsets():
+    """Slice-indexed result still has (2, M) offsets (consistent contract)."""
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    sub = rag[0:2]
+    assert sub.offsets.ndim == 2
+    assert sub.offsets.shape == (2, 2)
+
+
+def test_getitem_empty_slice():
+    """Empty slice returns an empty Ragged."""
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    sub = rag[1:1]
+    assert isinstance(sub, Ragged)
+    assert len(sub.offsets[0]) == 0

@@ -156,10 +156,118 @@ doc → implementation plan → build cycle.
    Remove `awkward` from dependencies entirely; adapt `tokenize`/`translate` to
    string-leaf shapes; benchmark vs the old awkward path; rewrite
    `docs/ragged.md`; update `skills/seqpro/SKILL.md`; downstream migration notes.
-   *Exit:* `import awkward` gone, full suite green, docs/skill current.
+   **Gated by the throughput milestone** ([design
+   doc](../superpowers/specs/2026-06-21-ragged-throughput-gate-design.md)): a
+   transitional, local A-vs-B benchmark (`benchmarks/bench_ragged_backends.py`,
+   `pixi run -e bench rag-gate`) must show rust-native `Ragged` ≥ awkward (per-op
+   wall-clock, `rust <= awkward * (1 + tol)`, default `tol = 0.10`) across Core +
+   records + nested R=2 ops **before** `awkward` is dropped. The gate runs during
+   the coexistence window, is retired at cutover, and its rust-side timings fold
+   into the CodSpeed bench for forward regression tracking.
+   *Exit:* throughput gate green, `import awkward` gone, full suite green,
+   docs/skill current.
 
 ## Decision log
 
+- **2026-06-21** — Rust single-level pack kernel; single-level `to_packed` now
+  has headroom (was at parity). The single-level pack path was the numba `_pack`
+  kernel, which only *matched* awkward on a bandwidth-bound gather (rust/awk ≈
+  1.0). Added `ragged::pack_into` (exposed as `_ragged_pack`) — a Rust gather
+  mirroring the existing nested `_ragged_nested_pack`: a single-pass sequential
+  copy for small outputs and a chunked **rayon-parallel** gather (safe
+  `split_at_mut` into disjoint per-chunk slices, no `unsafe`) for outputs ≥ 4 MB.
+  Wired into `_pack_parts`'s gather branch with the numba `_pack` retained as an
+  `ImportError` fallback; `out_offsets` and the `is_packed` copy branches are
+  unchanged, so output is byte-identical to the numba path. Result: single-level
+  `to_packed` **i64 ≈ 0.26**, **S1 ≈ 0.19** rust/awk (was ≈ 1.0). Reviewed on
+  Opus (memory-soundness of the disjoint parallel chunks verified; equivalence
+  with numba confirmed). 31 cargo tests (incl. a forced parallel-path test),
+  clippy `-D warnings` + fmt clean.
+
+  **Build-mode note (important for anyone running the gate):** the gate must be
+  run against a **release** build of the extension — `pixi run -e dev maturin
+  develop --release --uv` (plain `maturin develop` builds an unoptimized debug
+  `.so` that slows *every* Rust kernel ~5–10×, e.g. `index[mask]` and nested
+  `to_packed` fail the gate in debug). All ratios in this log are release-build
+  numbers.
+
+- **2026-06-21** — Throughput gate **GREEN: 23/23 passed (tol=10.00%), exit 0**
+  after optimizing the 5 single-level regressors. All categories now pass with
+  rust at or below awkward; worst ratio is `to_packed` i64 (unpacked) at 0.986
+  (a genuine, fair, narrow win). Three changes, all **Python-only** (no
+  `src/*.rs` edit, no `maturin` rebuild — the rust/numba kernels were already
+  competitive):
+
+  1. **Opt-in validation (default off).** `Ragged.__init__` previously ran
+     `validate_layout` on *every* construction (including every `__getitem__`
+     result), checking R=1 monotonicity **twice** (numpy `_is_monotonic` +
+     rust `_ragged_validate`) — awkward validates nothing on construct. This
+     both violated the documented "validation is opt-in and front-loaded via a
+     `validate=` flag" convention (CLAUDE.md) and was the `construct` perf bug.
+     Now `from_offsets`/`from_lengths`/`__init__` take `validate: bool = False`;
+     `validate=True` is the one obvious way to ask "is this input clean?" Fixed
+     `construct` (i64 1.79×→0.094, S1 1.59×→0.084) and removed re-validation on
+     indexing results.
+  2. **Slice indexing fast-path.** For a `slice`, `__getitem__` now takes
+     `starts[sl]`/`stops[sl]` views instead of materializing `np.arange(n)` +
+     `np.where` + a rust gather. Fixed `index[slice]` (1.21×→0.226). Verified
+     equivalent to the old path across normal/full/empty/step/negative slice
+     forms.
+  3. **Benchmark fairness fix for `to_packed`.** The prior `to_packed` cells fed
+     **already-packed** data, where awkward's `to_packed` is zero-copy (shares
+     the buffer) while rust's `to_packed(copy=True)` does a defensive
+     `data.copy()` — comparing *unequal work*, contrary to the gate's
+     same-logical-work principle. The single-level `to_packed` cells now pack
+     **unpacked** (masked) input so both backends perform the real gather; rust
+     wins (i64 0.986, S1 0.866). This corrected the earlier "4.25× blocker"
+     framing: the numba `_pack` kernel was never the problem — it beats awkward
+     on genuine pack work; the cell was measuring awkward's degenerate
+     already-packed shortcut. Records/nested `to_packed` cells were left on
+     packed input (rust wins there regardless, as awkward does real structural
+     work).
+
+  Net: all 5 earlier single-level regressors (construct i64/S1, index[slice],
+  to_packed i64/S1 — see the prior gate-ran entry) are **resolved**; none remain
+  Spec D blockers. Full
+  rag pytest suite green (3 pre-existing pyarrow `PyExtensionType` failures
+  unrelated/unchanged); ruff clean.
+
+- **2026-06-21** — Throughput gate ran; `rag-gate` pixi task wired.
+  `pixi run -e bench rag-gate` now runs the full A-vs-B benchmark
+  (`benchmarks/bench_ragged_backends.py`). Result: **18/23 passed
+  (tol=10.00%), exit code 1**. Categories: records ✓ (4/4), nested ✓ (8/8),
+  string ✓ (2/2), single ✗ (4/9). The 5 FAILing ops are all in the
+  single-level category and are **Spec D blockers** — must be optimised before
+  cutover:
+
+  | op | shape | awk (µs) | rust (µs) | rust/awk | backing layer |
+  |---|---|---|---|---|---|
+  | construct | 8000×~11-60 i64 | 6.11 | 10.92 | **1.787** | rust ingest (`from_offsets`) |
+  | index[slice] | 8000×~11-60 i64 | 15.76 | 19.07 | **1.211** | rust |
+  | to_packed | 8000×~11-60 i64 | 27.80 | 118.11 | **4.248** | numba `_pack` (via `_pack_parts`) |
+  | construct | 8000×~11-60 S1 | 6.79 | 10.80 | **1.590** | rust ingest (`from_offsets`) |
+  | to_packed | 8000×~11-60 S1 | 28.80 | 44.66 | **1.551** | numba `_pack` (via `_pack_parts`) |
+
+  Worst regressor: `to_packed` i64 at 4.25× slower. The single-level
+  `to_packed` regressions are in the **numba** kernel `seqpro.rag._ops._pack`
+  (via `_pack_parts`) — NOT in Rust. (The nested R=2 `to_packed`, backed by the
+  rust `_ragged_nested_pack` extension, passed the gate.) The `construct` and
+  `index[slice]` FAILs are in the rust ingest path. These are the priority
+  targets for the Spec D performance sprint.
+
+- **2026-06-21** — Spec D throughput gate designed
+  ([design doc](../superpowers/specs/2026-06-21-ragged-throughput-gate-design.md)).
+  A transitional, local A-vs-B benchmark gates the Spec D cutover: rust-native
+  `Ragged` must be ≥ awkward (per-op wall-clock, `rust <= awkward * (1 + tol)`,
+  `tol = 0.10` default) across Core + records + nested R=2 ops. Decided during
+  brainstorming: standalone script (`benchmarks/bench_ragged_backends.py` +
+  `rag-gate` pixi task) over a pytest test, since the gate is one-time/throwaway;
+  per-op-with-tolerance pass bar over strict/aggregate; min-of-repeats
+  wall-clock with warmup + autoscaled batches; records/R=2 rows compare
+  awkward-native (`ak.*`) vs
+  rust-native (public awkward wrapper is 1-level only). Not a permanent CI fixture
+  — CodSpeed keeps tracking forward regressions of the rust path; the gate is
+  retired at cutover and its rust-side timings migrate into the CodSpeed bench.
 - **2026-06-19** — Epic kicked off. Locked the four design decisions above after
   surveying consumer shapes. Chose to decompose into 4 sequential specs rather
   than front-load all specs before proving the core model.

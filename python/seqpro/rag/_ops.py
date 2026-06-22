@@ -205,14 +205,29 @@ def _pack_parts(
     if not data.flags.c_contiguous:
         data = np.ascontiguousarray(data)
     src_bytes = data.view(np.uint8).reshape(-1)
-    out_bytes = np.empty(int(out_offsets[-1]) * elem, dtype=np.uint8)
-    _pack(
-        src_bytes,
-        (starts.astype(np.int64) * elem),
-        (stops.astype(np.int64) * elem),
-        out_bytes,
-        (out_offsets[:-1] * elem),
-    )
+    try:
+        from seqpro.seqpro import _ragged_pack  # type: ignore[missing-import]
+
+        # Pre-allocate a plain numpy-owned buffer and let rust write into it.
+        # This avoids: (a) a zero-init pass inside Rust, (b) a PySliceContainer-
+        # backed return value (which breaks `is_base`), and (c) an extra .copy().
+        out_bytes = np.empty(int(out_offsets[-1]) * elem, dtype=np.uint8)
+        _ragged_pack(
+            np.ascontiguousarray(starts, np.int64),
+            np.ascontiguousarray(stops, np.int64),
+            src_bytes,
+            elem,
+            out_bytes,
+        )
+    except ImportError:  # pragma: no cover - fallback to numba kernel
+        out_bytes = np.empty(int(out_offsets[-1]) * elem, dtype=np.uint8)
+        _pack(
+            src_bytes,
+            (starts.astype(np.int64) * elem),
+            (stops.astype(np.int64) * elem),
+            out_bytes,
+            (out_offsets[:-1] * elem),
+        )
     out_data = out_bytes.view(data.dtype)
     if trailing:
         out_data = out_data.reshape(-1, *trailing)
