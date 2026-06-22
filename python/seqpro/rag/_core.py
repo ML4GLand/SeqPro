@@ -422,7 +422,13 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             # Multi-dim tuple: each key in the tuple targets successive leading axes.
             # We collapse all the integer-dim keys into one combined index so that
             # e.g. rag[:, [0]] correctly selects sample axis 1, not range axis 0.
-            if self._layout.shape.count(None) == 1 and self.rag_dim > 0:
+            # Only meaningful when there are *multiple* leading int axes to combine
+            # (rag_dim > 1). When rag_dim == 1 there is a single leading axis and a
+            # tuple just indexes it then reaches into the ragged/trailing dims; the
+            # combining path would mis-handle the trailing fixed dim (e.g. a
+            # (d0, None, K) array padded by to_padded), so fall through to the
+            # sequential per-key path below.
+            if self._layout.shape.count(None) == 1 and self.rag_dim > 1:
                 return self._getitem_tuple_multidim(where)
             result: Any = self
             for k in where:
