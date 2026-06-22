@@ -23,6 +23,14 @@ Status legend: PASS / FAIL / SKIP(deferred) / N/A.
 | genoray | tuple index on multi-dim Ragged | PASS | FAIL | axes applied sequentially, not jointly | seqpro `_core` `_getitem_tuple_multidim` meshgrid (a787440) | regression vs `_array`; verified against `_array` oracle |
 | genoray (`test_parity.py` ×12, `test_ragged_core.py` ×3) | getitem routing | n/a | regressed mid-fix | first guard (`offsets[0].ndim==1`) too coarse — conflated canonical multidim (`rag_dim>=3`) with lazy-gather (`rag_dim==2`) | seqpro `_core` (b2961b4) | precise routing on `rag_dim>=3`; both `_core` contract tests and genoray parity green |
 
+### GenVarLoader (gvl)
+- **Phase A** (seqpro 0.16 `_array`): after fixing an audit-induced regression (SP-1 had made `_ops.to_padded` `_core`-only; fixed backend-agnostic in SP-4 `3b8b4c7`), `800 passed, 20 skipped, 4 xfailed, 0 failed` (controller-verified) → no genuine version drift. pixi repoint `2c4148023`. (osx-arm64 env gaps: plink2/PGEN + basenji2-torch linux-only, skipped.)
+- **Phase B** (seqpro 0.16 `_core`): `800 passed, 0 failed` (controller-verified). **27 swap-caused failures** → 3 fixed in seqpro `_core` (`87e41bb`: `__len__`, `np.newaxis`, multi-fancy-index zip-semantics in `_getitem_tuple_multidim`), 7 gvl prod sites + 13 gvl test files (`3e3f7b8`: `ak.*`→`.to_ak()`/native, `_ragged_stack_tracks` helper later vectorized in `241cfd9`). Opus-reviewed.
+
+### genvarformer (gvf) — CPU-runnable subset on osx-arm64
+- **Phase A/B** (gvf has no clean awkward baseline: audited gvl `_tracks.py` directly imports `_core`): CPU subset `369 passed, 0 failed, 97 skipped` (controller-verified). **8 swap-caused failures** → 7 gvf (`8684c96`: `ak.to_packed`→`.to_packed()`), 1 seqpro (`672e075`: `_core.from_offsets` eager data-size validation, `_array` parity). pixi repoint `a5064dd`. Sonnet-reviewed.
+- **DEFERRED-to-Linux-GPU** (out of scope, osx-arm64 lacks CUDA/flash-attn/triton): 9 test files — `test_compile_attention_gpu.py`, `test_compile_custom_ops_gpu.py`, `test_compile_dilation_gpu.py`, `test_compile_e2e_gpu.py`, `test_compile_gpu.py`, `test_compile_intragenic_gpu.py`, `test_compile_intragenic_torch211_gpu.py`, `test_nested.py`, `test_profile_conv_varlen.py` (~38 tests) + ~59 `@cuda_only` skips within included files. These MUST be run on Linux+GPU before final awkward removal.
+
 ## ⚠️ Critical ship-readiness discovery (out of plan scope — flagged to owner)
 
 Flipping `seqpro.rag.Ragged` to `_core` breaks **SeqPro's OWN test suite**, which the plan never tasked running:
@@ -45,4 +53,23 @@ Notable: three subagent fixes mislabeled their own regressions as "pre-existing"
 
 ## Ship-readiness verdict
 
-_Filled in Task 10._
+**Final sweep (all controller-verified, seqpro on `_core`):**
+| suite | result |
+|-------|--------|
+| SeqPro own suite (`pytest tests/`) under `_core` | **544 passed, 2 skipped, 2 xfailed, 2 xpassed, 0 failed** |
+| genoray (`pixi run test`) | **456 passed, 2 skipped, 16 xfailed, 0 failed** |
+| GenVarLoader (`pixi run -e dev pytest tests`) | **800 passed, 20 skipped, 4 xfailed, 0 failed** |
+| genvarformer CPU subset (osx-arm64) | **369 passed, 97 skipped, 0 failed** |
+
+**Swap-caused breakages:** 57 across consumers (genoray 22, gvl 27, gvf 8) + 123 in SeqPro's own suite (discovered out-of-plan — see above). 
+**Fix split:** seqpro `_core`/`_ops`/`_encoders` carried the bulk of the genuine regressions (multi-dim & tuple getitem, `is_base`, opaque-string `to_packed`, `to_numpy` record dict, `is_rag_dtype`/`_ops` backend-agnosticism, `to_padded` both-backend, `__len__`, `np.newaxis`, `from_offsets` validation, ported `_ops`); consumers took API-vocabulary adaptations (`ak.*`→`_core` ops/`.to_ak()`, `ak.zip`→`from_fields`). seqpro fix commits: `a787440 6c577b2 b2961b4 2a366ec d3f88a3 39a7185 3b8b4c7 87e41bb 672e075`. consumer fix commits: genoray `b7d2800`; gvl `3e3f7b8 241cfd9`; gvf `8684c96`.
+
+**Accepted exceptions:**
+- SeqPro own suite under the *retiring* `_array` backend has 20 failures, all in 4 test files deliberately ported to the `_core` API (test-API-port artifacts, NOT functional regressions). Resolves automatically when `_array` is deleted (tests then run only under `_core`, where they pass).
+- gvf GPU/CUDA/flash-attn subset (9 files, ~38 tests + ~59 cuda-only) DEFERRED-to-Linux-GPU — not runnable on osx-arm64.
+- Minor cleanups rolled up for final review (in `.superpowers/sdd/progress.md`): `from_fields` surface note; `Ragged.data` type annotation `# type: ignore`; `test_to_numpy_raises_on_record` misnomer; `_core` non-adjacent fancy-index inconsistency vs `_array`; gvl `_haps.py` AF-filter awkward round-trip; redundant `None` filter + theoretical empty-offsets `IndexError` in `from_offsets`.
+
+**VERDICT: GO to retire the awkward `_array` backend — conditional on one gate.**
+The Rust `_core.Ragged` is a verified drop-in across SeqPro itself and all three consumers on CPU (osx-arm64). All version-drift and swap-caused breakages are resolved or explained. **Condition:** before physically deleting `_array`, run genvarformer's deferred GPU/CUDA subset (the 9 files above) on a Linux+CUDA host and confirm green — those paths exercise `_core.Ragged` through flash-attn/Nested and were not runnable here. With that gate met, the awkward backend can be retired.
+
+**Process note:** during the audit, fix subagents mislabeled four of their own regressions as "pre-existing"; each was empirically disproved by the controller (cross-commit `_core.py`/`__init__.py` swaps) and forced to a real fix. All final-state numbers above were independently re-run by the controller, not taken from subagent self-reports.
