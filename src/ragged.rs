@@ -1,5 +1,131 @@
 use ndarray::prelude::*;
 
+/// Concatenate N ragged arrays along their ragged axis.
+///
+/// All inputs share the same number of groups G.  For each group g the
+/// output contains the elements of input 0 followed by input 1, …, input N-1.
+///
+/// `data_list[i]` is the packed byte buffer for input i (length = n_elements_i * elem).
+/// `offsets_list[i]` is the 1-D (G+1,) offset array for input i (element units, not bytes).
+/// `elem` is the byte-size of one element (e.g. 4 for f32 or i32).
+///
+/// Returns `(out_data: Vec<u8>, out_offsets: Vec<i64>)` where `out_offsets` has
+/// length G+1 and `out_data` has length `sum_i(offsets_i[G]) * elem` bytes.
+pub fn ragged_concat(
+    data_list: Vec<&[u8]>,
+    offsets_list: Vec<&[i64]>,
+    elem: usize,
+) -> Result<(Vec<u8>, Vec<i64>), String> {
+    use rayon::prelude::*;
+
+    let n = data_list.len();
+    if n == 0 {
+        return Err("ragged_concat requires at least one input".into());
+    }
+    if offsets_list.len() != n {
+        return Err("data_list and offsets_list must have the same length".into());
+    }
+    if elem == 0 {
+        return Err("elem must be positive".into());
+    }
+
+    let g = offsets_list[0].len().saturating_sub(1); // number of groups
+    for (i, off) in offsets_list.iter().enumerate() {
+        if off.len() != g + 1 {
+            return Err(format!(
+                "offsets_list[{}] has length {} but expected {}",
+                i,
+                off.len(),
+                g + 1
+            ));
+        }
+    }
+
+    // Validate and compute per-group output lengths.
+    // out_lens[g] = sum_i (offsets_i[g+1] - offsets_i[g])
+    let mut out_lens: Vec<usize> = Vec::with_capacity(g);
+    let mut total_elems: usize = 0;
+    for grp in 0..g {
+        let mut grp_len: usize = 0;
+        for i in 0..n {
+            let a = offsets_list[i][grp];
+            let b = offsets_list[i][grp + 1];
+            if a < 0 || b < a {
+                return Err(format!(
+                    "input {}: invalid offsets at group {}: [{}, {})",
+                    i, grp, a, b
+                ));
+            }
+            let len = (b - a) as usize;
+            // Validate byte span against data buffer
+            let byte_b = (b as usize)
+                .checked_mul(elem)
+                .ok_or_else(|| format!("input {}: byte offset overflow at group {}", i, grp))?;
+            if byte_b > data_list[i].len() {
+                return Err(format!(
+                    "input {}: data span out of bounds at group {}",
+                    i, grp
+                ));
+            }
+            grp_len = grp_len.checked_add(len).ok_or("output length overflow")?;
+        }
+        out_lens.push(grp_len);
+        total_elems = total_elems
+            .checked_add(grp_len)
+            .ok_or("total length overflow")?;
+    }
+
+    // Build 1-D output offsets (cumulative sum of out_lens).
+    let mut out_offsets: Vec<i64> = Vec::with_capacity(g + 1);
+    out_offsets.push(0i64);
+    for &l in &out_lens {
+        let prev = *out_offsets.last().unwrap();
+        out_offsets.push(prev + l as i64);
+    }
+
+    let total_bytes = total_elems
+        .checked_mul(elem)
+        .ok_or("output byte count overflow")?;
+    let mut out_data: Vec<u8> = vec![0u8; total_bytes];
+
+    // Strategy: rayon over groups — each group writes into a disjoint slice of
+    // out_data, so no locking is required.
+    // Safety: we split out_data into disjoint mutable slices per group.
+    // Each group slice is of length out_lens[g]*elem bytes.
+    // We use split_at_mut to peel off slices without overlapping.
+
+    // Build per-group slices in a Vec.
+    let mut group_slices: Vec<&mut [u8]> = Vec::with_capacity(g);
+    {
+        let mut rest: &mut [u8] = &mut out_data;
+        for &grp_len in &out_lens {
+            let chunk_bytes = grp_len * elem;
+            let (head, tail) = rest.split_at_mut(chunk_bytes);
+            group_slices.push(head);
+            rest = tail;
+        }
+    }
+
+    // Parallel copy: for each group, write inputs 0..n sequentially into the group slice.
+    group_slices
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(grp, grp_slice)| {
+            let mut dst_pos = 0usize;
+            for i in 0..n {
+                let a = offsets_list[i][grp] as usize;
+                let b = offsets_list[i][grp + 1] as usize;
+                let src_byte_start = a * elem;
+                let src_byte_end = b * elem;
+                let src = &data_list[i][src_byte_start..src_byte_end];
+                grp_slice[dst_pos..dst_pos + src.len()].copy_from_slice(src);
+                dst_pos += src.len();
+            }
+        });
+
+    Ok((out_data, out_offsets))
+}
+
 pub fn nested_gather(
     o0_starts: ArrayView1<i64>,
     o0_stops: ArrayView1<i64>,

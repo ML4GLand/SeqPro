@@ -17,7 +17,7 @@ from numpy.typing import NDArray
 from ._core import Ragged, is_rag_dtype
 from ._utils import OFFSET_TYPE
 
-__all__ = ["reverse_complement", "to_packed", "to_padded"]
+__all__ = ["concatenate", "reverse_complement", "to_packed", "to_padded"]
 
 
 @nb.njit(parallel=True, nogil=True, cache=True)
@@ -477,3 +477,72 @@ def to_padded(
     if leading:
         out = out.reshape((*leading, out_len))  # pyrefly: ignore[no-matching-overload] -- leading contains int|None but dims before rag_dim are always int; numpy stub can't verify this
     return out
+
+
+def concatenate(rags: Any, axis: int) -> "Ragged[Any]":
+    """Concatenate Ragged arrays along the ragged axis.
+
+    Given N ``Ragged`` arrays that share the same number of groups and the same
+    leading fixed dimensions, concatenate their per-group element sequences so
+    that each output group contains the elements of ``rags[0]`` followed by
+    ``rags[1]``, …, ``rags[-1]``.
+
+    Parameters
+    ----------
+    rags
+        Sequence of :class:`Ragged` arrays.  All must have the same ``shape``
+        except for the total element count (which varies per group).
+    axis
+        Axis to concatenate along.  Must be the ragged axis (``None`` position
+        in ``shape``); negative values are normalised.  ``axis=-1`` is the
+        typical call for a 1-D ragged array ``(G, None)``.
+
+    Returns
+    -------
+    Ragged
+        A new packed :class:`Ragged` whose per-group data is the concatenation
+        of the inputs.  dtype is inherited from the first input.
+
+    Notes
+    -----
+    No Python loops over elements.  Offset arithmetic and buffered copy are
+    performed by a Rust/rayon kernel (``_ragged_concat``).  Supports any
+    fixed-itemsize numeric dtype (e.g. ``int32``, ``float32``).
+    """
+    from ._core import Ragged
+
+    if not rags:
+        raise ValueError("concatenate requires at least one Ragged")
+    rags = [r if isinstance(r, Ragged) else Ragged(r) for r in rags]
+    ref = rags[0]
+    ax = axis % len(ref.shape)
+    if ax != ref.rag_dim:
+        raise ValueError(
+            f"concatenate only supports the ragged axis ({ref.rag_dim}), got {axis}"
+        )
+
+    # Pack each input so offsets are 1-D (G+1,) and data is contiguous.
+    packed = [x.to_packed() for x in rags]
+
+    # Compute byte-element size: dtype.itemsize * product of trailing fixed dims.
+    trailing = ref.shape[ref.rag_dim + 1 :]
+    trailing_ints = [d for d in trailing if d is not None]
+    elem = (
+        int(np.prod(trailing_ints, dtype=np.int64)) * ref.data.dtype.itemsize
+        if trailing_ints
+        else ref.data.dtype.itemsize
+    )  # type: ignore[union-attr]
+
+    from seqpro.seqpro import _ragged_concat  # type: ignore[missing-import]  # rust
+
+    data_list = [
+        np.ascontiguousarray(p.data).reshape(-1).view(np.uint8)  # type: ignore[union-attr]
+        for p in packed
+    ]
+    offsets_list = [np.ascontiguousarray(p.offsets, dtype=np.int64) for p in packed]
+
+    out_bytes, out_offsets = _ragged_concat(data_list, offsets_list, elem)
+    out_data = out_bytes.view(ref.data.dtype)  # type: ignore[union-attr]
+    if trailing_ints:
+        out_data = out_data.reshape(-1, *trailing_ints)
+    return Ragged.from_offsets(out_data, ref.shape, out_offsets)
