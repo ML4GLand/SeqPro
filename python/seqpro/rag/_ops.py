@@ -429,7 +429,14 @@ def to_padded(
         Dense array of dtype ``rag.data.dtype`` and shape
         ``(*rag.shape[:rag_dim], out_len)``.
     """
-    if rag._is_record:
+    # Backend-agnostic record detection: _core.Ragged exposes _is_record; _array.Ragged
+    # delegates __getattr__ to ak.Array so that attr raises — fall back to ak.fields().
+    _is_rec = getattr(rag, "_is_record", None)
+    if _is_rec is None:
+        import awkward as _ak
+
+        _is_rec = bool(_ak.fields(rag))
+    if _is_rec:
         raise NotImplementedError(
             "to_padded is not defined on record-layout Ragged arrays; "
             "convert fields individually."
