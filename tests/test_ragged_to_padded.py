@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import awkward as ak
-import awkward.operations.str as ak_str
 import numpy as np
 import pytest
 
 from seqpro.rag import Ragged, lengths_to_offsets
+from seqpro.rag import zip as rag_zip
 from seqpro.rag._core import Ragged as CoreRagged
 from seqpro.rag._ops import to_padded
 
@@ -18,12 +18,24 @@ from seqpro.rag._ops import to_padded
 
 
 def _naive_pad_bytes(rag: Ragged, pad_value: bytes, length: int) -> np.ndarray:
-    return Ragged(ak_str.rpad(rag, length, pad_value)).to_numpy()
+    # Independent per-row numpy oracle (ak.str.rpad is unusable here: the installed
+    # pyarrow lacks PyExtensionType, which awkward's str ops require). Right-pad /
+    # truncate each row's bytes against a packed copy.
+    packed = rag.to_packed()
+    off = np.asarray(packed.offsets)
+    data = np.ascontiguousarray(packed.data)
+    n = len(off) - 1
+    out = np.full((n, length), pad_value, dtype="S1")
+    for i in range(n):
+        seg = data[off[i] : off[i + 1]][:length]
+        out[i, : len(seg)] = seg
+    return out
 
 
 def _naive_pad_numeric(rag: Ragged, pad_value, length: int) -> np.ndarray:
+    # awkward's numeric pad_none/fill_none work on the awkward bridge (rag.to_ak()).
     orig_dtype = rag.dtype
-    r = ak.pad_none(rag, length, axis=-1, clip=True)
+    r = ak.pad_none(rag.to_ak(), length, axis=-1, clip=True)
     r = ak.fill_none(r, pad_value)
     return ak.to_numpy(r).astype(orig_dtype, copy=False)
 
@@ -139,9 +151,12 @@ def test_length_truncate_numeric():
 
 
 def test_record_layout_raises():
-    seq = _make_bytes_rag(["ATCG", "GG"])
-    score = _make_numeric_rag([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0]], np.float32)
-    rec = ak.zip({"seq": seq, "score": score})
+    # A record (struct-of-arrays) Ragged built via seqpro.rag.zip; to_padded must
+    # reject it. _core.zip requires fields to share one ragged axis (matching
+    # offsets), so both fields use the same lengths [4, 2].
+    a = _make_numeric_rag([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0]], np.float32)
+    b = _make_numeric_rag([[1, 2, 3, 4], [5, 6]], np.int32)
+    rec = rag_zip({"a": a, "b": b})
     assert isinstance(rec, Ragged)
     with pytest.raises(NotImplementedError, match="record-layout"):
         to_padded(rec, b"N")

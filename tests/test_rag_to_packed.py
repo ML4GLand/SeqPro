@@ -3,7 +3,18 @@ import numpy as np
 import pytest
 
 from seqpro.rag import Ragged
+from seqpro.rag import zip as rag_zip
 from seqpro.rag._ops import to_packed
+
+
+def _to_list(rag):
+    """Awkward nested-list view of a _core.Ragged for value comparisons.
+
+    _core.Ragged is not an ak.Array, so ``ak.to_list(rag)`` cannot introspect it
+    directly; ``rag.to_ak()`` bridges to the awkward layout that the old
+    _array-backed tests compared against.
+    """
+    return ak.to_list(rag.to_ak()) if isinstance(rag, Ragged) else ak.to_list(rag)
 
 
 def _unpacked(lengths, dtype):
@@ -25,26 +36,26 @@ class TestToPackedFlat:
         assert out.offsets.ndim == 1
         assert out.offsets[0] == 0
         assert out.is_contiguous
-        assert ak.to_list(out) == ak.to_list(rag)
+        assert _to_list(out) == _to_list(rag)
         # matches awkward's packing exactly
-        assert ak.to_list(out) == ak.to_list(ak.to_packed(rag))
+        assert _to_list(out) == ak.to_list(ak.to_packed(rag.to_ak()))
 
-    def test_1d_offsets_unpacked_rebases(self):
-        # A contiguous slice keeps a 1-D ListOffsetArray but with a non-zero
-        # base (offsets[0] != 0) and untrimmed content -> exercises the
-        # offsets.ndim == 1 gather path (starts = offsets[:-1]) in _pack_parts.
+    def test_unpacked_slice_rebases(self):
+        # Slicing a _core.Ragged yields a lazy 2-D (starts, stops) offset gather
+        # over the untrimmed parent buffer (unpacked: not is_contiguous).
+        # to_packed must rebase it into a fresh zero-based, contiguous 1-D buffer.
         full = Ragged.from_lengths(np.arange(9, dtype=np.float64), np.array([3, 2, 4]))
         rag = full[1:]
-        assert rag.offsets.ndim == 1
-        assert rag.offsets[0] != 0  # not zero-based -> unpacked
+        assert rag.offsets.ndim == 2  # 2-D (starts, stops) lazy gather -> unpacked
+        assert not rag.is_contiguous
         out = to_packed(rag)
         assert out.offsets.ndim == 1
         assert out.offsets[0] == 0
         assert out.is_contiguous
         assert out.data.shape[0] == 6  # content trimmed to packed extent
         assert not np.shares_memory(out.data, rag.data)  # rebased into fresh buffer
-        assert ak.to_list(out) == ak.to_list(rag)
-        assert ak.to_list(out) == ak.to_list(ak.to_packed(rag))
+        assert _to_list(out) == _to_list(rag)
+        assert _to_list(out) == ak.to_list(ak.to_packed(rag.to_ak()))
 
     def test_bytes_dtype(self):
         seqs = ["ATG", "C", "GGGG"]
@@ -52,8 +63,11 @@ class TestToPackedFlat:
         lengths = np.array([len(s) for s in seqs])
         rag = Ragged.from_lengths(data, lengths)[::-1]
         out = to_packed(rag)
-        assert out.dtype == np.dtype("S1")
-        assert ak.to_list(out) == ak.to_list(rag)
+        # _core models a 1-D S1 from_lengths collection as an opaque variable-width
+        # string (dtype descriptor 'S'); the underlying char buffer stays S1.
+        assert out.dtype == np.dtype("S")
+        assert out.data.dtype == np.dtype("S1")
+        assert _to_list(out) == _to_list(rag)
 
     def test_trailing_fixed_dims(self):
         # OHE-like: (n, None, 4) uint8
@@ -61,13 +75,13 @@ class TestToPackedFlat:
         rag = Ragged.from_lengths(data, np.array([2, 1]))[::-1]
         out = to_packed(rag)
         assert out.shape[1:] == rag.shape[1:]
-        assert ak.to_list(out) == ak.to_list(rag)
+        assert _to_list(out) == _to_list(rag)
 
     def test_empty_array(self):
         rag = Ragged.empty((0, None), np.float64)
         out = to_packed(rag)
         assert out.offsets.ndim == 1
-        assert len(out) == 0
+        assert out.shape[0] == 0  # _core.Ragged has no __len__; check leading dim
 
     def test_copy_true_returns_owned_buffer(self):
         rag = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([3, 3]))
@@ -95,30 +109,27 @@ class TestToPackedFlat:
         out = to_packed(rag)
         assert out.dtype == np.dtype("float64")
         assert out.shape[1:] == rag.shape[1:]
-        assert ak.to_list(out) == ak.to_list(rag)
+        assert _to_list(out) == _to_list(rag)
 
 
 class TestToPackedRecord:
     def _record(self):
-        import awkward as ak
-
         lengths = np.array([3, 2, 4])
         scores = np.arange(9, dtype=np.float64)
         flags = np.arange(9, dtype=np.int8)
-        rec = ak.zip(
+        return rag_zip(
             {
                 "score": Ragged.from_lengths(scores, lengths),
                 "flag": Ragged.from_lengths(flags, lengths),
             }
         )
-        return Ragged(rec)
 
     def test_record_unpacked_packs_all_fields(self):
         rec = self._record()[::-1]  # reorder -> ListArray-backed fields
         out = to_packed(rec)
         assert out.offsets.ndim == 1
         assert out.offsets[0] == 0
-        assert ak.to_list(out) == ak.to_list(rec)
+        assert _to_list(out) == _to_list(rec)
         # fields share one offsets object (zero-copy SoA contract)
         assert out["score"].offsets is out["flag"].offsets
 
@@ -135,7 +146,7 @@ class TestToPackedMethod:
         ]
         out = rag.to_packed()
         assert out.offsets.ndim == 1
-        assert ak.to_list(out) == ak.to_list(rag)
+        assert _to_list(out) == _to_list(rag)
 
     def test_method_copy_false(self):
         rag = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([3, 3]))
@@ -149,15 +160,17 @@ class TestToPackedMethod:
 
 class TestIndexedLayouts:
     """An IndexedArray wrapper arises from indexing a *record* then pulling a
-    field (e.g. ak.zip(...)[perm]["x"]). seqpro's layout walkers must traverse
-    it. Plain Ragged[perm] yields a ListArray (already covered elsewhere)."""
+    field (e.g. ak.zip(rag.to_ak(), ...)[perm]["x"]). seqpro's awkward-layout
+    ingestion (Ragged(ak_array)) must traverse it. Plain Ragged[perm] yields a
+    ListArray (already covered elsewhere). The awkward record is built from
+    rag.to_ak() since _core.Ragged is not itself an ak.Array."""
 
     def test_indexed_field_unbox_and_to_packed(self):
         lengths = np.array([3, 0, 2, 4])
         perm = np.array([2, 0, 3, 1])
         data = np.arange(int(lengths.sum()), dtype=np.float64)
         r = Ragged.from_lengths(data, lengths)
-        field = ak.zip({"x": r}, depth_limit=1)[perm]["x"]
+        field = ak.zip({"x": r.to_ak()}, depth_limit=1)[perm]["x"]
 
         from awkward.contents import IndexedArray
 
@@ -170,14 +183,16 @@ class TestIndexedLayouts:
         out = to_packed(rag)
         assert out.offsets.ndim == 1 and out.offsets[0] == 0
         assert out.is_contiguous
-        assert ak.to_list(out) == ak.to_list(field)
-        assert ak.to_list(out) == ak.to_list(ak.to_packed(field))
+        assert _to_list(out) == ak.to_list(field)
+        assert _to_list(out) == ak.to_list(ak.to_packed(field))
 
     def test_indexed_record_layout_offsets(self):
         # ak.zip(..., depth_limit=1) -> RecordArray; indexing it ->
         # IndexedArray(RecordArray(...)), which _extract_list_offsets must walk.
         r = Ragged.from_lengths(np.arange(9, dtype=np.float64), np.array([3, 2, 4]))
-        rec = ak.zip({"a": r, "b": r}, depth_limit=1)[np.array([2, 0, 1])]
+        rec = ak.zip({"a": r.to_ak(), "b": r.to_ak()}, depth_limit=1)[
+            np.array([2, 0, 1])
+        ]
 
         from awkward.contents import IndexedArray
 
@@ -186,7 +201,7 @@ class TestIndexedLayouts:
         rag = Ragged(rec)  # record-layout Ragged over an indexed layout
         # offsets extraction (via _extract_list_offsets) must not crash
         assert rag.offsets is not None
-        assert ak.to_list(rag["a"]) == ak.to_list(rec["a"])
+        assert _to_list(rag["a"]) == ak.to_list(rec["a"])
 
 
 class TestToPackedNested:

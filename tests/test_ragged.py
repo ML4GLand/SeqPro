@@ -2,8 +2,8 @@ import awkward as ak
 import numpy as np
 import pytest
 from pytest_cases import parametrize_with_cases
-from seqpro.rag import OFFSET_TYPE, Ragged, lengths_to_offsets
-from seqpro.rag._array import RagParts, is_rag_dtype
+from seqpro.rag import OFFSET_TYPE, Ragged, is_rag_dtype, lengths_to_offsets
+from seqpro.rag import zip as rag_zip
 
 
 def case_int32():
@@ -16,10 +16,14 @@ def case_int32():
 
 
 def case_s1():
+    # _core.Ragged models a 1-D S1 collection built via from_lengths as an opaque
+    # variable-width string leaf: the byte-length is NOT a counted axis, so the
+    # shape is (3,) rather than (3, None). The flat data buffer and the (str_)offsets
+    # are identical to the awkward-backed model.
     data = np.array([b"cathithere"]).view("S1")
     lengths = np.array([3, 2, 5], dtype=np.uint32)
     offsets = lengths_to_offsets(lengths)
-    shape = (3, None)
+    shape = (3,)
     content = Ragged.from_lengths(data, lengths)
     return content, data, shape, offsets
 
@@ -99,17 +103,18 @@ class TestRecordRagged:
             d["field1"], np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         )
 
-    def test_parts_dict(self, rag: Ragged):
-        p = rag.parts
-        assert isinstance(p, dict)
-        assert list(p.keys()) == ["field0", "field1"]
-        for v in p.values():
-            assert isinstance(v, RagParts)
+    def test_fields_list(self, rag: Ragged):
+        # _core.Ragged exposes record fields via .fields (a list of names) and
+        # field access via rag[name]; the _array-only RagParts container does not
+        # exist in the _core model.
+        assert rag.fields == ["field0", "field1"]
+        for name in rag.fields:
+            assert isinstance(rag[name], Ragged)
 
-    def test_parts_dict_shares_offsets(self, rag: Ragged):
-        p = rag.parts
-        assert p["field0"].offsets is rag.offsets
-        assert p["field1"].offsets is rag.offsets
+    def test_fields_share_offsets(self, rag: Ragged):
+        # Zero-copy SoA contract: every field's offsets IS the record's offsets.
+        assert rag["field0"].offsets is rag.offsets
+        assert rag["field1"].offsets is rag.offsets
 
     def test_data_dict_zero_copy(self, rag: Ragged):
         d = rag.data
@@ -146,7 +151,7 @@ class TestRecordRagged:
     def test_dtype_field_order_preserved(self):
         r1 = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
         r2 = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))
-        rag = Ragged(ak.zip({"zeta": r1, "alpha": r2}))
+        rag = rag_zip({"zeta": r1, "alpha": r2})
         assert list(rag.dtype.names) == ["zeta", "alpha"]
 
     def test_view_raises_on_record(self, rag: Ragged):
@@ -169,7 +174,7 @@ class TestRecordRagged:
         f1 = Ragged.from_lengths(
             np.arange(6, dtype=np.float64).reshape(6, 1), np.array([2, 1, 3])
         )
-        rag = Ragged(ak.zip({"a": f0, "b": f1}, depth_limit=1))
+        rag = rag_zip({"a": f0, "b": f1})
         sq = rag.squeeze()
         assert isinstance(sq, Ragged)
         assert sq.shape == (3, None)
@@ -182,7 +187,7 @@ class TestRecordRagged:
         data_b = np.arange(10, dtype=np.float64)
         f0 = Ragged.from_lengths(data_a, lengths)
         f1 = Ragged.from_lengths(data_b, lengths)
-        rag = Ragged(ak.zip({"a": f0, "b": f1}, depth_limit=1))
+        rag = rag_zip({"a": f0, "b": f1})
         re = rag.reshape(2, 3, None)
         assert isinstance(re, Ragged)
         assert re.shape == (2, 3, None)
@@ -192,7 +197,7 @@ class TestRecordRagged:
     def test_zip_produces_initialized_ragged(self):
         r1 = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
         r2 = Ragged.from_lengths(np.arange(6, dtype=np.float64), np.array([2, 1, 3]))
-        z = ak.zip({"a": r1, "b": r2})
+        z = rag_zip({"a": r1, "b": r2})
         assert isinstance(z, Ragged)
         np.testing.assert_array_equal(
             z.offsets, np.array([0, 2, 3, 6], dtype=z.offsets.dtype)
@@ -200,44 +205,46 @@ class TestRecordRagged:
 
 
 class TestZip:
+    # seqpro.rag.zip (alias of Ragged.from_fields) is the _core-native record
+    # builder, replacing the _array-era ak.zip({...}) idiom. It builds a record
+    # (struct-of-arrays) Ragged from single-field Ragged inputs sharing one
+    # ragged axis.
     def _mk(self, dtype):
         return Ragged.from_lengths(np.arange(6, dtype=dtype), np.array([2, 1, 3]))
 
-    def test_zip_auto_returns_ragged(self):
+    def test_zip_returns_ragged(self):
         r1, r2 = self._mk(np.int64), self._mk(np.float64)
-        z = ak.zip({"a": r1, "b": r2})
+        z = rag_zip({"a": r1, "b": r2})
         assert isinstance(z, Ragged)
 
     def test_zip_explicit_wrap_returns_ragged(self):
         r1, r2 = self._mk(np.int64), self._mk(np.float64)
-        z = Ragged(ak.zip({"a": r1, "b": r2}))
+        z = Ragged(rag_zip({"a": r1, "b": r2}))
         assert isinstance(z, Ragged)
 
     def test_zip_three_fields(self):
         r1, r2, r3 = self._mk(np.int64), self._mk(np.float64), self._mk(np.int32)
-        z = ak.zip({"a": r1, "b": r2, "c": r3})
+        z = rag_zip({"a": r1, "b": r2, "c": r3})
         assert list(z.dtype.names) == ["a", "b", "c"]
         np.testing.assert_array_equal(z["c"].data, np.arange(6, dtype=np.int32))
 
     def test_zip_field_order_preserved(self):
         r1, r2 = self._mk(np.int64), self._mk(np.float64)
-        z = ak.zip({"zeta": r1, "alpha": r2})
+        z = rag_zip({"zeta": r1, "alpha": r2})
         assert list(z.dtype.names) == ["zeta", "alpha"]
 
     def test_zip_offsets_shared_across_fields(self):
         r1, r2 = self._mk(np.int64), self._mk(np.float64)
-        z = ak.zip({"a": r1, "b": r2})
+        z = rag_zip({"a": r1, "b": r2})
         assert z["a"].offsets is z["b"].offsets
 
-    def test_zip_depth_limit_with_extra_dim(self):
-        # With depth_limit=1, the outer layer of the zipped result is a
-        # RecordArray (not a list-tagged layer), so behavior dispatch does
-        # not auto-coerce to Ragged. Use the explicit wrap path.
+    def test_zip_with_extra_dim(self):
+        # Fields may carry a trailing fixed dim (here K=2); zip preserves it.
         data_a = np.arange(12, dtype=np.int64).reshape(6, 2)
         data_b = np.arange(12, dtype=np.float64).reshape(6, 2)
         r1 = Ragged.from_lengths(data_a, np.array([2, 1, 3]))
         r2 = Ragged.from_lengths(data_b, np.array([2, 1, 3]))
-        z = Ragged(ak.zip({"a": r1, "b": r2}, depth_limit=1))
+        z = rag_zip({"a": r1, "b": r2})
         assert isinstance(z, Ragged)
         np.testing.assert_array_equal(z["a"].data, data_a)
 
@@ -271,17 +278,24 @@ def test_is_rag_dtype_record_wrong_struct_returns_false(rag_record):
     assert not is_rag_dtype(rag_record, dt_wrong_names)
 
 
+# _core.Ragged is not an ak.Array subclass and does not register an awkward
+# typestr; the structural facts the old "3 * var * Ragged[int64]" typestr encoded
+# (leading dims, the single ragged axis, trailing fixed dims, and the leaf dtype)
+# are exposed directly via .shape and .dtype, which these tests now assert.
 def test_typestr_scalar_dtype():
     r = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
-    assert str(ak.type(r)) == "3 * var * Ragged[int64]"
+    assert r.shape == (3, None)  # "3 * var"
+    assert r.dtype == np.dtype(np.int64)  # "Ragged[int64]"
 
 
 def test_typestr_multidim_inner():
     data = np.zeros((6, 4), dtype=np.int32)
     r = Ragged.from_offsets(data, (2, None, 4), np.array([0, 2, 6]))
-    assert str(ak.type(r)) == "2 * var * 4 * Ragged[int32]"
+    assert r.shape == (2, None, 4)  # "2 * var * 4"
+    assert r.dtype == np.dtype(np.int32)  # "Ragged[int32]"
 
 
 def test_typestr_float():
     r = Ragged.from_lengths(np.ones(6, dtype=np.float32), np.array([2, 1, 3]))
-    assert str(ak.type(r)) == "3 * var * Ragged[float32]"
+    assert r.shape == (3, None)  # "3 * var"
+    assert r.dtype == np.dtype(np.float32)  # "Ragged[float32]"

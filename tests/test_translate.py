@@ -219,9 +219,11 @@ def test_translate_ragged_ohe_basic():
 
     out = sp.AA.translate(rag_ohe, nuc_alphabet=sp.DNA)
     assert out.dtype == np.uint8
-    # Decode output OHE to check values
-    aa0 = sp.AA.decode_ohe(out[0].to_numpy(), ohe_axis=-1)
-    aa1 = sp.AA.decode_ohe(out[1].to_numpy(), ohe_axis=-1)
+    # Decode output OHE to check values. For _core.Ragged, indexing an
+    # (N, None, n_aa) array on the leading axis peels a dense (L, n_aa) ndarray
+    # directly (no .to_numpy() needed).
+    aa0 = sp.AA.decode_ohe(out[0], ohe_axis=-1)
+    aa1 = sp.AA.decode_ohe(out[1], ohe_axis=-1)
     np.testing.assert_array_equal(aa0, sp.cast_seqs("ID"))
     np.testing.assert_array_equal(aa1, sp.cast_seqs("DH"))
 
@@ -234,8 +236,8 @@ def test_translate_ragged_ohe_truncate_stop():
     rag_ohe = Ragged.from_lengths(ohe_data, lengths)
 
     out = sp.AA.translate(rag_ohe, nuc_alphabet=sp.DNA, truncate_stop=True)
-    aa0 = sp.AA.decode_ohe(out[0].to_numpy(), ohe_axis=-1)
-    aa1 = sp.AA.decode_ohe(out[1].to_numpy(), ohe_axis=-1)
+    aa0 = sp.AA.decode_ohe(out[0], ohe_axis=-1)
+    aa1 = sp.AA.decode_ohe(out[1], ohe_axis=-1)
     np.testing.assert_array_equal(aa0, sp.cast_seqs("MK*"))
     np.testing.assert_array_equal(aa1, sp.cast_seqs("MG"))
 
@@ -676,6 +678,7 @@ def test_translate_ohe_ragged_drop():
     rag_ohe = Ragged.from_lengths(ohe_data, lengths)
 
     out = sp.AA.translate(rag_ohe, nuc_alphabet=sp.DNA, unknown="drop")
-    # OHE in -> OHE out; decode to compare. out[0].to_numpy() shape: (1, n_aa)
-    aa = sp.AA.decode_ohe(out[0].to_numpy(), ohe_axis=-1)
+    # OHE in -> OHE out; decode to compare. For _core.Ragged, out[0] peels a
+    # dense (n_codons, n_aa) ndarray directly (no .to_numpy() needed).
+    aa = sp.AA.decode_ohe(out[0], ohe_axis=-1)
     assert aa.view("S1").tobytes() == b"M"
