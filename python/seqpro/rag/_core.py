@@ -18,6 +18,29 @@ def _where_is_bool(where: Any) -> bool:
     return isinstance(where, np.ndarray) and where.dtype == np.bool_
 
 
+def is_rag_dtype(rag: Any, dtype: Any) -> bool:
+    """Backend-agnostic dtype check for Ragged arrays (works with both _core and _array backends).
+
+    Returns True if *rag* is a Ragged with a dtype that is a numpy subtype of *dtype*.
+    Always returns False for record-layout Rageds when a primitive dtype is queried.
+    """
+    # Lazy import to avoid circular imports; _array.Ragged is also a valid backend.
+    try:
+        from ._array import Ragged as _ArrayRagged  # type: ignore[attr-defined]
+
+        _ragged_types: tuple[type, ...] = (Ragged, _ArrayRagged)
+    except Exception:
+        _ragged_types = (Ragged,)
+    if not isinstance(rag, _ragged_types):
+        return False
+    rag_dtype = rag.dtype
+    if np.issubdtype(rag_dtype, np.void):  # structured dtype → record layout
+        if not np.issubdtype(dtype, np.void):
+            return False
+        return rag_dtype == np.dtype(dtype)
+    return np.issubdtype(rag_dtype, dtype)
+
+
 def _build_layout(
     data: NDArray[Any],
     shape: tuple[int | None, ...],
@@ -232,7 +255,15 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     @property
     def rag_dim(self) -> int:
-        return self._layout.shape.index(None)
+        if None in self._layout.shape:
+            return self._layout.shape.index(None)
+        # Opaque-string layout: the byte-length axis is implicit, conceptually
+        # immediately after all explicit leading dims.
+        if not isinstance(self._layout, RecordLayout) and self._rl.is_string:
+            return len(self._layout.shape)
+        raise ValueError(
+            f"Ragged has no ragged dimension (shape={self._layout.shape!r})"
+        )
 
     @property
     def is_empty(self) -> bool:
@@ -248,6 +279,15 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return all_1d and all(
                 fl.data.flags.c_contiguous for fl in self._layout.fields.values()
             )
+        if self._rl.is_string:
+            # Opaque-string: str_offsets must also be 1-D and zero-based
+            str_off = self._rl.str_offsets
+            if (
+                str_off is None
+                or str_off.ndim != 1
+                or (str_off.size > 0 and str_off[0] != 0)
+            ):
+                return False
         return all_1d and self._rl.data.flags.c_contiguous
 
     @staticmethod
@@ -1163,6 +1203,25 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 "to_packed() on a string-under-axis Ragged is not supported in Spec C; "
                 "convert via .to_chars() first, or pack in Spec D."
             )
+        if self._rl.is_string:
+            # Opaque-string layout: str_offsets IS the packed dimension; there is
+            # no None in shape, so _pack_parts (which calls shape.index(None)) cannot
+            # be used.  Pack the string buffer directly using str_offsets as the row
+            # delimiters, then rebuild with new zero-based str_offsets.
+            str_off = self._rl.str_offsets
+            assert str_off is not None
+            packed_data, packed_str_offsets = _pack_parts(
+                self._rl.data, (*self._layout.shape, None), str_off, copy
+            )
+            if packed_data is self._rl.data and packed_str_offsets is str_off:
+                return self
+            new_layout = RaggedLayout(
+                data=packed_data,
+                offsets=[],
+                shape=self._layout.shape,
+                str_offsets=packed_str_offsets,
+            )
+            return Ragged(new_layout)
         packed_data, packed_offsets = _pack_parts(
             self._rl.data, self._layout.shape, self.offsets, copy
         )
@@ -1272,12 +1331,10 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         self, allow_missing: bool = False
     ) -> "NDArray[Any] | dict[str, NDArray[Any]]":
         if isinstance(self._layout, RecordLayout):
-            return {  # pyrefly: ignore[bad-return] -- fields are never records; inner calls return NDArray
-                f: cast(
-                    "NDArray[Any]", cast("Ragged[Any]", self[f]).to_numpy(allow_missing)
-                )
-                for f in self._layout.fields
-            }
+            raise NotImplementedError(
+                "record-layout Ragged cannot be converted to a single dense array; "
+                "access fields individually."
+            )
         if self._layout.n_ragged == 2:
             if self._rl.str_offsets is not None:
                 raise NotImplementedError(

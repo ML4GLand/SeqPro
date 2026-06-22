@@ -14,7 +14,7 @@ import numba as nb
 import numpy as np
 from numpy.typing import NDArray
 
-from ._array import Ragged, is_rag_dtype
+from ._core import Ragged, is_rag_dtype
 from ._utils import OFFSET_TYPE
 
 __all__ = ["reverse_complement", "to_packed", "to_padded"]
@@ -293,7 +293,7 @@ def _nested_pack_parts(
     return out_data, [out_o0.astype(OFFSET_TYPE), out_o1.astype(OFFSET_TYPE)]
 
 
-def to_packed(rag: Ragged[Any], *, copy: bool = True) -> Ragged[Any]:
+def to_packed(rag: Any, *, copy: bool = True) -> Any:
     """Pack a Ragged array's data into a fresh contiguous, zero-based buffer.
 
     A Numba-parallelized replacement for ``Ragged(ak.to_packed(rag))``: it
@@ -316,19 +316,32 @@ def to_packed(rag: Ragged[Any], *, copy: bool = True) -> Ragged[Any]:
     Ragged
         Contiguous, zero-based Ragged equal in value to ``rag``.
     """
-    rag._ensure_parts()
-    if isinstance(rag._parts, dict):
-        import awkward as ak
+    # _core.Ragged has a native to_packed() that handles all layout cases:
+    # record, R=2 nested, opaque-string, and flat.  Delegate to it directly.
+    # _array.Ragged's to_packed() calls this function, so we must NOT call
+    # rag.to_packed() for _array.Ragged (infinite recursion); instead fall
+    # back to the _array-native implementation for that backend.
+    if isinstance(rag, Ragged):
+        return rag.to_packed(copy=copy)
 
+    # ---- _array.Ragged fallback (legacy backend) --------------------------------
+    try:
+        from ._array import Ragged as _ArrayRagged  # type: ignore[attr-defined]
+    except ImportError as exc:
+        raise TypeError(f"Unsupported Ragged type: {type(rag)}") from exc
+
+    import awkward as ak
+
+    rag._ensure_parts()  # type: ignore[union-attr]
+    if isinstance(rag._parts, dict):  # type: ignore[union-attr]
         offsets = rag.offsets
         if not copy:
-            # passthrough only if 1-D zero-based and every field already packed
             is_packed = (
                 offsets.ndim == 1
                 and (offsets.size == 0 or offsets[0] == 0)
                 and all(
                     p.data.flags.c_contiguous and int(offsets[-1]) == p.data.shape[0]
-                    for p in rag._parts.values()
+                    for p in rag._parts.values()  # type: ignore[union-attr]
                 )
             )
             if is_packed:
@@ -337,21 +350,23 @@ def to_packed(rag: Ragged[Any], *, copy: bool = True) -> Ragged[Any]:
                 "to_packed(copy=False) requires already-packed input; "
                 "got an unpacked record array."
             )
-        fields = {}
-        for name, p in rag._parts.items():
+        fields: dict[str, Any] = {}
+        for name, p in rag._parts.items():  # type: ignore[union-attr]
             packed_data, packed_offsets = _pack_parts(
                 p.data, p.shape, offsets, copy=True
             )
-            fields[name] = Ragged.from_offsets(packed_data, p.shape, packed_offsets)
-        return Ragged(ak.zip(fields))
+            fields[name] = _ArrayRagged.from_offsets(
+                packed_data, p.shape, packed_offsets
+            )
+        return _ArrayRagged(ak.zip(fields))
 
-    parts = rag._parts
+    parts = rag._parts  # type: ignore[union-attr]
     packed_data, packed_offsets = _pack_parts(
         parts.data, parts.shape, parts.offsets, copy
     )
     if packed_data is parts.data and packed_offsets is parts.offsets:
         return rag  # copy=False passthrough
-    return Ragged.from_offsets(packed_data, parts.shape, packed_offsets)
+    return _ArrayRagged.from_offsets(packed_data, parts.shape, packed_offsets)
 
 
 @nb.njit(parallel=True, nogil=True, cache=True)
@@ -414,9 +429,7 @@ def to_padded(
         Dense array of dtype ``rag.data.dtype`` and shape
         ``(*rag.shape[:rag_dim], out_len)``.
     """
-    import awkward as ak
-
-    if ak.fields(rag):
+    if rag._is_record:
         raise NotImplementedError(
             "to_padded is not defined on record-layout Ragged arrays; "
             "convert fields individually."
