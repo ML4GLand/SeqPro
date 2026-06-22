@@ -207,6 +207,13 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         offsets: NDArray[Any] = np.zeros(n_seg + 1, dtype=OFFSET_TYPE)
         return Ragged.from_offsets(data, shape, offsets)
 
+    def __len__(self) -> int:
+        """Return the size of the outermost dimension (shape[0])."""
+        s = self._layout.shape[0]
+        if s is None:
+            raise TypeError("len() of unsized Ragged (shape[0] is the ragged axis)")
+        return int(s)
+
     @property
     def data(self) -> "NDArray[Any]":  # type: ignore[override]
         """Return the underlying data array. For record Rageds, returns the dict of fields."""
@@ -410,6 +417,17 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def __getitem__(
         self, where: Any
     ) -> "NDArray[Any] | bytes | dict[str, Any] | Ragged[Any]":
+        # np.newaxis / None: insert a size-1 leading axis.
+        # e.g. shape (batch, None)[None] -> (1, batch, None)
+        if where is None:
+            new_shape = (1, *self._layout.shape)
+            new_layout = RaggedLayout(
+                data=self._rl.data,
+                offsets=list(self._layout.offsets),
+                shape=new_shape,
+                str_offsets=self._rl.str_offsets,
+            )
+            return Ragged(new_layout)
         if (
             isinstance(where, tuple)
             and len(where) == 2
@@ -430,7 +448,47 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             # sequential per-key path below.
             if self._layout.shape.count(None) == 1 and self.rag_dim > 1:
                 return self._getitem_tuple_multidim(where)
-            result: Any = self
+            # Sequential per-key path.  np.newaxis (None) keys are handled here:
+            # track their positions, strip them from the tuple, apply the remaining
+            # keys, then insert size-1 axes at the correct positions in the result.
+            has_none = any(k is None for k in where)
+            if has_none:
+                # Separate None positions from real indexing keys.
+                real_keys: list[Any] = []
+                none_positions: list[int] = []
+                pos = 0  # tracks the output axis number as we accumulate
+                for k in where:
+                    if k is None:
+                        none_positions.append(pos)
+                        pos += 1  # new axis consumes one output position
+                    else:
+                        real_keys.append(k)
+                        # An integer key collapses one axis (no output position);
+                        # a slice/array key keeps one axis.
+                        if not isinstance(k, (int, np.integer)):
+                            pos += 1
+                result: Any = self
+                for k in real_keys:
+                    result = result[k]
+                # Insert size-1 leading axes at recorded positions.
+                if isinstance(result, Ragged):
+                    for p in reversed(none_positions):
+                        cur_shape = result._layout.shape
+                        new_shape = cur_shape[:p] + (1,) + cur_shape[p:]
+                        result = Ragged(
+                            RaggedLayout(
+                                data=result._rl.data,
+                                offsets=list(result._layout.offsets),
+                                shape=new_shape,
+                                str_offsets=result._rl.str_offsets,
+                            )
+                        )
+                else:
+                    # numpy array or scalar: use np.expand_dims
+                    for p in reversed(none_positions):
+                        result = np.expand_dims(result, p)
+                return result
+            result = self
             for k in where:
                 result = result[k]
             return result
@@ -585,9 +643,13 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         remainder_keys = where[n_leading_keys:]
 
         # For each leading dim, resolve the key to an index array (or scalar).
-        # We track whether each dim produces an int (scalar) or an array (kept dim).
+        # We track whether each dim produces an int (scalar), a "slice" range, or a
+        # "fancy" array.  Fancy arrays follow NumPy broadcast semantics: when multiple
+        # fancy arrays index successive leading dimensions they are broadcast element-
+        # wise, NOT outer-producted.  Slices/ints use the outer-product (meshgrid) path.
         idx_per_dim: list[NDArray[Any]] = []
         out_leading: list[int | None] = []
+        is_fancy: list[bool] = []  # True = fancy array; False = int/slice
         for j, k in enumerate(leading_keys):
             dj: int = cast(
                 int, leading[j]
@@ -595,10 +657,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             if isinstance(k, (int, np.integer)):
                 ij = int(k) % dj
                 idx_per_dim.append(np.array([ij], dtype=np.int64))
+                is_fancy.append(False)
                 # integer key: scalar — do NOT append to out_leading (dim is squeezed)
             elif isinstance(k, slice):
                 ij_arr = np.arange(*k.indices(dj), dtype=np.int64)
                 idx_per_dim.append(ij_arr)
+                is_fancy.append(False)
                 out_leading.append(len(ij_arr))
             elif _where_is_bool(k):
                 if k.shape[0] != dj:
@@ -607,16 +671,19 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                     )
                 ij_arr = np.flatnonzero(k).astype(np.int64)
                 idx_per_dim.append(ij_arr)
+                is_fancy.append(True)
                 out_leading.append(len(ij_arr))
             else:
                 ij_arr = np.atleast_1d(np.asarray(np.arange(dj)[k], dtype=np.int64))
                 idx_per_dim.append(ij_arr)
+                is_fancy.append(True)
                 out_leading.append(len(ij_arr))
 
         # Append any un-keyed leading dims (if len(where) < rag_dim)
         for j in range(n_leading_keys, rag_dim):
             dj = cast(int, leading[j])  # always int before rag_dim
             idx_per_dim.append(np.arange(dj, dtype=np.int64))
+            is_fancy.append(False)
             out_leading.append(dj)
 
         # Compute strides for the flat segment layout: segment(i0,i1,...,ik) =
@@ -626,12 +693,60 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             dj1 = leading[j + 1]
             strides[j] = strides[j + 1] * int(dj1 if dj1 is not None else 1)
 
-        # Meshgrid over all selected index combinations -> flat segment indices
-        grids = np.meshgrid(*idx_per_dim, indexing="ij")  # each has shape (*out+scalar)
-        combined: NDArray[Any] = np.zeros(grids[0].shape, dtype=np.int64)
-        for j in range(rag_dim):
-            combined = combined + grids[j] * strides[j]
-        flat_seg_idx = np.asarray(combined.reshape(-1), dtype=np.int64)
+        # Fancy-index semantics: when more than one index is a fancy array, broadcast
+        # them together element-wise (NumPy / awkward convention) rather than forming
+        # an outer product.  Non-fancy indices (ints squeezed, slices kept, or un-keyed)
+        # form an outer product with the broadcast fancy result — matching NumPy semantics
+        # for mixed fancy/slice indexing.
+        n_fancy = sum(is_fancy)
+        if n_fancy >= 2:
+            # Step 1: compute the broadcast (element-wise) contribution of fancy dims.
+            fancy_arrays = [idx_per_dim[j] for j in range(rag_dim) if is_fancy[j]]
+            bc = np.broadcast(*fancy_arrays)
+            bc_shape: tuple[int, ...] = bc.shape
+
+            fancy_iter = iter(fancy_arrays)
+            fancy_combined: NDArray[Any] = np.zeros(bc_shape, dtype=np.int64)
+            for j in range(rag_dim):
+                if is_fancy[j]:
+                    fancy_combined = fancy_combined + next(fancy_iter) * strides[j]
+
+            # Step 2: outer-product non-fancy (slice/unkeyed) dims with the fancy result.
+            non_fancy_parts: list[NDArray[Any]] = [
+                idx_per_dim[j] for j in range(rag_dim) if not is_fancy[j]
+            ]
+            non_fancy_strides: list[int] = [
+                int(strides[j]) for j in range(rag_dim) if not is_fancy[j]
+            ]
+            non_fancy_sizes: list[int] = [len(a) for a in non_fancy_parts]
+
+            if non_fancy_parts:
+                # Build outer-product of non-fancy contributions, then broadcast with fancy.
+                nf_grids = np.meshgrid(*non_fancy_parts, indexing="ij")
+                nf_combined: NDArray[Any] = np.zeros(
+                    [len(a) for a in non_fancy_parts], dtype=np.int64
+                )
+                for a, sf in zip(nf_grids, non_fancy_strides):
+                    nf_combined = nf_combined + a * sf
+                # Outer product: fancy shape + nf shape
+                combined: NDArray[Any] = fancy_combined.reshape(
+                    bc_shape + (1,) * len(non_fancy_sizes)
+                ) + nf_combined.reshape((1,) * len(bc_shape) + tuple(non_fancy_sizes))
+                flat_seg_idx = np.asarray(combined.reshape(-1), dtype=np.int64)
+                # out_leading: fancy broadcast shape PLUS non-fancy (slice/unkeyed) sizes.
+                # Un-keyed dims contribute new output dims (like NumPy's behaviour for
+                # unindexed axes appended after the fancy block).
+                out_leading = list(bc_shape) + non_fancy_sizes  # type: ignore[assignment]
+            else:
+                flat_seg_idx = np.asarray(fancy_combined.reshape(-1), dtype=np.int64)
+                out_leading = list(bc_shape)  # type: ignore[assignment]
+        else:
+            # Outer-product via meshgrid: original behaviour for slices and single fancy.
+            grids = np.meshgrid(*idx_per_dim, indexing="ij")
+            grid_combined: NDArray[Any] = np.zeros(grids[0].shape, dtype=np.int64)
+            for j in range(rag_dim):
+                grid_combined = grid_combined + grids[j] * strides[j]
+            flat_seg_idx = np.asarray(grid_combined.reshape(-1), dtype=np.int64)
 
         # Gather segment starts/stops
         starts, stops = self._starts_stops()
