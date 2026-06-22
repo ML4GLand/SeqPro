@@ -187,6 +187,42 @@ def test_state_predicates():
     assert empty.is_empty is True
 
 
+def test_is_base_mmap_returns_false(tmp_path):
+    """_core.Ragged.is_base must return False for a memmap-backed Ragged.
+
+    The ``is_base`` semantics follow ``data.base is None``.  A memmap array's
+    ``base`` is a ``mmap.mmap`` object (not None), so ``is_base`` must be False.
+
+    A previous crash-fix for the ``mmap.mmap`` case (which has no ``.base``
+    attribute) accidentally returned True for any non-ndarray base, diverging
+    from this contract.  The correct fix is ``arr.base is None`` — never crash,
+    never diverge.
+    """
+    # Write raw int32 bytes to a file and open as a read/write memmap.
+    data_plain = np.arange(10, dtype=np.int32)
+    mm_path = tmp_path / "data.bin"
+    mm_path.write_bytes(data_plain.tobytes())
+    mm_data = np.memmap(str(mm_path), dtype=np.int32, mode="r+", shape=(10,))
+
+    # Confirm the precondition: mm_data.base is a mmap.mmap, not None or ndarray.
+    assert mm_data.base is not None
+    assert not isinstance(mm_data.base, np.ndarray)
+
+    lengths = np.array([3, 2, 5], dtype=np.uint32)
+    offsets = lengths_to_offsets(lengths)
+    core_rag = Ragged.from_offsets(mm_data, (3, None), offsets)
+
+    # Oracle value: data.base is not None -> is_base is False.
+    # (Same as _array.Ragged which checks self._parts.data.base is None.)
+    assert core_rag.is_base is False
+
+    # Sanity: a plain owned array still returns True.
+    owned = np.arange(10, dtype=np.int32)
+    assert owned.base is None  # precondition
+    owned_rag = Ragged.from_offsets(owned, (3, None), offsets)
+    assert owned_rag.is_base is True
+
+
 def test_view_reinterprets_dtype_zero_copy():
     rag = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
     v = rag.view(np.uint64)

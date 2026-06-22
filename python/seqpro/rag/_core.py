@@ -252,18 +252,26 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
 
     @staticmethod
     def _owns_memory(arr: "NDArray[Any]") -> bool:
-        """Return True if ``arr`` owns its memory (base is None or a non-ndarray root).
+        """Return True if ``arr`` owns its memory (not backed by mmap or a non-owned ndarray).
 
-        Handles memory-mapped arrays whose ``arr.base`` is a ``mmap.mmap`` object
-        (which has no further ``.base`` attribute) as well as the normal case where
-        ``arr.base`` is another ndarray.
+        The contract matches ``_array.Ragged.is_base`` for the mmap case: a
+        memory-mapped array whose ``base`` is a ``mmap.mmap`` object is *not*
+        considered owned (returns ``False``).  A normal view of a freshly
+        allocated ndarray (``base`` is an ndarray whose own ``base is None``)
+        *is* considered owned (returns ``True``), consistent with the pre-Task-5
+        behaviour and the ``to_packed`` contract.
+
+        The previous crash-fix returned ``True`` for any non-ndarray base
+        (including ``mmap.mmap``), diverging from the oracle.
         """
         base = arr.base
         if base is None:
             return True
-        # If base is not an ndarray (e.g. mmap.mmap), there's no further .base to check.
+        # mmap.mmap (or any non-ndarray base) = memory-mapped / external buffer
+        # -> not owned.  This also avoids AttributeError from accessing .base on
+        # types that don't have it (e.g. mmap.mmap).
         if not isinstance(base, np.ndarray):
-            return True
+            return False
         return base.base is None
 
     @property
