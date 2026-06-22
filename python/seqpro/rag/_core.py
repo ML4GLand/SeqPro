@@ -185,9 +185,10 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return Ragged.from_offsets(data, shape, offsets)
 
     @property
-    def data(self) -> "NDArray[Any] | dict[str, NDArray[Any]]":
+    def data(self) -> "NDArray[Any]":  # type: ignore[override]
+        """Return the underlying data array. For record Rageds, returns the dict of fields."""
         if isinstance(self._layout, RecordLayout):
-            return {f: fl.data for f, fl in self._layout.fields.items()}
+            return {f: fl.data for f, fl in self._layout.fields.items()}  # type: ignore[return-value]
         return self._rl.data
 
     @property
@@ -249,22 +250,34 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             )
         return all_1d and self._rl.data.flags.c_contiguous
 
+    @staticmethod
+    def _owns_memory(arr: "NDArray[Any]") -> bool:
+        """Return True if ``arr`` owns its memory (base is None or a non-ndarray root).
+
+        Handles memory-mapped arrays whose ``arr.base`` is a ``mmap.mmap`` object
+        (which has no further ``.base`` attribute) as well as the normal case where
+        ``arr.base`` is another ndarray.
+        """
+        base = arr.base
+        if base is None:
+            return True
+        # If base is not an ndarray (e.g. mmap.mmap), there's no further .base to check.
+        if not isinstance(base, np.ndarray):
+            return True
+        return base.base is None
+
     @property
     def is_base(self) -> bool:
         offsets = self.offsets
         if isinstance(self._layout, RecordLayout):
             fields = self._layout.fields.values()
-            owns = all(
-                fl.data.base is None or fl.data.base.base is None for fl in fields
-            )
+            owns = all(self._owns_memory(fl.data) for fl in fields)
             size0 = next(iter(self._layout.fields.values())).data.shape[0]
             return bool(
                 owns and self.is_contiguous and offsets[0] == 0 and offsets[-1] == size0
             )
         data = self._rl.data
-        owns_memory = data.base is None or (
-            data.base is not None and data.base.base is None
-        )
+        owns_memory = self._owns_memory(data)
         return bool(
             owns_memory
             and self.is_contiguous
@@ -358,6 +371,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         ):
             return self._getitem_inner(where[1])
         if isinstance(where, tuple):
+            # Multi-dim tuple: each key in the tuple targets successive leading axes.
+            # We collapse all the integer-dim keys into one combined index so that
+            # e.g. rag[:, [0]] correctly selects sample axis 1, not range axis 0.
+            if self._layout.shape.count(None) == 1 and self.rag_dim > 0:
+                return self._getitem_tuple_multidim(where)
             result: Any = self
             for k in where:
                 result = result[k]
@@ -366,6 +384,10 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return self._getitem_record(where)
         if self._layout.n_ragged == 2:
             return self._getitem_r2(where)
+        # Multi-dim leading shape: when rag_dim > 1 (e.g. shape (d0, d1, ..., None)),
+        # index the first axis treating each "row" as a block of n_inner segments.
+        if self.rag_dim > 1:
+            return self._getitem_multidim(where)
         starts, stops = self._starts_stops()
         if isinstance(where, (int, np.integer)):
             lo, hi = int(starts[where]), int(stops[where])
@@ -395,6 +417,198 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 str_offsets=self._rl.str_offsets,
             )
         return Ragged(new_layout)
+
+    def _getitem_multidim(self, where: Any) -> "NDArray[Any] | Ragged[Any]":
+        """Index the first leading dim of a multi-dim Ragged (rag_dim > 1).
+
+        Shape is ``(d0, d1, ..., dk, None, ...)``.  Each "row" on the first axis
+        corresponds to ``n_inner = d1 * ... * dk`` contiguous ragged segments.
+        Supports int (peel first dim), slice, bool-mask, and int-array.
+        """
+        rag_dim = self.rag_dim
+        leading = self._layout.shape[:rag_dim]  # (d0, d1, ..., dk)
+        d0: int = cast(int, leading[0])  # always int before rag_dim
+        inner_leading = leading[1:]  # (d1, ..., dk)
+        n_inner = (
+            int(
+                np.prod(
+                    np.array(
+                        [int(d) for d in inner_leading if d is not None], dtype=np.int64
+                    )
+                )
+            )
+            if inner_leading
+            else 1
+        )
+        trailing = self._layout.shape[rag_dim:]  # (None, *trailing_int)
+
+        starts, stops = self._starts_stops()
+        # starts/stops are flat over all d0*n_inner segments
+
+        if isinstance(where, (int, np.integer)):
+            i = int(where) % d0
+            seg_lo = i * n_inner
+            seg_hi = (i + 1) * n_inner
+            new_starts = np.ascontiguousarray(starts[seg_lo:seg_hi], dtype=OFFSET_TYPE)
+            new_stops = np.ascontiguousarray(stops[seg_lo:seg_hi], dtype=OFFSET_TYPE)
+            new_offsets = np.stack([new_starts, new_stops], 0)
+            new_shape: tuple[int | None, ...] = (*inner_leading, *trailing)
+            return Ragged(
+                RaggedLayout(
+                    data=self._rl.data,
+                    offsets=[new_offsets],
+                    shape=new_shape,
+                    str_offsets=self._rl.str_offsets,
+                )
+            )
+
+        # Build the "outer" index (which d0-rows to select)
+        if _where_is_bool(where):
+            if where.shape[0] != d0:
+                raise IndexError(
+                    f"boolean index did not match axis 0 size {d0} but has size {where.shape[0]}"
+                )
+            d0_idx = np.flatnonzero(where).astype(np.int64)
+        elif isinstance(where, slice):
+            d0_idx = np.arange(*where.indices(d0), dtype=np.int64)
+        else:
+            arr = np.atleast_1d(np.asarray(np.arange(d0)[where], dtype=np.int64))
+            d0_idx = np.where(arr < 0, arr + d0, arr)
+
+        # For each selected d0-row, gather the n_inner segment offsets
+        n_sel = len(d0_idx)
+        flat_idx = (
+            d0_idx[:, None] * n_inner + np.arange(n_inner, dtype=np.int64)
+        ).reshape(-1)
+        new_starts = np.ascontiguousarray(starts[flat_idx], dtype=OFFSET_TYPE)
+        new_stops = np.ascontiguousarray(stops[flat_idx], dtype=OFFSET_TYPE)
+        new_offsets = np.stack([new_starts, new_stops], 0)
+        new_shape = (n_sel, *inner_leading, *trailing)
+        return Ragged(
+            RaggedLayout(
+                data=self._rl.data,
+                offsets=[new_offsets],
+                shape=new_shape,
+                str_offsets=self._rl.str_offsets,
+            )
+        )
+
+    def _getitem_tuple_multidim(self, where: tuple[Any, ...]) -> Any:
+        """Handle a tuple index on a single-ragged Ragged (record or non-record) with rag_dim >= 1.
+
+        Each key in ``where`` targets successive leading integer axes (like NumPy
+        multi-dim indexing).  All leading-dim keys are resolved simultaneously into
+        a single flat segment selection so that e.g. ``rag[:, [0]]`` correctly
+        selects from axis 1 (samples), not axis 0 (ranges).
+
+        Keys that reach the ragged ``None`` axis or beyond are not handled here
+        (fall through to normal single-key dispatch after leading dims are consumed).
+        """
+        rag_dim = self.rag_dim
+        leading = self._layout.shape[:rag_dim]  # e.g. (d0, d1, ..., dk)
+        trailing = self._layout.shape[rag_dim:]  # (None, *trailing_int)
+
+        # Split tuple: leading-dim keys vs. keys that reach or exceed the ragged axis.
+        n_leading_keys = min(len(where), rag_dim)
+        leading_keys = where[:n_leading_keys]
+        remainder_keys = where[n_leading_keys:]
+
+        # For each leading dim, resolve the key to an index array (or scalar).
+        # We track whether each dim produces an int (scalar) or an array (kept dim).
+        idx_per_dim: list[NDArray[Any]] = []
+        out_leading: list[int | None] = []
+        for j, k in enumerate(leading_keys):
+            dj: int = cast(
+                int, leading[j]
+            )  # leading dims before rag_dim are always int
+            if isinstance(k, (int, np.integer)):
+                ij = int(k) % dj
+                idx_per_dim.append(np.array([ij], dtype=np.int64))
+                # integer key: scalar — do NOT append to out_leading (dim is squeezed)
+            elif isinstance(k, slice):
+                ij_arr = np.arange(*k.indices(dj), dtype=np.int64)
+                idx_per_dim.append(ij_arr)
+                out_leading.append(len(ij_arr))
+            elif _where_is_bool(k):
+                if k.shape[0] != dj:
+                    raise IndexError(
+                        f"boolean index size {k.shape[0]} != axis {j} size {dj}"
+                    )
+                ij_arr = np.flatnonzero(k).astype(np.int64)
+                idx_per_dim.append(ij_arr)
+                out_leading.append(len(ij_arr))
+            else:
+                ij_arr = np.atleast_1d(np.asarray(np.arange(dj)[k], dtype=np.int64))
+                idx_per_dim.append(ij_arr)
+                out_leading.append(len(ij_arr))
+
+        # Append any un-keyed leading dims (if len(where) < rag_dim)
+        for j in range(n_leading_keys, rag_dim):
+            dj = cast(int, leading[j])  # always int before rag_dim
+            idx_per_dim.append(np.arange(dj, dtype=np.int64))
+            out_leading.append(dj)
+
+        # Compute strides for the flat segment layout: segment(i0,i1,...,ik) =
+        # i0 * stride[0] + i1 * stride[1] + ... + ik * stride[k]
+        strides = np.ones(rag_dim, dtype=np.int64)
+        for j in range(rag_dim - 2, -1, -1):
+            dj1 = leading[j + 1]
+            strides[j] = strides[j + 1] * int(dj1 if dj1 is not None else 1)
+
+        # Meshgrid over all selected index combinations -> flat segment indices
+        grids = np.meshgrid(*idx_per_dim, indexing="ij")  # each has shape (*out+scalar)
+        combined: NDArray[Any] = np.zeros(grids[0].shape, dtype=np.int64)
+        for j in range(rag_dim):
+            combined = combined + grids[j] * strides[j]
+        flat_seg_idx = np.asarray(combined.reshape(-1), dtype=np.int64)
+
+        # Gather segment starts/stops
+        starts, stops = self._starts_stops()
+        new_starts = np.ascontiguousarray(starts[flat_seg_idx], dtype=OFFSET_TYPE)
+        new_stops = np.ascontiguousarray(stops[flat_seg_idx], dtype=OFFSET_TYPE)
+        new_offsets = np.stack([new_starts, new_stops], 0)
+
+        # Build new shape: scalar axes squeezed, array-selected axes kept
+        new_leading: tuple[int | None, ...] = tuple(out_leading)
+        new_shape: tuple[int | None, ...] = (*new_leading, *trailing)
+
+        # Build result: record Ragged or non-record Ragged depending on layout type
+        if isinstance(self._layout, RecordLayout):
+            rec = self._layout
+            new_fields = {
+                name: RaggedLayout(
+                    data=fl.data,
+                    offsets=[new_offsets],
+                    shape=(
+                        *new_leading,
+                        *fl.shape[fl.shape.index(None) :],
+                    ),
+                    str_offsets=fl.str_offsets,
+                )
+                for name, fl in rec.fields.items()
+            }
+            result: Any = Ragged(
+                RecordLayout(
+                    offsets=[new_offsets],
+                    shape=new_shape,
+                    fields=new_fields,
+                )
+            )
+        else:
+            result = Ragged(
+                RaggedLayout(
+                    data=self._rl.data,
+                    offsets=[new_offsets],
+                    shape=new_shape,
+                    str_offsets=self._rl.str_offsets,
+                )
+            )
+
+        # Apply any remainder keys (reaching into or past the ragged axis)
+        for k in remainder_keys:
+            result = result[k]
+
+        return result
 
     def _getitem_record(self, where: Any) -> Any:
         rec = self._layout
