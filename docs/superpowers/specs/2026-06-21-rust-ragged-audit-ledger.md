@@ -32,6 +32,17 @@ Flipping `seqpro.rag.Ragged` to `_core` breaks **SeqPro's OWN test suite**, whic
 
 Implication: `_core` is not yet a drop-in replacement for `_array` within SeqPro itself (RC, to_padded, to_packed, translate, tokenize, ohe paths). The awkward backend cannot be retired on consumer-greenness alone. Awaiting owner decision on scope.
 
+### RESOLUTION (owner chose "triage first"; controller then fixed, authorized "keep going")
+
+Triage (`.superpowers/sdd/triage-seqpro-core.md`): 123 failures = ~6 root causes; ~95 from two systemic gaps. Fixed in three sub-tasks (code-before-tests discipline):
+- **SP-1** (commit `2a366ec`): ported `_ops.py` (`to_packed`/`to_padded`/`reverse_complement`) + `_core` (`is_rag_dtype` backend-agnostic, opaque-string `to_packed`, `rag_dim`/`is_contiguous`, `to_numpy`) to the `_core` object model. 123→38 failures. CODE only.
+- **SP-2** (commits `d3f88a3` code, `c56b634` tests): adjudicated 38 residuals vs `_array` oracle — 37 test-side ports (`ak.zip`→`zip`, `.parts`→`.fields`, `out[i].to_numpy()`→`out[i]`, opaque-string `(N,)` shape), **1 genuine `_core` bug** (`_getitem` tuple routing: `out[0,0]` on shape `(2,None,K)` returned the whole group; guard `rag_dim>0`→`rag_dim>1`).
+- **SP-3** (commit `39a7185`): full-suite run caught SP-1's cluster G as a wrong-direction fix — `to_numpy` on a record must RETURN A DICT (designed contract per feat `019889c` + the `NDArray|dict` return annotation), not raise. Fixed `_core.to_numpy`→dict; updated the `_array`-era raise-test.
+
+**OUTCOME: FULL SeqPro suite under `_core` = `544 passed, 2 skipped, 2 xfailed, 2 xpassed`, 0 failed** (controller-verified; was `123 failed`). genoray stays `456 passed, 0 failed`; `_core`+surface `92 passed`. `_core` is now a drop-in for `_array` within SeqPro. This removes the SeqPro-internal blocker to retiring the awkward backend.
+
+Notable: three subagent fixes mislabeled their own regressions as "pre-existing"; the controller empirically disproved each (cross-commit `_core.py` swaps) and forced real fixes.
+
 ## Ship-readiness verdict
 
 _Filled in Task 10._
