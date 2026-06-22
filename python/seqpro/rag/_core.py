@@ -393,15 +393,24 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         if self._layout.n_ragged == 2:
             return self._getitem_r2(where)
         # Multi-dim leading shape: when rag_dim > 1 (e.g. shape (d0, d1, ..., None))
-        # AND the offsets are canonical (1-D), index the first axis treating each
-        # "row" as a block of n_inner contiguous segments.
-        # NOTE: opaque string leaves have no None in shape (rag_dim would crash), and
-        # lazy-gather results (offsets[0].ndim == 2) must use the flat path below.
+        # index the first axis treating each "row" as a block of n_inner contiguous
+        # segments.  Two offset encodings are used:
+        #   - 1-D offsets: canonical / packed layout produced by from_offsets or
+        #     to_packed(); always uses _getitem_multidim.
+        #   - 2-D offsets (shape (2, n_segs)): two sub-cases:
+        #       * rag_dim == 2: lazy-gather result from _getitem_inner_gather.
+        #         The shape (d0, n_inner, None) is a virtual label; flat integer
+        #         indexing is correct (returns a raw ndarray).  Use the flat path.
+        #       * rag_dim >= 3: canonical multi-dim layout from genoray's
+        #         from_offsets(data, (n_ranges, n_samples, ploidy, None), flat_2d).
+        #         Outer dim must be peeled to return a Ragged.  Use _getitem_multidim.
+        # NOTE: opaque string leaves have no None in shape (rag_dim would crash)
+        # and are handled by the flat path below.
         if (
             None in self._layout.shape
             and self.rag_dim > 1
             and self._layout.offsets
-            and self._layout.offsets[0].ndim == 1
+            and (self._layout.offsets[0].ndim == 1 or self.rag_dim >= 3)
         ):
             return self._getitem_multidim(where)
         starts, stops = self._starts_stops()
