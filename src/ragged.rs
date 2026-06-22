@@ -148,32 +148,9 @@ pub fn pack_into(
     let stops_s = stops.as_slice().ok_or("stops must be contiguous")?;
     let src_slice = src.as_slice().ok_or("src must be contiguous")?;
 
-    // Decide strategy based on output buffer size (caller computed out.len()).
-    // For small batches use a single-pass sequential gather (no extra allocation,
-    // no rayon overhead).  For large batches chunk into ~num_cpus parallel tasks.
-    const MIN_PAR_BYTES: usize = 4 * 1024 * 1024; // 4 MB
-    let num_cpus = rayon::current_num_threads().max(1);
-
-    if out.len() < MIN_PAR_BYTES || num_cpus == 1 {
-        // Single-pass sequential gather: validate + copy in one loop.
-        let mut dst_pos = 0usize;
-        for (&a, &b) in starts_s.iter().zip(stops_s.iter()) {
-            if a < 0 || b < a {
-                return Err("invalid pack range".into());
-            }
-            let a_bytes = a.checked_mul(elem).ok_or("byte offset overflow")? as usize;
-            let b_bytes = b.checked_mul(elem).ok_or("byte offset overflow")? as usize;
-            if b_bytes > src_slice.len() {
-                return Err("data span out of bounds".into());
-            }
-            let row_len = b_bytes - a_bytes;
-            out[dst_pos..dst_pos + row_len].copy_from_slice(&src_slice[a_bytes..b_bytes]);
-            dst_pos += row_len;
-        }
-        return Ok(());
-    }
-
-    // Parallel path: first validate all rows and build lens[] for chunk splitting.
+    // Up-front validation pass: check every row, build lens[], compute total.
+    // This single pass covers BOTH the sequential and parallel paths so neither
+    // can OOB-panic on a mis-sized `out`.
     let mut lens: Vec<usize> = Vec::with_capacity(n);
     let mut total_bytes: usize = 0;
     for (&a, &b) in starts_s.iter().zip(stops_s.iter()) {
@@ -185,9 +162,8 @@ pub fn pack_into(
         if b_bytes > src_slice.len() {
             return Err("data span out of bounds".into());
         }
-        let row_len = b_bytes - a_bytes;
-        lens.push(row_len);
-        total_bytes += row_len;
+        lens.push(b_bytes - a_bytes);
+        total_bytes += b_bytes - a_bytes;
     }
     if out.len() != total_bytes {
         return Err(format!(
@@ -197,6 +173,24 @@ pub fn pack_into(
         ));
     }
 
+    // Decide strategy based on output buffer size.
+    // For small batches use a single-pass sequential gather (no extra allocation,
+    // no rayon overhead).  For large batches chunk into ~num_cpus parallel tasks.
+    const MIN_PAR_BYTES: usize = 4 * 1024 * 1024; // 4 MB
+    let num_cpus = rayon::current_num_threads().max(1);
+
+    if out.len() < MIN_PAR_BYTES || num_cpus == 1 {
+        // Sequential gather: validation already done above, just copy rows.
+        let mut dst_pos = 0usize;
+        for (&a, &row_len) in starts_s.iter().zip(lens.iter()) {
+            let a_bytes = (a * elem) as usize;
+            out[dst_pos..dst_pos + row_len].copy_from_slice(&src_slice[a_bytes..a_bytes + row_len]);
+            dst_pos += row_len;
+        }
+        return Ok(());
+    }
+
+    // Parallel path: lens[] and total_bytes already computed by the up-front pass.
     // Chunk rows into ~num_cpus groups by output byte count.
     let chunk_bytes = (total_bytes / num_cpus).max(1);
     let mut chunk_bounds: Vec<(usize, usize)> = Vec::with_capacity(num_cpus + 1);
@@ -450,5 +444,43 @@ mod tests {
         let src: Array1<u8> = array![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let out = pack(starts.view(), stops.view(), src.view(), 1).unwrap();
         assert_eq!(out, array![7u8, 8, 2, 3, 4, 0]);
+    }
+
+    #[test]
+    fn test_pack_parallel_path_matches_serial_permuted() {
+        // Force the parallel path: construct input whose total output >= 4 MB.
+        // 16 rows x 256 KiB each = 4 MiB, well above the 4 MB threshold.
+        // Rows are in REVERSE source order (permuted) to exercise disjoint-chunk
+        // gather correctness across chunk boundaries.
+        const ROW_LEN: usize = 262_144; // 256 KiB
+        const N_ROWS: usize = 16;
+        const SRC_LEN: usize = ROW_LEN * N_ROWS; // 4 MiB
+
+        // Deterministic source pattern for byte-level verification.
+        let src_data: Vec<u8> = (0..SRC_LEN).map(|i| (i & 0xff) as u8).collect();
+        let src = Array1::from(src_data.clone());
+
+        // Row i reads source slice [(N_ROWS-1-i)*ROW_LEN .. (N_ROWS-i)*ROW_LEN].
+        let starts: Array1<i64> = Array1::from(
+            (0..N_ROWS)
+                .rev()
+                .map(|r| (r * ROW_LEN) as i64)
+                .collect::<Vec<_>>(),
+        );
+        let stops: Array1<i64> = Array1::from(
+            (0..N_ROWS)
+                .rev()
+                .map(|r| ((r + 1) * ROW_LEN) as i64)
+                .collect::<Vec<_>>(),
+        );
+
+        // Serial reference: gather each row in order.
+        let mut expected: Vec<u8> = Vec::with_capacity(SRC_LEN);
+        for (&a, &b) in starts.iter().zip(stops.iter()) {
+            expected.extend_from_slice(&src_data[a as usize..b as usize]);
+        }
+
+        let out = pack(starts.view(), stops.view(), src.view(), 1).unwrap();
+        assert_eq!(out.as_slice().unwrap(), expected.as_slice());
     }
 }
