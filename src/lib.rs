@@ -7,7 +7,7 @@ pub mod ragged;
 pub mod translate;
 
 use ndarray::prelude::*;
-use numpy::{IntoPyArray, PyArray, PyReadonlyArray, PyReadonlyArray1};
+use numpy::{IntoPyArray, PyArray, PyReadonlyArray, PyReadonlyArray1, PyReadwriteArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -30,6 +30,7 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_ragged_select, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_nested_gather, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_nested_pack, m)?)?;
+    m.add_function(wrap_pyfunction!(_ragged_pack, m)?)?;
     Ok(())
 }
 
@@ -104,6 +105,26 @@ fn _ragged_nested_pack<'py>(
         o1.into_pyarray(py),
         out_bytes.into_pyarray(py),
     ))
+}
+
+#[pyfunction]
+fn _ragged_pack<'py>(
+    starts: PyReadonlyArray1<'py, i64>,
+    stops: PyReadonlyArray1<'py, i64>,
+    src: PyReadonlyArray1<'py, u8>,
+    elem: i64,
+    mut out: PyReadwriteArray1<'py, u8>,
+) -> PyResult<()> {
+    ragged::pack_into(
+        starts.as_array(),
+        stops.as_array(),
+        src.as_array(),
+        elem,
+        out.as_array_mut()
+            .as_slice_mut()
+            .ok_or_else(|| PyValueError::new_err("out must be contiguous"))?,
+    )
+    .map_err(PyValueError::new_err)
 }
 
 #[pyfunction]
