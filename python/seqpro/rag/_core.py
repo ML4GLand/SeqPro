@@ -133,11 +133,13 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             # trailing cannot contain None here (n_none == 1 and rag_dim is the only None).
             trailing_ints: list[int] = [d for d in trailing if d is not None]
             trailing_size = int(np.prod(trailing_ints)) if trailing_ints else 1
-            expected_size = int(off_list[0][-1]) * trailing_size
-            if data.size != expected_size:
-                raise ValueError(
-                    f"Data size {data.size} does not match size implied by shape and contiguous offsets: {expected_size}"
-                )
+            # Skip the check when the offsets array is empty (no segments → empty Ragged).
+            if off_list[0].size > 0:
+                expected_size = int(off_list[0][-1]) * trailing_size
+                if data.size != expected_size:
+                    raise ValueError(
+                        f"Data size {data.size} does not match size implied by shape and contiguous offsets: {expected_size}"
+                    )
         return Ragged(_build_layout(data, shape, off_list), validate=validate)
 
     @staticmethod
@@ -636,7 +638,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         )
 
     def _getitem_tuple_multidim(self, where: tuple[Any, ...]) -> Any:
-        """Handle a tuple index on a single-ragged Ragged (record or non-record) with rag_dim >= 1.
+        """Handle a tuple index on a single-ragged Ragged (record or non-record) with rag_dim > 1.
 
         Each key in ``where`` targets successive leading integer axes (like NumPy
         multi-dim indexing).  All leading-dim keys are resolved simultaneously into
