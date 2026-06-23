@@ -56,4 +56,5 @@ def test_reshape_squeeze_to_packed_preserve_subclass():
 def test_reshape_squeeze_to_packed_base_unchanged():
     base = _record()
     assert type(base.reshape(1, 3, None)) is Ragged
+    assert type(base.reshape(1, 3, None).squeeze(0)) is Ragged
     assert type(base.to_packed()) is Ragged
