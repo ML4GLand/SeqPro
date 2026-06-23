@@ -12,15 +12,16 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
-type RaggedSelectResult<'py> = PyResult<(&'py PyArray<i64, Ix1>, &'py PyArray<i64, Ix1>)>;
+type RaggedSelectResult<'py> =
+    PyResult<(Bound<'py, PyArray<i64, Ix1>>, Bound<'py, PyArray<i64, Ix1>>)>;
 type NestedPackResult<'py> = PyResult<(
-    &'py PyArray<i64, Ix1>,
-    &'py PyArray<i64, Ix1>,
-    &'py PyArray<u8, Ix1>,
+    Bound<'py, PyArray<i64, Ix1>>,
+    Bound<'py, PyArray<i64, Ix1>>,
+    Bound<'py, PyArray<u8, Ix1>>,
 )>;
 
 #[pymodule]
-fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
+fn seqpro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_k_shuffle, m)?)?;
     m.add_function(wrap_pyfunction!(translate::_translate_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(translate::_translate_drop, m)?)?;
@@ -33,6 +34,8 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_ragged_nested_pack, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_pack, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_concat, m)?)?;
+    m.add_function(wrap_pyfunction!(_ragged_to_padded, m)?)?;
+    m.add_function(wrap_pyfunction!(_ragged_reverse_complement, m)?)?;
     Ok(())
 }
 
@@ -59,7 +62,7 @@ fn _k_shuffle<'py>(
     alphabet_size: usize,
     alphabet_bytes: &[u8],
     seed: Option<u64>,
-) -> &'py PyArray<u8, IxDyn> {
+) -> Bound<'py, PyArray<u8, IxDyn>> {
     let seqs = seqs.as_array();
     let out = kshuffle::k_shuffle(seqs, k, seed, alphabet_size, alphabet_bytes);
     out.into_pyarray(py)
@@ -141,7 +144,45 @@ fn _ragged_select<'py>(
     Ok((s.into_pyarray(py), e.into_pyarray(py)))
 }
 
-type RaggedConcatResult<'py> = PyResult<(&'py PyArray<u8, Ix1>, &'py PyArray<i64, Ix1>)>;
+#[pyfunction]
+fn _ragged_to_padded(
+    data: PyReadonlyArray1<u8>,
+    offsets: PyReadonlyArray1<i64>,
+    mut out: PyReadwriteArray1<u8>,
+    itemsize: usize,
+    out_len: usize,
+) -> PyResult<()> {
+    let data = data.as_slice()?;
+    let offsets = offsets.as_slice()?;
+    let out = out
+        .as_slice_mut()
+        .map_err(|_| PyValueError::new_err("out must be contiguous"))?;
+    seqpro_core::Ragged::new(offsets, data, itemsize)
+        .to_padded_into(out, itemsize, out_len)
+        .map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+fn _ragged_reverse_complement(
+    mut data: PyReadwriteArray1<u8>,
+    offsets: PyReadonlyArray1<i64>,
+    comp_lut: PyReadonlyArray1<u8>,
+    mask: PyReadonlyArray1<bool>,
+) -> PyResult<()> {
+    let data = data
+        .as_slice_mut()
+        .map_err(|_| PyValueError::new_err("data must be contiguous"))?;
+    seqpro_core::ragged::reverse_complement_inplace(
+        data,
+        offsets.as_slice()?,
+        comp_lut.as_slice()?,
+        mask.as_slice()?,
+    )
+    .map_err(PyValueError::new_err)
+}
+
+type RaggedConcatResult<'py> =
+    PyResult<(Bound<'py, PyArray<u8, Ix1>>, Bound<'py, PyArray<i64, Ix1>>)>;
 
 /// Concatenate N ragged arrays along their ragged axis.
 ///
@@ -161,8 +202,8 @@ type RaggedConcatResult<'py> = PyResult<(&'py PyArray<u8, Ix1>, &'py PyArray<i64
 #[pyfunction]
 fn _ragged_concat<'py>(
     py: Python<'py>,
-    data_list: &'py PyList,
-    offsets_list: &'py PyList,
+    data_list: &Bound<'py, PyList>,
+    offsets_list: &Bound<'py, PyList>,
     elem: usize,
 ) -> RaggedConcatResult<'py> {
     // Extract contiguous u8 slices from each data array.

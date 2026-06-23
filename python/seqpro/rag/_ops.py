@@ -1,16 +1,15 @@
 """Flat-buffer operations on :class:`Ragged` arrays.
 
-These operate directly on the ``(data, offsets)`` representation with Numba
-kernels instead of going through awkward-array ops, which is the hot path for
-per-batch transforms (e.g. reverse-complementing negative-strand entries) in
-downstream loaders.
+These operate directly on the ``(data, offsets)`` representation using Rust
+kernels (via the compiled ``seqpro.seqpro`` extension) instead of going
+through awkward-array ops, which is the hot path for per-batch transforms
+(e.g. reverse-complementing negative-strand entries) in downstream loaders.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import numba as nb
 import numpy as np
 from numpy.typing import NDArray
 
@@ -18,39 +17,6 @@ from ._core import Ragged, is_rag_dtype
 from ._utils import OFFSET_TYPE
 
 __all__ = ["concatenate", "reverse_complement", "to_packed", "to_padded"]
-
-
-@nb.njit(parallel=True, nogil=True, cache=True)
-def _reverse_complement_ragged(
-    data: NDArray[np.uint8],
-    offsets: NDArray[np.int64],
-    comp_lut: NDArray[np.uint8],
-    mask: NDArray[np.bool_],
-) -> None:  # pragma: no cover - exercised via reverse_complement
-    """In-place reverse-complement of selected ragged rows over a flat buffer.
-
-    Each row ``data[offsets[i]:offsets[i + 1]]`` with ``mask[i]`` true is
-    reverse-complemented in place: positions are swapped end-to-end and each
-    byte is mapped through ``comp_lut`` (a 256-entry byte->byte table). Rows with
-    ``mask[i]`` false are left untouched. Offsets are unchanged because
-    reverse-complement preserves length. The pass is single-touch (each byte is
-    read and written exactly once) and parallel across rows.
-    """
-    n = mask.shape[0]
-    for i in nb.prange(n):  # type: ignore[not-iterable]
-        if not mask[i]:
-            continue
-        lo = offsets[i]
-        hi = offsets[i + 1] - 1
-        while lo < hi:
-            a = data[lo]
-            b = data[hi]
-            data[lo] = comp_lut[b]
-            data[hi] = comp_lut[a]
-            lo += 1
-            hi -= 1
-        if lo == hi:
-            data[lo] = comp_lut[data[lo]]
 
 
 def reverse_complement(
@@ -128,31 +94,10 @@ def reverse_complement(
     u1 = np.ascontiguousarray(rag.data).view(np.uint8)
     if copy:
         u1 = u1.copy()
-    _reverse_complement_ragged(u1, offsets, comp_lut, mask_flat)
+    from seqpro.seqpro import _ragged_reverse_complement  # type: ignore[missing-import]  # rust
+
+    _ragged_reverse_complement(u1, offsets, comp_lut, mask_flat)
     return Ragged.from_offsets(u1.view("S1"), rag.shape, offsets)
-
-
-@nb.njit(parallel=True, nogil=True, cache=True)
-def _pack(
-    src_bytes: NDArray[np.uint8],
-    in_starts: NDArray[np.int64],
-    in_stops: NDArray[np.int64],
-    out_bytes: NDArray[np.uint8],
-    out_starts: NDArray[np.int64],
-) -> None:  # pragma: no cover - exercised via to_packed
-    """Gather each row's contiguous byte span into the packed output buffer.
-
-    All offsets are in *byte* units. Row ``i`` copies
-    ``src_bytes[in_starts[i]:in_stops[i]]`` to
-    ``out_bytes[out_starts[i]:out_starts[i] + (in_stops[i] - in_starts[i])]``.
-    One contiguous read + write per row, parallel across rows.
-    """
-    n = in_starts.shape[0]
-    for i in nb.prange(n):  # type: ignore[not-iterable]
-        length = in_stops[i] - in_starts[i]
-        out_bytes[out_starts[i] : out_starts[i] + length] = src_bytes[
-            in_starts[i] : in_stops[i]
-        ]
 
 
 def _pack_parts(
@@ -205,29 +150,19 @@ def _pack_parts(
     if not data.flags.c_contiguous:
         data = np.ascontiguousarray(data)
     src_bytes = data.view(np.uint8).reshape(-1)
-    try:
-        from seqpro.seqpro import _ragged_pack  # type: ignore[missing-import]
+    from seqpro.seqpro import _ragged_pack  # type: ignore[missing-import]  # rust
 
-        # Pre-allocate a plain numpy-owned buffer and let rust write into it.
-        # This avoids: (a) a zero-init pass inside Rust, (b) a PySliceContainer-
-        # backed return value (which breaks `is_base`), and (c) an extra .copy().
-        out_bytes = np.empty(int(out_offsets[-1]) * elem, dtype=np.uint8)
-        _ragged_pack(
-            np.ascontiguousarray(starts, np.int64),
-            np.ascontiguousarray(stops, np.int64),
-            src_bytes,
-            elem,
-            out_bytes,
-        )
-    except ImportError:  # pragma: no cover - fallback to numba kernel
-        out_bytes = np.empty(int(out_offsets[-1]) * elem, dtype=np.uint8)
-        _pack(
-            src_bytes,
-            (starts.astype(np.int64) * elem),
-            (stops.astype(np.int64) * elem),
-            out_bytes,
-            (out_offsets[:-1] * elem),
-        )
+    # Pre-allocate a plain numpy-owned buffer and let rust write into it.
+    # This avoids: (a) a zero-init pass inside Rust, (b) a PySliceContainer-
+    # backed return value (which breaks `is_base`), and (c) an extra .copy().
+    out_bytes = np.empty(int(out_offsets[-1]) * elem, dtype=np.uint8)
+    _ragged_pack(
+        np.ascontiguousarray(starts, np.int64),
+        np.ascontiguousarray(stops, np.int64),
+        src_bytes,
+        elem,
+        out_bytes,
+    )
     out_data = out_bytes.view(data.dtype)
     if trailing:
         out_data = out_data.reshape(-1, *trailing)
@@ -324,33 +259,6 @@ def to_packed(rag: Any, *, copy: bool = True) -> Any:
     raise TypeError(f"Unsupported Ragged type: {type(rag)}")
 
 
-@nb.njit(parallel=True, nogil=True, cache=True)
-def _to_padded_copy(
-    data_u1: NDArray[np.uint8],
-    offsets: NDArray[np.int64],
-    out_u1: NDArray[np.uint8],
-    itemsize: int,
-    out_len: int,
-) -> None:  # pragma: no cover - exercised via to_padded
-    """Copy each ragged row's bytes into a pre-filled (n_rows, out_len) buffer.
-
-    ``out_u1`` is the flat uint8 view of a C-contiguous ``(n_rows, out_len)`` array
-    already filled with the pad value. For each row, the first
-    ``min(row_len, out_len)`` elements are copied (longer rows are truncated);
-    padded positions keep the pre-filled value. Parallel across rows.
-    """
-    n = offsets.shape[0] - 1
-    row_stride = out_len * itemsize
-    for i in nb.prange(n):  # type: ignore[not-iterable]
-        row_len = offsets[i + 1] - offsets[i]
-        ncopy = row_len if row_len < out_len else out_len
-        nbytes = ncopy * itemsize
-        src = offsets[i] * itemsize
-        dst = i * row_stride
-        for b in range(nbytes):
-            out_u1[dst + b] = data_u1[src + b]
-
-
 def to_padded(
     rag: Ragged[Any],
     pad_value: Any,
@@ -420,7 +328,9 @@ def to_padded(
     if n_rows and out_len:
         data_u1 = np.ascontiguousarray(rag_data).reshape(-1).view(np.uint8)
         out_u1 = out.reshape(-1).view(np.uint8)
-        _to_padded_copy(data_u1, offsets, out_u1, itemsize, out_len)
+        from seqpro.seqpro import _ragged_to_padded  # type: ignore[missing-import]  # rust
+
+        _ragged_to_padded(data_u1, offsets, out_u1, itemsize, out_len)
 
     leading = rag.shape[:rag_dim]
     if leading:

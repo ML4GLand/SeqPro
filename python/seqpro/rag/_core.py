@@ -1470,7 +1470,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             }
         if self._layout.n_ragged == 2:
             return self._to_padded_nested(pad_value, length=length, axis=axis)
-        from ._ops import _to_padded_copy
+        from seqpro.seqpro import _ragged_to_padded  # type: ignore[missing-import]  # rust
 
         # Part A: support trailing regular dims (e.g. (N, None, K) -> (N, out_len, K))
         rag = self if self.is_contiguous else self.to_packed()
@@ -1492,7 +1492,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 if trailing
                 else dtype.itemsize
             )
-            _to_padded_copy(data_u1, offsets, out_u1, elem_bytes, out_len)
+            _ragged_to_padded(data_u1, offsets, out_u1, elem_bytes, out_len)
         leading = rag.shape[: rag.rag_dim]
         if leading or trailing:
             return out.reshape((*leading, out_len, *trailing))  # pyrefly: ignore[no-matching-overload] -- leading/trailing dims are always int; numpy stub can't verify this
