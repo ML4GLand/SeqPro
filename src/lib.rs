@@ -10,6 +10,7 @@ use ndarray::prelude::*;
 use numpy::{IntoPyArray, PyArray, PyReadonlyArray, PyReadonlyArray1, PyReadwriteArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 
 type RaggedSelectResult<'py> = PyResult<(&'py PyArray<i64, Ix1>, &'py PyArray<i64, Ix1>)>;
 type NestedPackResult<'py> = PyResult<(
@@ -31,6 +32,7 @@ fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_ragged_nested_gather, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_nested_pack, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_pack, m)?)?;
+    m.add_function(wrap_pyfunction!(_ragged_concat, m)?)?;
     Ok(())
 }
 
@@ -137,4 +139,74 @@ fn _ragged_select<'py>(
     let (s, e) = ragged::select(starts.as_array(), stops.as_array(), idx.as_array())
         .map_err(PyValueError::new_err)?;
     Ok((s.into_pyarray(py), e.into_pyarray(py)))
+}
+
+type RaggedConcatResult<'py> = PyResult<(&'py PyArray<u8, Ix1>, &'py PyArray<i64, Ix1>)>;
+
+/// Concatenate N ragged arrays along their ragged axis.
+///
+/// Parameters
+/// ----------
+/// data_list : list of NDArray[uint8]
+///     Byte-view of each packed data buffer (contiguous uint8, 1-D).
+/// offsets_list : list of NDArray[int64]
+///     1-D (G+1,) offset arrays for each input (element units, not bytes).
+/// elem : int
+///     Byte size of one logical element (e.g. 4 for int32/float32).
+///
+/// Returns
+/// -------
+/// (out_data, out_offsets) : (NDArray[uint8], NDArray[int64])
+///     Concatenated byte buffer and (G+1,) cumulative offsets in element units.
+#[pyfunction]
+fn _ragged_concat<'py>(
+    py: Python<'py>,
+    data_list: &'py PyList,
+    offsets_list: &'py PyList,
+    elem: usize,
+) -> RaggedConcatResult<'py> {
+    // Extract contiguous u8 slices from each data array.
+    let mut data_bufs: Vec<PyReadonlyArray1<'py, u8>> = Vec::with_capacity(data_list.len());
+    for item in data_list.iter() {
+        let arr: PyReadonlyArray1<u8> = item.extract().map_err(|e| {
+            PyValueError::new_err(format!("data_list element is not a 1-D uint8 array: {}", e))
+        })?;
+        data_bufs.push(arr);
+    }
+
+    // Extract contiguous i64 slices from each offsets array.
+    let mut off_bufs: Vec<PyReadonlyArray1<'py, i64>> = Vec::with_capacity(offsets_list.len());
+    for item in offsets_list.iter() {
+        let arr: PyReadonlyArray1<i64> = item.extract().map_err(|e| {
+            PyValueError::new_err(format!(
+                "offsets_list element is not a 1-D int64 array: {}",
+                e
+            ))
+        })?;
+        off_bufs.push(arr);
+    }
+
+    let data_slices: Vec<&[u8]> = data_bufs
+        .iter()
+        .map(|a| {
+            a.as_slice()
+                .map_err(|_| PyValueError::new_err("data array must be contiguous"))
+        })
+        .collect::<PyResult<_>>()?;
+
+    let off_slices: Vec<&[i64]> = off_bufs
+        .iter()
+        .map(|a| {
+            a.as_slice()
+                .map_err(|_| PyValueError::new_err("offsets array must be contiguous"))
+        })
+        .collect::<PyResult<_>>()?;
+
+    let (out_data, out_offsets) =
+        ragged::ragged_concat(data_slices, off_slices, elem).map_err(PyValueError::new_err)?;
+
+    Ok((
+        Array1::from_vec(out_data).into_pyarray(py),
+        Array1::from_vec(out_offsets).into_pyarray(py),
+    ))
 }

@@ -25,12 +25,12 @@ jobs:
       - name: Setup pixi
         uses: prefix-dev/setup-pixi@v0.9.5
         with:
-          pixi-version: v0.67.2
+          pixi-version: v0.70.1
           cache: true
           environments: bench
-          locked: false
+          locked: true
       - name: Build extension
-        run: pixi run -e bench maturin develop
+        run: pixi run -e bench maturin develop --uv
       - name: Run benchmarks
         uses: CodSpeedHQ/action@v4
         with:

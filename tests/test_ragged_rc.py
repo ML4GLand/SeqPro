@@ -4,37 +4,34 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import awkward as ak
-import awkward.operations.str as ak_str
-import numba as nb
-from awkward.contents import NumpyArray
 
 import seqpro as sp
 from seqpro.rag import Ragged, lengths_to_offsets
 from seqpro.rag._ops import reverse_complement
 
 # --------------------------------------------------------------------------- #
-# Naive awkward reference (mirrors scratch_bench_rc.py / gvl's implementation)
+# Naive numpy reference
 # --------------------------------------------------------------------------- #
+#
+# The original oracle used ak.str.reverse, which is unusable in this environment
+# (the installed pyarrow lacks PyExtensionType, which awkward's string ops
+# require). This independent per-row numpy reference computes the same value:
+# reverse-complement each masked row over a packed copy of the flat buffer.
 
 _COMP_DNA_U8 = np.frombuffer(bytes.maketrans(b"ACGT", b"TGCA"), np.uint8)
 
 
-@nb.vectorize(["u1(u1)"], nopython=True)
-def _ufunc_comp(x):  # pragma: no cover
-    return _COMP_DNA_U8[x]
-
-
-def _ak_comp_helper(layout, **kwargs):
-    if layout.is_numpy:
-        return NumpyArray(_ufunc_comp(layout.data), parameters=layout.parameters)
-
-
-def _naive_rc(rag: Ragged, mask: np.ndarray) -> Ragged:
-    """Awkward-based reference: complement then string-reverse, conditional on mask."""
-    arr = ak.to_packed(rag)
-    rc = ak_str.reverse(ak.transform(_ak_comp_helper, arr))
-    return Ragged(ak.to_packed(ak.where(mask, rc, arr)))
+def _naive_rc_data(rag: Ragged, mask: np.ndarray) -> np.ndarray:
+    """Packed S1 flat buffer after reverse-complementing each masked row."""
+    packed = rag.to_packed()
+    off = np.asarray(packed.offsets)
+    data = np.ascontiguousarray(packed.data).view(np.uint8).copy()
+    mask = np.asarray(mask).reshape(-1)
+    for i in range(len(off) - 1):
+        if mask[i]:
+            seg = data[off[i] : off[i + 1]]
+            data[off[i] : off[i + 1]] = _COMP_DNA_U8[seg[::-1]]
+    return data.view("S1")
 
 
 # --------------------------------------------------------------------------- #
@@ -173,12 +170,10 @@ def test_rc_matches_awkward_baseline_batch():
     rag = Ragged.from_lengths(raw, lengths)
     mask = rng.random(n) < 0.5
 
-    expected = _naive_rc(rag, mask)
+    exp_data = _naive_rc_data(rag, mask)
     got = reverse_complement(rag, COMP_LUT, mask=mask, copy=True)
 
-    exp_data = ak.to_packed(expected).layout.content.data.view("S1")
-    got_data = got.data
-    np.testing.assert_array_equal(got_data, exp_data)
+    np.testing.assert_array_equal(got.data, exp_data)
 
 
 def test_rc_no_mask_matches_awkward_baseline():
@@ -189,10 +184,9 @@ def test_rc_no_mask_matches_awkward_baseline():
     rag = Ragged.from_lengths(raw, lengths)
     mask = np.ones(8, dtype=bool)
 
-    expected = _naive_rc(rag, mask)
+    exp_data = _naive_rc_data(rag, mask)
     got = reverse_complement(rag, COMP_LUT)
 
-    exp_data = ak.to_packed(expected).layout.content.data.view("S1")
     np.testing.assert_array_equal(got.data, exp_data)
 
 

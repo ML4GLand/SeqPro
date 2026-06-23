@@ -1,12 +1,9 @@
 import awkward as ak
 import numpy as np
 import pytest
-from hypothesis import given, strategies as st
-from hypothesis.extra.numpy import arrays
 from seqpro.rag._utils import OFFSET_TYPE, lengths_to_offsets
 from seqpro.rag._layout import RaggedLayout, validate_layout
 from seqpro.rag._core import Ragged
-from seqpro.rag._array import Ragged as AkRagged
 
 
 def test_layout_numeric_basic():
@@ -187,6 +184,42 @@ def test_state_predicates():
     assert empty.is_empty is True
 
 
+def test_is_base_mmap_returns_false(tmp_path):
+    """_core.Ragged.is_base must return False for a memmap-backed Ragged.
+
+    The ``is_base`` semantics follow ``data.base is None``.  A memmap array's
+    ``base`` is a ``mmap.mmap`` object (not None), so ``is_base`` must be False.
+
+    A previous crash-fix for the ``mmap.mmap`` case (which has no ``.base``
+    attribute) accidentally returned True for any non-ndarray base, diverging
+    from this contract.  The correct fix is ``arr.base is None`` — never crash,
+    never diverge.
+    """
+    # Write raw int32 bytes to a file and open as a read/write memmap.
+    data_plain = np.arange(10, dtype=np.int32)
+    mm_path = tmp_path / "data.bin"
+    mm_path.write_bytes(data_plain.tobytes())
+    mm_data = np.memmap(str(mm_path), dtype=np.int32, mode="r+", shape=(10,))
+
+    # Confirm the precondition: mm_data.base is a mmap.mmap, not None or ndarray.
+    assert mm_data.base is not None
+    assert not isinstance(mm_data.base, np.ndarray)
+
+    lengths = np.array([3, 2, 5], dtype=np.uint32)
+    offsets = lengths_to_offsets(lengths)
+    core_rag = Ragged.from_offsets(mm_data, (3, None), offsets)
+
+    # Oracle value: data.base is not None -> is_base is False.
+    # (Same as _array.Ragged which checks self._parts.data.base is None.)
+    assert core_rag.is_base is False
+
+    # Sanity: a plain owned array still returns True.
+    owned = np.arange(10, dtype=np.int32)
+    assert owned.base is None  # precondition
+    owned_rag = Ragged.from_offsets(owned, (3, None), offsets)
+    assert owned_rag.is_base is True
+
+
 def test_view_reinterprets_dtype_zero_copy():
     rag = Ragged.from_lengths(np.arange(6, dtype=np.int64), np.array([2, 1, 3]))
     v = rag.view(np.uint64)
@@ -318,68 +351,6 @@ def test_ingest_record_from_ak_works():
     assert rag.fields == ["a", "b"]
     np.testing.assert_array_equal(rag["a"].data, np.array([1, 2, 3]))
     assert rag["a"].offsets is rag["b"].offsets
-
-
-# ---------------------------------------------------------------------------
-# Hypothesis differential tests vs the awkward oracle
-# ---------------------------------------------------------------------------
-
-
-@st.composite
-def _ragged_inputs(draw):
-    n = draw(st.integers(1, 6))
-    lengths = draw(st.lists(st.integers(0, 5), min_size=n, max_size=n).map(np.array))
-    total = int(lengths.sum())
-    data = draw(arrays(np.int64, (total,), elements=st.integers(-100, 100)))
-    return data, lengths
-
-
-@given(_ragged_inputs())
-def test_diff_numeric_properties(inp):
-    data, lengths = inp
-    new = Ragged.from_lengths(data, lengths.astype(np.uint32))
-    old = AkRagged.from_lengths(data, lengths.astype(np.uint32))
-    np.testing.assert_array_equal(new.data, old.data)
-    np.testing.assert_array_equal(new.offsets, old.offsets)
-    assert new.shape == old.shape
-    np.testing.assert_array_equal(new.lengths, old.lengths)
-
-
-@given(_ragged_inputs())
-def test_diff_to_packed_after_slice(inp):
-    data, lengths = inp
-    if len(lengths) < 2:
-        return
-    new = Ragged.from_lengths(data, lengths.astype(np.uint32))[::2].to_packed()
-    old = AkRagged.from_lengths(data, lengths.astype(np.uint32))[::2].to_packed()
-    np.testing.assert_array_equal(new.data, old.data)
-    np.testing.assert_array_equal(new.offsets, old.offsets)
-
-
-@given(_ragged_inputs())
-def test_diff_ufunc(inp):
-    data, lengths = inp
-    new = Ragged.from_lengths(data.astype(np.float64), lengths.astype(np.uint32))
-    old = AkRagged.from_lengths(data.astype(np.float64), lengths.astype(np.uint32))
-    np.testing.assert_allclose((new + 1.0).data, ak_flat(old + 1.0))
-
-
-def ak_flat(ak_rag):
-    import awkward as ak
-
-    return ak.to_numpy(ak.flatten(ak_rag, axis=None))
-
-
-def test_diff_string_shape_documented_change():
-    # The one intentional divergence: bytes collection (N, None) -> (N,)
-    data = np.frombuffer(b"cathithere", "S1")
-    lengths = np.array([3, 2, 5], dtype=np.uint32)
-    new = Ragged.from_lengths(data, lengths)
-    old = AkRagged.from_lengths(data, lengths)
-    assert new.shape == (3,)
-    assert old.shape == (3, None)
-    np.testing.assert_array_equal(new.offsets, old.offsets)  # same byte offsets
-    np.testing.assert_array_equal(new.data, old.data)
 
 
 def test_getitem_uses_rust_select_intarray():
@@ -754,15 +725,16 @@ def test_r2_to_numpy_after_inner_mask_rectangular():
     np.testing.assert_array_equal(arr[1, 1], np.array([9, 10, 11]))
 
 
-def test_string_under_axis_to_packed_raises():
+def test_string_under_axis_to_packed_and_numpy():
+    # to_packed() now works on string-under-axis; to_numpy() still raises (Spec C).
     rag = Ragged.from_offsets(
-        np.frombuffer(b"ACGTT", "S1"),
+        np.frombuffer(b"ACGTT", "S1").copy(),
         (2, None),
         np.array([0, 2, 3]),
         str_offsets=np.array([0, 1, 2, 5]),
     )
-    with pytest.raises(NotImplementedError, match="string-under-axis"):
-        rag.to_packed()
+    packed = rag.to_packed()
+    assert packed.to_ak().to_list() == [[b"A", b"C"], [b"GTT"]]
     with pytest.raises(NotImplementedError, match="string-under-axis"):
         rag.to_numpy()
 

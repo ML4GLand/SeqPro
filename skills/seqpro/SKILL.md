@@ -5,7 +5,7 @@ description: Use when writing Python that processes biological sequences (DNA/RN
 
 # seqpro
 
-Python/Rust package for fast biological-sequence processing. Python+NumPy+Numba for hot loops, a small Rust extension (`src/kshuffle.rs`) for graph-algorithm ops, and an awkward-backed `Ragged` array for variable-length batches. Imported as `import seqpro as sp`.
+Python/Rust package for fast biological-sequence processing. Python+NumPy+Numba for hot loops, a small Rust extension (`src/kshuffle.rs`) for graph-algorithm ops, and a Rust-native `Ragged` array (`_core.Ragged`) for variable-length batches. Imported as `import seqpro as sp`.
 
 ## When to use
 
@@ -48,7 +48,7 @@ For exact signatures and kwargs, read the docstring directly (`sp.<fn>?` in a RE
 
 ## `Ragged` — variable-length sequence batches
 
-`sp.Ragged` (in `python/seqpro/rag/_array.py`) is the canonical container for batches where sequences differ in length. It is a thin subclass of `ak.Array` with **exactly one ragged dimension**, plus zero-copy access to the underlying flat NumPy buffer and offsets.
+`sp.Ragged` (backed by `python/seqpro/rag/_core.py`) is the canonical container for batches where sequences differ in length. It is a Rust-native class implementing `NDArrayOperatorsMixin` (NOT a subclass of `ak.Array`) with **exactly one ragged dimension**, plus zero-copy access to the underlying flat NumPy buffer and offsets.
 
 ### Mental model
 
@@ -65,14 +65,15 @@ A `Ragged` has three things:
 ```python
 import numpy as np, seqpro as sp
 
-# From lengths (most common — you have a flat data buffer and per-segment lengths)
-data = np.frombuffer(b"ACGTACGTACG", dtype="S1")
+# From lengths (most common — you have a flat numeric data buffer and per-segment lengths)
+data = np.frombuffer(b"ACGTACGTACG", dtype=np.uint8)  # uint8 for char-as-number
 lengths = np.array([4, 3, 4])
 rag = sp.rag.Ragged.from_lengths(data, lengths)   # shape (3, None)
 
-# From explicit offsets
+# From explicit offsets (also accepts S1 char arrays when shape has a None)
 offsets = np.array([0, 4, 7, 11], dtype=np.int64)
-rag = sp.rag.Ragged.from_offsets(data, shape=(3, None), offsets=offsets)
+char_data = np.frombuffer(b"ACGTACGTACG", dtype="S1")
+rag = sp.rag.Ragged.from_offsets(char_data, shape=(3, None), offsets=offsets)  # shape (3, None)
 
 # Empty with known shape
 rag = sp.rag.Ragged.empty((10, None, 4), dtype=np.uint8)   # batch of 10 OHE seqs
@@ -85,46 +86,56 @@ rag = sp.rag.Ragged.empty((10, None, 4), dtype=np.uint8)   # batch of 10 OHE seq
 | Task | Do | Don't |
 |---|---|---|
 | Bulk numeric op on the flat data | `rag.data[:] = ...` or `rag.data.view(...)` — zero-copy | Iterate `for seq in rag:` |
-| Apply a `np.ufunc` | Just call it: `np.exp(rag)` — dispatched via awkward behavior to return a `Ragged` | Manually unpack and rebuild |
+| Apply a `np.ufunc` | Just call it: `np.exp(rag)` — dispatched via `__array_ufunc__` (NDArrayOperatorsMixin) to return a `Ragged` | Manually unpack and rebuild |
+| Count top-level rows | `len(rag)` — returns `shape[0]` (raises if `shape[0]` is the ragged axis) | `rag.shape[0]` with manual int-cast |
+| Insert a leading size-1 axis | `rag[np.newaxis]` — returns `Ragged` with shape `(1, *old_shape)` | Manual `from_offsets` rebuild |
 | Reinterpret bytes/dtype | `rag.view(np.uint8)` | `np.asarray(rag).view(...)` (loses ragged structure) |
 | Reshape non-ragged axes | `rag.reshape(batch, None, k, 4)` | Touch `rag.data.shape` directly |
 | Drop a size-1 axis | `rag.squeeze(axis)` (returns `ndarray` if collapses to 1D) | |
 | Densify to NumPy | `rag.to_numpy()` (pads/raises per `allow_missing`) | Loop and stack |
 | Pack into contiguous buffer | `rag.to_packed()` or `sp.rag.to_packed(rag)` — Numba-parallelized, safe on `np.memmap`; `copy=False` for zero-copy passthrough when already packed | `ak.to_packed(rag)` |
 | Densify + right-pad to fixed length | `sp.rag.to_padded(rag, pad_value, *, length=None)` — flat-buffer numba kernel; `length=None` pads to batch max, explicit `length` pads/truncates; ragged-axis-last, non-record only | `rag.to_numpy()` with manual slicing or `ak_str.rpad` (~3× slower; the awkward path allocates extra intermediates) |
+| Concatenate along ragged axis | `sp.rag.concatenate(rags, axis)` — concatenate a list of `Ragged` arrays along the ragged axis (`axis` must be the `None` dim, negative allowed); offset-arithmetic + buffered copy via Rust/rayon kernel; numeric dtypes (int32, float32, …) | `ak.concatenate(rags, axis=…)` |
 | Strip to plain awkward | `rag.to_ak()` | |
 
 ### Record-layout `Ragged` (multi-field)
 
-Build by `ak.zip`-ing existing `Ragged`s that share offsets. The result is already a `Ragged` — no manual wrap needed (it's registered via `ak.behavior`):
+Build by calling `sp.rag.zip` (or equivalently `Ragged.from_fields`) with a dict of single-field `Ragged`s that share the **same offsets object**. The result is a `Ragged` with a record layout:
 
 ```python
-import awkward as ak
-seq_rag   = sp.rag.Ragged.from_lengths(seq_flat,   lengths)  # |S1
-score_rag = sp.rag.Ragged.from_lengths(score_flat, lengths)  # f4
-batch = ak.zip({"seq": seq_rag, "score": score_rag})         # → Ragged (record layout)
+import numpy as np, seqpro as sp
+from seqpro.rag._utils import lengths_to_offsets
+
+lengths = np.array([4, 3])
+shared_offsets = lengths_to_offsets(lengths)
+
+seq_rag   = sp.rag.Ragged.from_offsets(seq_flat,   shape=(2, None), offsets=shared_offsets)  # |S1
+score_rag = sp.rag.Ragged.from_offsets(score_flat, shape=(2, None), offsets=shared_offsets)  # f4
+
+batch = sp.rag.zip({"seq": seq_rag, "score": score_rag})   # → Ragged (record layout)
+# equivalently: batch = sp.rag.Ragged.from_fields({"seq": seq_rag, "score": score_rag})
 assert isinstance(batch, sp.rag.Ragged)
 
 batch["score"].data[:] *= 2.0   # zero-copy mutation of the flat score buffer
 ```
 
-The two inputs **must share offsets** (same `lengths` / same `offsets` array) — that's what makes the result a single-ragged-dim record. Mixing mismatched offsets falls back to a plain `ak.Array`.
+The inputs **must share the same offsets object** (pass the same `shared_offsets` array to each `from_offsets` call) — that's what makes the result a single-ragged-dim record. Passing independently-constructed `from_lengths` results raises `ValueError` because their offsets objects differ even if lengths are equal.
 
 - `rag.dtype` returns a NumPy *structured* dtype (e.g. `[("seq","S1"),("score","f4")]`), purely as a descriptor — memory is SoA, not AoS.
-- `rag.data` and `rag.parts` return **dicts keyed by field name**, not single arrays. Always type-check before indexing.
+- `rag.data` returns a **dict keyed by field name**, not a single array. Always type-check before indexing.
 - `rag["field"]` gives zero-copy single-field access and shares the parent's offsets object. Its `.data` is the flat NumPy buffer for that field.
-- `view`, `apply`, and `to_numpy` are **not defined** on record layouts — operate per-field.
+- `rag.to_numpy()` on a record layout returns a **dict `{field: dense ndarray}`** (raises if any field is still jagged — lengths must be uniform for a dense conversion).
+- `view` and `apply` are **not defined** on record layouts — operate per-field.
 
-### Awkward interop — what you can rely on
+### NumPy interop — what you can rely on
 
-`Ragged` registers itself with `ak.behavior` so most awkward APIs Just Work:
+`_core.Ragged` implements `NDArrayOperatorsMixin` and `__array_ufunc__` directly (no awkward dependency):
 
-- NumPy ufuncs (`np.add`, `np.exp`, etc.) on a `Ragged` return a `Ragged`.
-- `ak.zip`, slicing, `ak.fields`, etc. work and produce `Ragged` when the result still has exactly one ragged dim. If a slice produces zero or >1 ragged dims, you get a plain `ak.Array` back.
-- `rag.to_packed()` / `sp.rag.to_packed(rag)` is the canonical way to materialize a contiguous, zero-based buffer — Numba-parallelized and safe on `np.memmap`. Use `copy=False` for a zero-copy passthrough when the array is already packed (raises `ValueError` if not). Prefer this over `ak.to_packed(rag)`, which is slower and doesn't handle memmap inputs.
-- Don't rely on awkward features outside this contract: strings (use `|S1` bytes), union types, and >1 ragged dim are unsupported by design.
+- NumPy ufuncs (`np.add`, `np.exp`, etc.) on a non-record `Ragged` return a `Ragged`. Record layouts raise `NotImplementedError` — operate on individual fields.
+- `rag.to_packed()` / `sp.rag.to_packed(rag)` is the canonical way to materialize a contiguous, zero-based buffer — Numba-parallelized and safe on `np.memmap`. Use `copy=False` for a zero-copy passthrough when the array is already packed (raises `ValueError` if not).
+- Don't rely on awkward (`ak.*`) APIs on `_core.Ragged` — the backend no longer registers `ak.behavior`. Use `rag.to_ak()` to get an `ak.Array` if you need awkward interop, but prefer the native API.
 
-When in doubt, read `python/seqpro/rag/_array.py` — it's ~800 lines and the docstrings are the source of truth. `_gufuncs.py` and `_utils.py` in the same dir are small.
+When in doubt, read `python/seqpro/rag/_core.py` — it's the live backend and the docstrings are the source of truth. `_layout.py`, `_ops.py`, and `_utils.py` in the same dir contain supporting internals.
 
 ### Common pitfalls
 
@@ -143,7 +154,7 @@ When in doubt, read `python/seqpro/rag/_array.py` — it's ~800 lines and the do
 | Augmentations | `python/seqpro/_modifiers.py` |
 | Stats | `python/seqpro/_analyzers.py` |
 | Alphabets | `python/seqpro/alphabets/_alphabets.py` |
-| Ragged | `python/seqpro/rag/_array.py` |
+| Ragged | `python/seqpro/rag/_core.py` |
 | Transforms (pipeline objects) | `python/seqpro/transforms/` |
 | BED/GTF | `python/seqpro/bed.py`, `gtf.py` |
 | Rust k-shuffle | `src/kshuffle.rs` |
@@ -154,6 +165,6 @@ When in doubt, read `python/seqpro/rag/_array.py` — it's ~800 lines and the do
 
 - Don't write Python `for` loops over residues or positions in library code. Look for a vectorized op, a Numba kernel in `_numba.py`, or extend one.
 - Don't assume an axis — always pass `length_axis` (and `ohe_axis` where relevant) explicitly.
-- Don't reach into `Ragged` internals (`_parts`, `__init__` shortcuts) from user code; use `data`, `offsets`, `parts`, `from_lengths`, `from_offsets`, `empty`.
+- Don't reach into `Ragged` internals (`_layout`, `_rl`, `__init__` shortcuts) from user code; use `data`, `offsets`, `fields`, `from_lengths`, `from_offsets`, `from_fields`, `empty`.
 - Don't introduce strings into `Ragged`. ASCII bytes (`|S1`) only.
 - Don't add a feature or change a public signature without updating this skill — see CLAUDE.md.
