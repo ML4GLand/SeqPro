@@ -34,6 +34,40 @@ impl<'a> Ragged<'a> {
         let n_data = (self.data.len() / self.elem) as i64;
         validate(ArrayView1::from(self.offsets), n_data, self.n_rows() as i64)
     }
+
+    /// Copy each row's first `min(row_len, out_len)` elements into a pre-filled
+    /// `out` (flat uint8 view of a row-major (n_rows, out_len) buffer already
+    /// filled with the pad value). Parallel across rows.
+    pub fn to_padded_into(
+        &self,
+        out: &mut [u8],
+        itemsize: usize,
+        out_len: usize,
+    ) -> Result<(), String> {
+        use rayon::prelude::*;
+        let n = self.n_rows();
+        let row_stride = out_len * itemsize;
+        if out.len() != n * row_stride {
+            return Err(format!(
+                "out has {} bytes, expected {}",
+                out.len(),
+                n * row_stride
+            ));
+        }
+        if row_stride == 0 {
+            return Ok(());
+        }
+        out.par_chunks_mut(row_stride)
+            .enumerate()
+            .for_each(|(i, dst)| {
+                let row_len = (self.offsets[i + 1] - self.offsets[i]) as usize;
+                let ncopy = row_len.min(out_len);
+                let nbytes = ncopy * itemsize;
+                let src = self.offsets[i] as usize * itemsize;
+                dst[..nbytes].copy_from_slice(&self.data[src..src + nbytes]);
+            });
+        Ok(())
+    }
 }
 
 /// Concatenate N ragged arrays along their ragged axis.
@@ -437,6 +471,50 @@ pub fn pack(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    // Naive reference: row-major copy with truncation into a pre-filled buffer.
+    fn to_padded_ref(
+        offsets: &[i64],
+        data: &[u8],
+        elem: usize,
+        out_len: usize,
+        fill: u8,
+    ) -> Vec<u8> {
+        let n = offsets.len() - 1;
+        let mut out = vec![fill; n * out_len * elem];
+        for i in 0..n {
+            let row_len = (offsets[i + 1] - offsets[i]) as usize;
+            let ncopy = row_len.min(out_len);
+            let src = offsets[i] as usize * elem;
+            let dst = i * out_len * elem;
+            out[dst..dst + ncopy * elem].copy_from_slice(&data[src..src + ncopy * elem]);
+        }
+        out
+    }
+
+    proptest! {
+        #[test]
+        fn to_padded_matches_reference(
+            rows in proptest::collection::vec(0usize..6, 1..8),
+            elem in 1usize..4,
+            out_len in 0usize..7,
+        ) {
+            let mut offsets = vec![0i64];
+            for r in &rows { offsets.push(offsets.last().unwrap() + *r as i64); }
+            let n_data = *offsets.last().unwrap() as usize;
+            let data: Vec<u8> = (0..n_data * elem).map(|x| (x % 251) as u8).collect();
+
+            let mut out = vec![0xAAu8; rows.len() * out_len * elem];
+            Ragged::new(&offsets, &data, elem)
+                .to_padded_into(&mut out, elem, out_len)
+                .unwrap();
+
+            let expected = to_padded_ref(&offsets, &data, elem, out_len, 0xAA);
+            prop_assert_eq!(out, expected);
+        }
+    }
+
     #[test]
     fn test_nested_gather_selects_per_group() {
         let o0_starts = array![0i64, 2];

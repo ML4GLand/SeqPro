@@ -34,6 +34,7 @@ fn seqpro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_ragged_nested_pack, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_pack, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_concat, m)?)?;
+    m.add_function(wrap_pyfunction!(_ragged_to_padded, m)?)?;
     Ok(())
 }
 
@@ -140,6 +141,24 @@ fn _ragged_select<'py>(
     let (s, e) = ragged::select(starts.as_array(), stops.as_array(), idx.as_array())
         .map_err(PyValueError::new_err)?;
     Ok((s.into_pyarray(py), e.into_pyarray(py)))
+}
+
+#[pyfunction]
+fn _ragged_to_padded(
+    data: PyReadonlyArray1<u8>,
+    offsets: PyReadonlyArray1<i64>,
+    mut out: PyReadwriteArray1<u8>,
+    itemsize: usize,
+    out_len: usize,
+) -> PyResult<()> {
+    let data = data.as_slice()?;
+    let offsets = offsets.as_slice()?;
+    let out = out
+        .as_slice_mut()
+        .map_err(|_| PyValueError::new_err("out must be contiguous"))?;
+    seqpro_core::Ragged::new(offsets, data, itemsize)
+        .to_padded_into(out, itemsize, out_len)
+        .map_err(PyValueError::new_err)
 }
 
 type RaggedConcatResult<'py> =

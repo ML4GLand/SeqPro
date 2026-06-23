@@ -324,33 +324,6 @@ def to_packed(rag: Any, *, copy: bool = True) -> Any:
     raise TypeError(f"Unsupported Ragged type: {type(rag)}")
 
 
-@nb.njit(parallel=True, nogil=True, cache=True)
-def _to_padded_copy(
-    data_u1: NDArray[np.uint8],
-    offsets: NDArray[np.int64],
-    out_u1: NDArray[np.uint8],
-    itemsize: int,
-    out_len: int,
-) -> None:  # pragma: no cover - exercised via to_padded
-    """Copy each ragged row's bytes into a pre-filled (n_rows, out_len) buffer.
-
-    ``out_u1`` is the flat uint8 view of a C-contiguous ``(n_rows, out_len)`` array
-    already filled with the pad value. For each row, the first
-    ``min(row_len, out_len)`` elements are copied (longer rows are truncated);
-    padded positions keep the pre-filled value. Parallel across rows.
-    """
-    n = offsets.shape[0] - 1
-    row_stride = out_len * itemsize
-    for i in nb.prange(n):  # type: ignore[not-iterable]
-        row_len = offsets[i + 1] - offsets[i]
-        ncopy = row_len if row_len < out_len else out_len
-        nbytes = ncopy * itemsize
-        src = offsets[i] * itemsize
-        dst = i * row_stride
-        for b in range(nbytes):
-            out_u1[dst + b] = data_u1[src + b]
-
-
 def to_padded(
     rag: Ragged[Any],
     pad_value: Any,
@@ -420,7 +393,9 @@ def to_padded(
     if n_rows and out_len:
         data_u1 = np.ascontiguousarray(rag_data).reshape(-1).view(np.uint8)
         out_u1 = out.reshape(-1).view(np.uint8)
-        _to_padded_copy(data_u1, offsets, out_u1, itemsize, out_len)
+        from seqpro.seqpro import _ragged_to_padded  # type: ignore[missing-import]  # rust
+
+        _ragged_to_padded(data_u1, offsets, out_u1, itemsize, out_len)
 
     leading = rag.shape[:rag_dim]
     if leading:
