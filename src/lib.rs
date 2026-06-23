@@ -35,6 +35,7 @@ fn seqpro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_ragged_pack, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_concat, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_to_padded, m)?)?;
+    m.add_function(wrap_pyfunction!(_ragged_reverse_complement, m)?)?;
     Ok(())
 }
 
@@ -159,6 +160,25 @@ fn _ragged_to_padded(
     seqpro_core::Ragged::new(offsets, data, itemsize)
         .to_padded_into(out, itemsize, out_len)
         .map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+fn _ragged_reverse_complement(
+    mut data: PyReadwriteArray1<u8>,
+    offsets: PyReadonlyArray1<i64>,
+    comp_lut: PyReadonlyArray1<u8>,
+    mask: PyReadonlyArray1<bool>,
+) -> PyResult<()> {
+    let data = data
+        .as_slice_mut()
+        .map_err(|_| PyValueError::new_err("data must be contiguous"))?;
+    seqpro_core::ragged::reverse_complement_inplace(
+        data,
+        offsets.as_slice()?,
+        comp_lut.as_slice()?,
+        mask.as_slice()?,
+    )
+    .map_err(PyValueError::new_err)
 }
 
 type RaggedConcatResult<'py> =

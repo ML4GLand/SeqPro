@@ -70,6 +70,53 @@ impl<'a> Ragged<'a> {
     }
 }
 
+/// In-place per-row reverse-complement over a flat S1 buffer for masked rows.
+/// `comp_lut` is a 256-entry byte->byte complement table. Length-preserving;
+/// offsets are unchanged. Parallel across rows (rows write disjoint spans).
+pub fn reverse_complement_inplace(
+    data: &mut [u8],
+    offsets: &[i64],
+    comp_lut: &[u8],
+    mask: &[bool],
+) -> Result<(), String> {
+    use rayon::prelude::*;
+    if comp_lut.len() != 256 {
+        return Err(format!(
+            "comp_lut must have 256 entries, got {}",
+            comp_lut.len()
+        ));
+    }
+    let n = offsets.len() - 1;
+    if mask.len() != n {
+        return Err(format!("mask has {} entries, expected {}", mask.len(), n));
+    }
+    // Build disjoint per-row mutable slices, then process in parallel.
+    let mut rows: Vec<&mut [u8]> = Vec::with_capacity(n);
+    let mut rest: &mut [u8] = data;
+    for i in 0..n {
+        let len = (offsets[i + 1] - offsets[i]) as usize;
+        let (head, tail) = rest.split_at_mut(len);
+        rows.push(head);
+        rest = tail;
+    }
+    rows.par_iter_mut().enumerate().for_each(|(i, row)| {
+        if !mask[i] {
+            return;
+        }
+        let len = row.len();
+        for j in 0..len / 2 {
+            let a = row[j];
+            let b = row[len - 1 - j];
+            row[j] = comp_lut[b as usize];
+            row[len - 1 - j] = comp_lut[a as usize];
+        }
+        if len % 2 == 1 {
+            row[len / 2] = comp_lut[row[len / 2] as usize];
+        }
+    });
+    Ok(())
+}
+
 /// Concatenate N ragged arrays along their ragged axis.
 ///
 /// All inputs share the same number of groups G.  For each group g the
@@ -491,6 +538,40 @@ mod tests {
             out[dst..dst + ncopy * elem].copy_from_slice(&data[src..src + ncopy * elem]);
         }
         out
+    }
+
+    fn rc_ref(data: &[u8], offsets: &[i64], comp: &[u8], mask: &[bool]) -> Vec<u8> {
+        let mut out = data.to_vec();
+        for i in 0..offsets.len() - 1 {
+            if !mask[i] {
+                continue;
+            }
+            let lo = offsets[i] as usize;
+            let hi = offsets[i + 1] as usize;
+            let row: Vec<u8> = data[lo..hi]
+                .iter()
+                .rev()
+                .map(|&b| comp[b as usize])
+                .collect();
+            out[lo..hi].copy_from_slice(&row);
+        }
+        out
+    }
+
+    proptest! {
+        #[test]
+        fn rc_matches_reference(rows in proptest::collection::vec(0usize..6, 1..8)) {
+            let mut offsets = vec![0i64];
+            for r in &rows { offsets.push(offsets.last().unwrap() + *r as i64); }
+            let n = *offsets.last().unwrap() as usize;
+            let data: Vec<u8> = (0..n).map(|x| (x % 4) as u8).collect();      // 0..3 = A,C,G,T
+            let comp: Vec<u8> = (0..256u32).map(|b| match b { 0=>3,1=>2,2=>1,3=>0, o=>o as u8 }).collect();
+            let mask: Vec<bool> = rows.iter().enumerate().map(|(i,_)| i % 2 == 0).collect();
+
+            let mut got = data.clone();
+            super::reverse_complement_inplace(&mut got, &offsets, &comp, &mask).unwrap();
+            prop_assert_eq!(got, rc_ref(&data, &offsets, &comp, &mask));
+        }
     }
 
     proptest! {
