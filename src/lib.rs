@@ -12,15 +12,16 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
-type RaggedSelectResult<'py> = PyResult<(&'py PyArray<i64, Ix1>, &'py PyArray<i64, Ix1>)>;
+type RaggedSelectResult<'py> =
+    PyResult<(Bound<'py, PyArray<i64, Ix1>>, Bound<'py, PyArray<i64, Ix1>>)>;
 type NestedPackResult<'py> = PyResult<(
-    &'py PyArray<i64, Ix1>,
-    &'py PyArray<i64, Ix1>,
-    &'py PyArray<u8, Ix1>,
+    Bound<'py, PyArray<i64, Ix1>>,
+    Bound<'py, PyArray<i64, Ix1>>,
+    Bound<'py, PyArray<u8, Ix1>>,
 )>;
 
 #[pymodule]
-fn seqpro(_py: Python, m: &PyModule) -> PyResult<()> {
+fn seqpro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_k_shuffle, m)?)?;
     m.add_function(wrap_pyfunction!(translate::_translate_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(translate::_translate_drop, m)?)?;
@@ -59,7 +60,7 @@ fn _k_shuffle<'py>(
     alphabet_size: usize,
     alphabet_bytes: &[u8],
     seed: Option<u64>,
-) -> &'py PyArray<u8, IxDyn> {
+) -> Bound<'py, PyArray<u8, IxDyn>> {
     let seqs = seqs.as_array();
     let out = kshuffle::k_shuffle(seqs, k, seed, alphabet_size, alphabet_bytes);
     out.into_pyarray(py)
@@ -141,7 +142,8 @@ fn _ragged_select<'py>(
     Ok((s.into_pyarray(py), e.into_pyarray(py)))
 }
 
-type RaggedConcatResult<'py> = PyResult<(&'py PyArray<u8, Ix1>, &'py PyArray<i64, Ix1>)>;
+type RaggedConcatResult<'py> =
+    PyResult<(Bound<'py, PyArray<u8, Ix1>>, Bound<'py, PyArray<i64, Ix1>>)>;
 
 /// Concatenate N ragged arrays along their ragged axis.
 ///
@@ -161,8 +163,8 @@ type RaggedConcatResult<'py> = PyResult<(&'py PyArray<u8, Ix1>, &'py PyArray<i64
 #[pyfunction]
 fn _ragged_concat<'py>(
     py: Python<'py>,
-    data_list: &'py PyList,
-    offsets_list: &'py PyList,
+    data_list: &Bound<'py, PyList>,
+    offsets_list: &Bound<'py, PyList>,
     elem: usize,
 ) -> RaggedConcatResult<'py> {
     // Extract contiguous u8 slices from each data array.

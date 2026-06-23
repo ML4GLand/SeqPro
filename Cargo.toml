@@ -11,15 +11,15 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 anyhow = "1.0.99"
-ndarray = { version = "0.15.6", features = ["rayon"] }
-numpy = "0.20.0"
+ndarray = { version = "0.17", features = ["rayon"] }
+numpy = "0.28.0"
 rand = { version = "0.8.5", features = ["small_rng"] }
 rayon = "1.11.0"
 thiserror = "1.0.69"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
 [dependencies.pyo3]
-version = "0.20"
+version = "0.28"
 features = ["abi3-py39"]
 
 [dev-dependencies]

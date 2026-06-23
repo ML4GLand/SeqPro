@@ -200,6 +200,9 @@ use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2}
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
+type TranslateDropResult<'py> = PyResult<(Bound<'py, PyArray1<u8>>, Bound<'py, PyArray1<i64>>)>;
+type TranslateOheDropResult<'py> = PyResult<(Bound<'py, PyArray2<u8>>, Bound<'py, PyArray1<i64>>)>;
+
 /// Translate a flat nucleotide buffer (length multiple of `codon_size`) to a
 /// flat AA buffer of length `buf.len()/codon_size`.
 #[pyfunction]
@@ -212,7 +215,7 @@ pub fn _translate_bytes<'py>(
     keys: Option<PyReadonlyArray1<'py, u8>>,
     values: Option<PyReadonlyArray1<'py, u8>>,
     marker: u8,
-) -> PyResult<&'py PyArray1<u8>> {
+) -> PyResult<Bound<'py, PyArray1<u8>>> {
     let buf = buf.as_slice()?;
     if codon_size == 0 || buf.len() % codon_size != 0 {
         return Err(PyValueError::new_err(
@@ -257,7 +260,7 @@ pub fn _translate_stop_ends<'py>(
     starts: PyReadonlyArray1<'py, i64>,
     full_ends: PyReadonlyArray1<'py, i64>,
     stop_char: u8,
-) -> PyResult<&'py PyArray1<i64>> {
+) -> PyResult<Bound<'py, PyArray1<i64>>> {
     let data = data.as_slice()?;
     let starts = starts.as_slice()?;
     let full_ends = full_ends.as_slice()?;
@@ -286,7 +289,7 @@ pub fn _translate_drop<'py>(
     codons: PyReadonlyArray2<'py, u8>,
     offsets: PyReadonlyArray1<'py, i64>,
     valid_upper: PyReadonlyArray1<'py, u8>,
-) -> PyResult<(&'py PyArray1<u8>, &'py PyArray1<i64>)> {
+) -> TranslateDropResult<'py> {
     let translated = translated.as_slice()?;
     let codons = codons.as_array(); // (n_codons, codon_size)
     let offsets = offsets.as_slice()?;
@@ -356,7 +359,7 @@ pub fn _translate_ohe<'py>(
     values: Option<PyReadonlyArray1<'py, u8>>,
     aa_bytes: Option<PyReadonlyArray1<'py, u8>>,
     marker: u8,
-) -> PyResult<&'py PyArray2<u8>> {
+) -> PyResult<Bound<'py, PyArray2<u8>>> {
     let data = data.as_array(); // (total, n_nuc)
     let nuc = nuc_bytes.as_slice()?;
     let aa_bytes = aa_bytes.ok_or_else(|| PyValueError::new_err("aa_bytes required"))?;
@@ -427,7 +430,7 @@ pub fn _translate_ohe_drop<'py>(
     values: Option<PyReadonlyArray1<'py, u8>>,
     aa_bytes: Option<PyReadonlyArray1<'py, u8>>,
     marker: u8,
-) -> PyResult<(&'py PyArray2<u8>, &'py PyArray1<i64>)> {
+) -> TranslateOheDropResult<'py> {
     let data = data.as_array();
     let nuc = nuc_bytes.as_slice()?;
     let valid = valid_upper.as_slice()?;
