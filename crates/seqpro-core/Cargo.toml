@@ -2,6 +2,12 @@
 name = "seqpro-core"
 version = "0.1.0"
 edition = "2021"
+description = "pyo3-free Rust kernels for seqpro's ragged (offsets+data) sequence arrays."
+license = "MIT"
+repository = "https://github.com/ML4GLand/SeqPro"
+readme = false
+keywords = ["bioinformatics", "genomics", "ragged", "sequences"]
+categories = ["science", "data-structures"]
 
 [lib]
 name = "seqpro_core"
