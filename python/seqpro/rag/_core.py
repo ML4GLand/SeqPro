@@ -434,6 +434,19 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def __getitem__(
         self, where: Any
     ) -> "NDArray[Any] | bytes | dict[str, Any] | Ragged[Any]":
+        result = self._getitem(where)
+        # Preserve the concrete subclass for positional (structural) results.
+        # A string key is field extraction -> keep the bare field as base Ragged.
+        # Non-Ragged results (dict / bytes / ndarray / scalar) pass through.
+        if (
+            type(self) is not Ragged
+            and not isinstance(where, str)
+            and isinstance(result, Ragged)
+        ):
+            return self._with_layout(result._layout)
+        return result
+
+    def _getitem(self, where: Any) -> Any:
         # np.newaxis / None: insert a size-1 leading axis.
         # e.g. shape (batch, None)[None] -> (1, batch, None)
         if where is None:
