@@ -1,9 +1,9 @@
 """Flat-buffer operations on :class:`Ragged` arrays.
 
-These operate directly on the ``(data, offsets)`` representation with Numba
-kernels instead of going through awkward-array ops, which is the hot path for
-per-batch transforms (e.g. reverse-complementing negative-strand entries) in
-downstream loaders.
+These operate directly on the ``(data, offsets)`` representation using Rust
+kernels (via the compiled ``seqpro.seqpro`` extension) instead of going
+through awkward-array ops, which is the hot path for per-batch transforms
+(e.g. reverse-complementing negative-strand entries) in downstream loaders.
 """
 
 from __future__ import annotations

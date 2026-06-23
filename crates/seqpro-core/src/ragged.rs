@@ -86,6 +86,9 @@ pub fn reverse_complement_inplace(
             comp_lut.len()
         ));
     }
+    if offsets.is_empty() {
+        return Err("offsets must have at least one entry".into());
+    }
     let n = offsets.len() - 1;
     if mask.len() != n {
         return Err(format!("mask has {} entries, expected {}", mask.len(), n));
