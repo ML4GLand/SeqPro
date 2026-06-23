@@ -1033,8 +1033,18 @@ dependencies = [
  "pyo3",
  "rand 0.8.5",
  "rayon",
+ "seqpro-core",
  "thiserror",
  "xxhash-rust",
+]
+
+[[package]]
+name = "seqpro-core"
+version = "0.1.0"
+dependencies = [
+ "ndarray",
+ "proptest",
+ "rayon",
 ]
 
 [[package]]
