@@ -1,3 +1,15 @@
+## 0.19.0 (2026-06-23)
+
+### Feat
+
+- **rag**: port reverse_complement to seqpro-core Rust; rag layer numba-free
+- **rag**: port to_padded to seqpro-core Rust, drop numba kernel
+
+### Refactor
+
+- **rag**: truthful _ops docstring; guard reverse_complement_inplace empty offsets
+- **rust**: extract pyo3-free seqpro-core crate owning the Ragged layout
+
 ## 0.18.0 (2026-06-23)
 
 ### Feat
