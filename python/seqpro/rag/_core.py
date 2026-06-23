@@ -75,6 +75,15 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             validate_layout(data)
         self._layout = data
 
+    def _with_layout(self, layout: Any) -> "Ragged[Any]":
+        """Reconstruct a same-kind container around ``layout``, preserving the
+        concrete subclass. Bypasses ``__init__`` (subclasses carry no state beyond
+        ``_layout``; see the subclassing contract). Used by structural transforms
+        so a ``Ragged`` subclass survives slicing/reshape/squeeze/to_packed."""
+        obj = object.__new__(type(self))
+        obj._layout = layout
+        return obj
+
     @property
     def _is_record(self) -> bool:
         return isinstance(self._layout, RecordLayout)
@@ -425,6 +434,19 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def __getitem__(
         self, where: Any
     ) -> "NDArray[Any] | bytes | dict[str, Any] | Ragged[Any]":
+        result = self._getitem(where)
+        # Preserve the concrete subclass for positional (structural) results.
+        # A string key is field extraction -> keep the bare field as base Ragged.
+        # Non-Ragged results (dict / bytes / ndarray / scalar) pass through.
+        if (
+            type(self) is not Ragged
+            and not isinstance(where, str)
+            and isinstance(result, Ragged)
+        ):
+            return self._with_layout(result._layout)
+        return result
+
+    def _getitem(self, where: Any) -> Any:
         # np.newaxis / None: insert a size-1 leading axis.
         # e.g. shape (batch, None)[None] -> (1, batch, None)
         if where is None:
@@ -1173,6 +1195,14 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def squeeze(
         self, axis: int | tuple[int, ...] | None = None
     ) -> "Ragged[Any] | NDArray[Any]":
+        result = self._squeeze_impl(axis)
+        if type(self) is not Ragged and isinstance(result, Ragged):
+            return self._with_layout(result._layout)
+        return result
+
+    def _squeeze_impl(
+        self, axis: int | tuple[int, ...] | None = None
+    ) -> "Ragged[Any] | NDArray[Any]":
         if isinstance(self._layout, RecordLayout):
             return Ragged.from_fields(
                 cast(
@@ -1221,6 +1251,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         )
 
     def reshape(self, *shape: int | None) -> "Ragged[Any]":
+        result = self._reshape_impl(*shape)
+        if type(self) is not Ragged and isinstance(result, Ragged):
+            return self._with_layout(result._layout)
+        return result
+
+    def _reshape_impl(self, *shape: int | None) -> "Ragged[Any]":
         if isinstance(self._layout, RecordLayout):
             return Ragged.from_fields(
                 {f: Ragged(fl).reshape(*shape) for f, fl in self._layout.fields.items()}
@@ -1281,6 +1317,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return raw.reshape(reshape_arg)
 
     def to_packed(self, *, copy: bool = True) -> "Ragged[Any]":
+        result = self._to_packed_impl(copy=copy)
+        if type(self) is not Ragged and isinstance(result, Ragged):
+            return self._with_layout(result._layout)
+        return result
+
+    def _to_packed_impl(self, *, copy: bool = True) -> "Ragged[Any]":
         from ._ops import _pack_parts
 
         if isinstance(self._layout, RecordLayout):
