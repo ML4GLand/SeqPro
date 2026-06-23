@@ -9,7 +9,9 @@
 # conditions below. Re-apply the workflow_call inputs (`dry_run`), delete
 # the `on.workflow_run` block, remove all `if: ${{ github.event_name ... }}`
 # guards, and wrap the `uv publish` step with the dry_run gate before
-# committing.
+# committing. Also re-add the hand-written `crates-io` job at the bottom
+# (maturin does not generate it) — it publishes the pyo3-free seqpro-core
+# crate to crates.io on a version bump.
 name: Publish
 
 on:
@@ -268,3 +270,47 @@ jobs:
             echo
             ls -1 wheels-*/* | sed 's/^/- /'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Publish the pyo3-free seqpro-core crate to crates.io. Bump-detected and
+  # idempotent: it reads the version from crates/seqpro-core/Cargo.toml and
+  # publishes only when that version is not already on crates.io, so an
+  # unchanged version is a no-op (success), and bumping the crate's version is
+  # what triggers a release. Independent of the Python wheel/PyPI publish above.
+  crates-io:
+    name: Publish seqpro-core to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Detect seqpro-core version and whether it is already published
+        id: ver
+        run: |
+          version=$(grep -m1 '^version' crates/seqpro-core/Cargo.toml \
+            | sed -E 's/version *= *"([^"]+)".*/\1/')
+          if [ -z "$version" ]; then
+            echo "::error::could not read seqpro-core version from crates/seqpro-core/Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # crates.io requires a descriptive User-Agent or it returns 403.
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'User-Agent: seqpro-release-pipeline (https://github.com/ML4GLand/SeqPro)' \
+            "https://crates.io/api/v1/crates/seqpro-core/$version")
+          if [ "$code" = "200" ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "seqpro-core $version is already on crates.io — no bump detected, skipping." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "seqpro-core $version not found on crates.io (HTTP $code) — will publish." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Dry-run publish
+        if: inputs.dry_run == true && steps.ver.outputs.published == 'false'
+        run: cargo publish -p seqpro-core --dry-run
+      - name: Publish to crates.io
+        if: inputs.dry_run == false && steps.ver.outputs.published == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO }}
+        run: cargo publish -p seqpro-core
