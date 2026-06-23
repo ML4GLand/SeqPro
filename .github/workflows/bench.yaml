@@ -30,7 +30,7 @@ jobs:
           environments: bench
           locked: true
       - name: Build extension
-        run: pixi run -e bench maturin develop --uv
+        run: pixi run -e bench maturin develop
       - name: Run benchmarks
         uses: CodSpeedHQ/action@v4
         with:

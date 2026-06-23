@@ -95,6 +95,10 @@ bench = "pytest tests/test_bench_tokenize.py --codspeed"
 rag-gate = "python benchmarks/bench_ragged_backends.py"
 
 [feature.bench.dependencies]
+# pip is required so `maturin develop` can install the editable build into
+# the bench env. (`--uv` instead trips a uv installer bug on conda-managed
+# transitive deps: "Installed distribution could not be found: ncls".)
+pip = "*"
 marimo = ">=0.23.5,<0.24"
 seaborn = ">=0.13.2,<0.14"
 statsmodels = ">=0.14.6,<0.15"
