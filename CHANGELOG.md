@@ -1,3 +1,15 @@
+## 0.18.0 (2026-06-23)
+
+### Feat
+
+- **rag**: reshape/squeeze/to_packed preserve Ragged subclass
+- **rag**: __getitem__ preserves subclass on positional indexing
+- **rag**: add _with_layout subclass-preserving constructor
+
+### Fix
+
+- **rag**: non-tuple record indexing matches numpy (A[x] == A[(x,)])
+
 ## 0.17.0 (2026-06-23)
 
 ### Feat
