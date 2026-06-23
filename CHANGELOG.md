@@ -1,3 +1,101 @@
+## 0.17.0 (2026-06-23)
+
+### Feat
+
+- **rag**: concatenate() along ragged axis (Rust kernel)
+- **rag**: to_packed() on record and opaque-string-under-axis Ragged
+- wire rag-gate pixi task; record throughput gate outcome
+- string-conversion op cells for Ragged throughput gate
+- nested R=2 op cells for Ragged throughput gate
+- record (SoA) op cells for Ragged throughput gate
+- single-level op cells for Ragged throughput gate
+- harness core for rust-vs-awkward Ragged throughput gate
+- _ingest bridge for R=2 + string-under-axis (oracle interop)
+- nested record indexing + record-aware to_packed/to_padded/to_numpy
+- nested + string-under-axis record fields sharing full offsets list
+- R=2 lengths/squeeze/reshape
+- per-axis nested to_padded + rectangular to_numpy (R=2); trailing-dim support in to_padded
+- nested to_packed via nested_pack kernel
+- nested_pack Rust kernel + binding for two-level pack
+- per-group inner mask/int-array indexing via nested_gather
+- nested_gather Rust kernel + binding for per-group middle selection
+- per-group inner int/slice indexing (rag[:, k], rag[:, a:b])
+- R=2 tuple indexing + leaf access via peel chaining
+- R=2 outer-row indexing (lazy gather, peel to 1-level)
+- string-under-axis leaf + nested to_chars/to_strings
+- nested constructors from_offsets(list)/from_lengths(tuple) for R=2
+- validate R=2 nested ragged layouts; cap at R<=2
+- ingest/emit record layouts via awkward bridge (oracle interop)
+- record to_numpy/to_padded dicts; raise view/ufunc on records
+- record-aware to_packed (one shared packed offsets across fields)
+- per-field squeeze/reshape on record Ragged
+- record row-axis indexing (slice/mask -> record, int -> dict)
+- record field access (key/attr) and __setitem__ mutation
+- record-branch properties (data/dtype/offsets/shape/fields/state)
+- add Ragged.from_fields record constructor and rag.zip alias
+- add RecordLayout value object and validation arm
+- add zero-copy to_chars/to_strings between opaque-string and char Ragged
+- disambiguate opaque-string vs char layout by presence of None in shape
+- report np.dtype('S') for opaque-string Ragged (string/char duality)
+- **rust**: ragged_validate and ragged_select kernels
+- **rag**: awkward ingestion and to_ak shim
+- **rag**: to_numpy, to_packed, to_padded
+- **rag**: squeeze and reshape on regular dims
+- **rag**: element-wise ufunc interop
+- **rag**: __getitem__ indexing and slicing
+- **rag**: state predicates and view
+- **rag**: Ragged constructors and core properties
+- **rag**: RaggedLayout value object + validation
+- **translate**: self-contained Rust OHE<->AA path with native drop
+- **translate**: route truncate_stop through Rust
+- **translate**: route unknown=drop compaction through Rust
+- **translate**: route ragged bytes pad path through Rust
+- **translate**: route dense pad path through Rust
+- **rust**: add codon-stride translate kernels
+- **tokenize**: route ragged path through Rust, drop Numba gather
+- **tokenize**: route dense path through Rust _tokenize
+- **rust**: add tokenize LUT gather kernel
+
+### Fix
+
+- **rag**: to_ak() on multi-leading-axis record Ragged
+- **rag**: _core.Ragged/tokenize fixes found via genvarformer audit
+- **rag**: add __len__, np.newaxis support, and element-wise fancy indexing to _core.Ragged
+- **rag**: _ops.to_padded record detection works for both _array and _core backends
+- **rag**: _core.to_numpy returns dict for records (restore designed contract); update _array-era test
+- **rag**: correct _core getitem tuple routing for rag_dim==1 found via SeqPro own-suite audit
+- **rag**: port _ops + _core to_packed/is_rag_dtype/to_numpy to _core object model
+- **rag**: precise _core getitem routing — _core contract + genoray parity both green
+- **rag**: repair _core.Ragged getitem regressions (string leaf, to_strings, r2 int array)
+- **rag**: match _array is_base semantics for non-ndarray base
+- **rag**: _core.Ragged fixes found via genoray audit
+- **bench**: time to_packed on unpacked input so single-level pack compares equal work
+- forward --repeats CLI flag into time_callable
+- R=2 is_contiguous checks all offset levels; guard string-under-axis to_packed/to_numpy
+- panic-safety in nested_pack (checked_mul, elem>0, o0-range guard)
+- reject negative inner-slice bounds in rag[:, a:b]
+- -O-safe record guards on is_string/to_chars/to_strings; note latent S4 over-acceptance
+- raise TypeError on np.asarray of a record Ragged (-O-safe, was a bare assert)
+- **rag**: reject mismatched boolean masks and bounds-check ragged_select
+- **translate**: handle empty dense input in unknown=drop path
+
+### Refactor
+
+- **rag**: delete awkward _array backend; relocate interop to _ak_interop
+- resolve clippy findings for -D warnings
+- **rag**: route index/validate hot paths through Rust
+- **rag**: use NDArrayOperatorsMixin for operator dunders
+- **tokenize**: restore np.take/Numba path; Rust port regressed vs baseline
+
+### Perf
+
+- validate pack output size up-front; test parallel pack path
+- Rust single-level pack kernel for to_packed (parallel gather)
+- opt-in Ragged validation (default off) + slice indexing fast-path
+- drop redundant per-field copy in record to_packed; align record is_base with single-level one-indirection rule
+- **translate**: optimize LUT gather kernel (validity table + coarse chunking)
+- **translate**: add rayon parallel path for large inputs
+
 ## 0.16.0 (2026-06-14)
 
 ### Feat
