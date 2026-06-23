@@ -75,6 +75,15 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             validate_layout(data)
         self._layout = data
 
+    def _with_layout(self, layout: Any) -> "Ragged[Any]":
+        """Reconstruct a same-kind container around ``layout``, preserving the
+        concrete subclass. Bypasses ``__init__`` (subclasses carry no state beyond
+        ``_layout``; see the subclassing contract). Used by structural transforms
+        so a ``Ragged`` subclass survives slicing/reshape/squeeze/to_packed."""
+        obj = object.__new__(type(self))
+        obj._layout = layout
+        return obj
+
     @property
     def _is_record(self) -> bool:
         return isinstance(self._layout, RecordLayout)
