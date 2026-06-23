@@ -1184,6 +1184,14 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def squeeze(
         self, axis: int | tuple[int, ...] | None = None
     ) -> "Ragged[Any] | NDArray[Any]":
+        result = self._squeeze_impl(axis)
+        if type(self) is not Ragged and isinstance(result, Ragged):
+            return self._with_layout(result._layout)
+        return result
+
+    def _squeeze_impl(
+        self, axis: int | tuple[int, ...] | None = None
+    ) -> "Ragged[Any] | NDArray[Any]":
         if isinstance(self._layout, RecordLayout):
             return Ragged.from_fields(
                 cast(
@@ -1232,6 +1240,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         )
 
     def reshape(self, *shape: int | None) -> "Ragged[Any]":
+        result = self._reshape_impl(*shape)
+        if type(self) is not Ragged and isinstance(result, Ragged):
+            return self._with_layout(result._layout)
+        return result
+
+    def _reshape_impl(self, *shape: int | None) -> "Ragged[Any]":
         if isinstance(self._layout, RecordLayout):
             return Ragged.from_fields(
                 {f: Ragged(fl).reshape(*shape) for f, fl in self._layout.fields.items()}
@@ -1292,6 +1306,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return raw.reshape(reshape_arg)
 
     def to_packed(self, *, copy: bool = True) -> "Ragged[Any]":
+        result = self._to_packed_impl(copy=copy)
+        if type(self) is not Ragged and isinstance(result, Ragged):
+            return self._with_layout(result._layout)
+        return result
+
+    def _to_packed_impl(self, *, copy: bool = True) -> "Ragged[Any]":
         from ._ops import _pack_parts
 
         if isinstance(self._layout, RecordLayout):

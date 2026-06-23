@@ -44,3 +44,16 @@ def test_getitem_positional_preserves_subclass():
 def test_getitem_field_extraction_stays_base():
     sub = _Sub(_record()._layout)
     assert type(sub["a"]) is Ragged  # string key -> bare field, base Ragged
+
+
+def test_reshape_squeeze_to_packed_preserve_subclass():
+    sub = _Sub(_record()._layout)  # shape (3, None) record
+    assert type(sub.reshape(1, 3, None)) is _Sub
+    assert type(sub.reshape(1, 3, None).squeeze(0)) is _Sub
+    assert type(sub.to_packed()) is _Sub
+
+
+def test_reshape_squeeze_to_packed_base_unchanged():
+    base = _record()
+    assert type(base.reshape(1, 3, None)) is Ragged
+    assert type(base.to_packed()) is Ragged
