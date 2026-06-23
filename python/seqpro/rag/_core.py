@@ -813,7 +813,18 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             except KeyError:
                 raise KeyError(where)
             return Ragged(field)  # field.offsets[0] is the shared object (zero-copy)
-        return self._getitem_record_rows(where)  # Task 8
+        # numpy contract: a non-tuple key is treated as a 1-tuple (A[x] == A[(x,)]).
+        # For a single-ragged-axis record with >1 leading fixed axis, route through
+        # the multidim peel path directly (under the SAME guard it requires, so we
+        # never re-dispatch through __getitem__ and risk recursion). Records that are
+        # not single-None fall through to the flat record-rows path unchanged.
+        if (
+            not isinstance(where, tuple)
+            and self.rag_dim > 1
+            and rec.shape.count(None) == 1
+        ):
+            return self._getitem_tuple_multidim((where,))
+        return self._getitem_record_rows(where)
 
     def _gather_indices(
         self, where: Any, starts: "NDArray[Any]", stops: "NDArray[Any]"
