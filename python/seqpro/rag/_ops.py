@@ -318,55 +318,10 @@ def to_packed(rag: Any, *, copy: bool = True) -> Any:
     """
     # _core.Ragged has a native to_packed() that handles all layout cases:
     # record, R=2 nested, opaque-string, and flat.  Delegate to it directly.
-    # _array.Ragged's to_packed() calls this function, so we must NOT call
-    # rag.to_packed() for _array.Ragged (infinite recursion); instead fall
-    # back to the _array-native implementation for that backend.
     if isinstance(rag, Ragged):
         return rag.to_packed(copy=copy)
 
-    # ---- _array.Ragged fallback (legacy backend) --------------------------------
-    try:
-        from ._array import Ragged as _ArrayRagged  # type: ignore[attr-defined]
-    except ImportError as exc:
-        raise TypeError(f"Unsupported Ragged type: {type(rag)}") from exc
-
-    import awkward as ak
-
-    rag._ensure_parts()  # type: ignore[union-attr]
-    if isinstance(rag._parts, dict):  # type: ignore[union-attr]
-        offsets = rag.offsets
-        if not copy:
-            is_packed = (
-                offsets.ndim == 1
-                and (offsets.size == 0 or offsets[0] == 0)
-                and all(
-                    p.data.flags.c_contiguous and int(offsets[-1]) == p.data.shape[0]
-                    for p in rag._parts.values()  # type: ignore[union-attr]
-                )
-            )
-            if is_packed:
-                return rag
-            raise ValueError(
-                "to_packed(copy=False) requires already-packed input; "
-                "got an unpacked record array."
-            )
-        fields: dict[str, Any] = {}
-        for name, p in rag._parts.items():  # type: ignore[union-attr]
-            packed_data, packed_offsets = _pack_parts(
-                p.data, p.shape, offsets, copy=True
-            )
-            fields[name] = _ArrayRagged.from_offsets(
-                packed_data, p.shape, packed_offsets
-            )
-        return _ArrayRagged(ak.zip(fields))
-
-    parts = rag._parts  # type: ignore[union-attr]
-    packed_data, packed_offsets = _pack_parts(
-        parts.data, parts.shape, parts.offsets, copy
-    )
-    if packed_data is parts.data and packed_offsets is parts.offsets:
-        return rag  # copy=False passthrough
-    return _ArrayRagged.from_offsets(packed_data, parts.shape, packed_offsets)
+    raise TypeError(f"Unsupported Ragged type: {type(rag)}")
 
 
 @nb.njit(parallel=True, nogil=True, cache=True)
@@ -429,13 +384,7 @@ def to_padded(
         Dense array of dtype ``rag.data.dtype`` and shape
         ``(*rag.shape[:rag_dim], out_len)``.
     """
-    # Backend-agnostic record detection: _core.Ragged exposes _is_record; _array.Ragged
-    # delegates __getattr__ to ak.Array so that attr raises — fall back to ak.fields().
-    _is_rec = getattr(rag, "_is_record", None)
-    if _is_rec is None:
-        import awkward as _ak
-
-        _is_rec = bool(_ak.fields(rag))
+    _is_rec = rag._is_record
     if _is_rec:
         raise NotImplementedError(
             "to_padded is not defined on record-layout Ragged arrays; "

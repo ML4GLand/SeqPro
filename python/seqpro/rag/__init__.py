@@ -1,6 +1,6 @@
 from typing import Any
 
-from ._array import DTYPE_co, RDTYPE_co
+from ._ak_interop import DTYPE_co, RDTYPE_co
 from ._core import Ragged, Ragged as _CoreRagged, is_rag_dtype
 from ._ops import concatenate, reverse_complement, to_packed, to_padded
 from ._utils import OFFSET_TYPE, lengths_to_offsets

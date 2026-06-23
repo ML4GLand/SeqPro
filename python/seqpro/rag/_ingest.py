@@ -16,7 +16,9 @@ from awkward.contents import (
 )
 from awkward.index import Index
 
-from ._array import unbox  # proven awkward extractor (RagParts: data, shape, offsets)
+from ._ak_interop import (
+    unbox,
+)  # proven awkward extractor (RagParts: data, shape, offsets)
 from ._layout import RaggedLayout, RecordLayout
 from ._utils import OFFSET_TYPE
 
@@ -148,7 +150,7 @@ def _wrap_list(off: Any, content: Any) -> Any:
 
 
 def to_ak(rag: Any) -> ak.Array:
-    from ._array import _parts_to_content, RagParts
+    from ._ak_interop import _parts_to_content, RagParts
     from ._layout import RecordLayout
 
     if isinstance(rag._layout, RecordLayout):

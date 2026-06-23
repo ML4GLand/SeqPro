@@ -1,12 +1,9 @@
 import awkward as ak
 import numpy as np
 import pytest
-from hypothesis import given, strategies as st
-from hypothesis.extra.numpy import arrays
 from seqpro.rag._core import Ragged
 from seqpro.rag._layout import RaggedLayout, RecordLayout, validate_layout
 from seqpro.rag._utils import lengths_to_offsets
-from seqpro.rag._array import Ragged as AkRagged
 
 
 def _two_field_record():
@@ -372,49 +369,8 @@ def test_record_to_ak_roundtrips():
 
 
 # ---------------------------------------------------------------------------
-# Task 13: Differential Hypothesis suite + char-record alignment
+# Task 13: char-record alignment
 # ---------------------------------------------------------------------------
-
-
-@st.composite
-def _record_inputs(draw):
-    n = draw(st.integers(1, 6))
-    lengths = draw(st.lists(st.integers(0, 5), min_size=n, max_size=n).map(np.array))
-    total = int(lengths.sum())
-    a = draw(arrays(np.int64, (total,), elements=st.integers(-50, 50)))
-    b = draw(arrays(np.float64, (total,), elements=st.floats(-50, 50, allow_nan=False)))
-    return lengths.astype(np.uint32), a, b
-
-
-@given(_record_inputs())
-def test_diff_record_properties(inp):
-    lengths, a, b = inp
-    new = Ragged.from_fields(
-        {"a": Ragged.from_lengths(a, lengths), "b": Ragged.from_lengths(b, lengths)}
-    )
-    old = AkRagged(
-        ak.zip({"a": ak.unflatten(a, lengths), "b": ak.unflatten(b, lengths)})
-    )
-    np.testing.assert_array_equal(new.offsets, old.offsets)
-    assert new.shape == old.shape
-    assert new.fields == list(ak.fields(old))
-    np.testing.assert_array_equal(new["a"].data, old["a"].data)
-    np.testing.assert_array_equal(new["b"].data, old["b"].data)
-
-
-@given(_record_inputs())
-def test_diff_record_to_packed_after_slice(inp):
-    lengths, a, b = inp
-    if len(lengths) < 2:
-        return
-    new = Ragged.from_fields(
-        {"a": Ragged.from_lengths(a, lengths), "b": Ragged.from_lengths(b, lengths)}
-    )[::-1].to_packed()
-    old = AkRagged(
-        ak.zip({"a": ak.unflatten(a, lengths), "b": ak.unflatten(b, lengths)})
-    )[::-1].to_packed()
-    np.testing.assert_array_equal(new["a"].data, old["a"].data)
-    np.testing.assert_array_equal(new.offsets, old.offsets)
 
 
 def test_char_field_record_aligns_on_length():

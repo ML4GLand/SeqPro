@@ -19,19 +19,12 @@ def _where_is_bool(where: Any) -> bool:
 
 
 def is_rag_dtype(rag: Any, dtype: Any) -> bool:
-    """Backend-agnostic dtype check for Ragged arrays (works with both _core and _array backends).
+    """Dtype check for _core.Ragged arrays.
 
     Returns True if *rag* is a Ragged with a dtype that is a numpy subtype of *dtype*.
     Always returns False for record-layout Rageds when a primitive dtype is queried.
     """
-    # Lazy import to avoid circular imports; _array.Ragged is also a valid backend.
-    try:
-        from ._array import Ragged as _ArrayRagged  # type: ignore[attr-defined]
-
-        _ragged_types: tuple[type, ...] = (Ragged, _ArrayRagged)
-    except Exception:
-        _ragged_types = (Ragged,)
-    if not isinstance(rag, _ragged_types):
+    if not isinstance(rag, Ragged):
         return False
     rag_dtype = rag.dtype
     if np.issubdtype(rag_dtype, np.void):  # structured dtype → record layout
