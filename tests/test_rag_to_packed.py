@@ -41,19 +41,19 @@ class TestToPackedFlat:
         assert _to_list(out) == ak.to_list(ak.to_packed(rag.to_ak()))
 
     def test_unpacked_slice_rebases(self):
-        # Slicing a _core.Ragged yields a lazy 2-D (starts, stops) offset gather
-        # over the untrimmed parent buffer (unpacked: not is_contiguous).
-        # to_packed must rebase it into a fresh zero-based, contiguous 1-D buffer.
+        # The contiguous-slice fast path now returns a zero-copy, already-contiguous
+        # result for simple (R=1, non-step) slices.  to_packed must still work
+        # correctly on the result: produce a 1-D, zero-based, contiguous output
+        # whose content matches the original slice.
         full = Ragged.from_lengths(np.arange(9, dtype=np.float64), np.array([3, 2, 4]))
         rag = full[1:]
-        assert rag.offsets.ndim == 2  # 2-D (starts, stops) lazy gather -> unpacked
-        assert not rag.is_contiguous
+        # Fast path: slicing now returns a contiguous view, not an unpacked gather.
+        assert rag.is_contiguous
         out = to_packed(rag)
         assert out.offsets.ndim == 1
         assert out.offsets[0] == 0
         assert out.is_contiguous
         assert out.data.shape[0] == 6  # content trimmed to packed extent
-        assert not np.shares_memory(out.data, rag.data)  # rebased into fresh buffer
         assert _to_list(out) == _to_list(rag)
         assert _to_list(out) == ak.to_list(ak.to_packed(rag.to_ak()))
 

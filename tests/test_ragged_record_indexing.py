@@ -25,18 +25,27 @@ def _multidim_record():
     ids=["int", "slice", "full_slice", "mask", "int_array"],
 )
 def test_nontuple_equals_one_tuple_multidim_record(key):
-    """numpy contract: rec[k] must equal rec[(k,)] for a multi-leading-axis record."""
+    """numpy contract: rec[k] must equal rec[(k,)] for a multi-leading-axis record.
+
+    Note: rec[slice] now returns a contiguous result (1-D offsets) while rec[(slice,)]
+    goes through the tuple/multidim path (2-D gather offsets). They are semantically
+    equivalent; we compare packed content not raw internal offsets.
+    """
     rec = _multidim_record()
     got = rec[key]
     want = rec[(key,)]
     assert type(got) is type(want), (type(got), type(want))
     if isinstance(want, Ragged):
         assert got.shape == want.shape, (got.shape, want.shape)
+        # Compare packed (contiguous) representations to avoid internal offset format differences.
+        got_packed = got.to_packed()
+        want_packed = want.to_packed()
         np.testing.assert_array_equal(
-            np.asarray(got["start"].data), np.asarray(want["start"].data)
+            np.asarray(got_packed["start"].data), np.asarray(want_packed["start"].data)
         )
         np.testing.assert_array_equal(
-            np.asarray(got["start"].offsets[0]), np.asarray(want["start"].offsets[0])
+            np.asarray(got_packed["start"].offsets[0]),
+            np.asarray(want_packed["start"].offsets[0]),
         )
 
 

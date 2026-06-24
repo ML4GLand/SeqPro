@@ -116,9 +116,23 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         if shape.count(None) >= 3:
             raise NotImplementedError("nested raggedness with R >= 3 is unsupported")
         off_list = offsets if isinstance(offsets, list) else [offsets]
-        off_list = [np.ascontiguousarray(o, dtype=OFFSET_TYPE) for o in off_list]
+        off_list = [
+            o
+            if (
+                isinstance(o, np.ndarray)
+                and o.dtype == OFFSET_TYPE
+                and o.flags.c_contiguous
+            )
+            else np.ascontiguousarray(o, dtype=OFFSET_TYPE)
+            for o in off_list
+        ]
         if str_offsets is not None:
-            str_offsets = np.ascontiguousarray(str_offsets, dtype=OFFSET_TYPE)
+            if not (
+                isinstance(str_offsets, np.ndarray)
+                and str_offsets.dtype == OFFSET_TYPE
+                and str_offsets.flags.c_contiguous
+            ):
+                str_offsets = np.ascontiguousarray(str_offsets, dtype=OFFSET_TYPE)
             return Ragged(
                 RaggedLayout(
                     data=data, offsets=off_list, shape=shape, str_offsets=str_offsets
@@ -127,21 +141,20 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             )
         if shape.count(None) == 0 and data.dtype.kind != "S":
             raise ValueError("shape must have a None ragged dimension")
-        # Eager data-size check for the R=1 / 1-D offsets path (parity with _array backend).
-        n_none = shape.count(None)
-        if n_none == 1 and len(off_list) == 1 and off_list[0].ndim == 1:
-            rag_dim = shape.index(None)
-            trailing = shape[rag_dim + 1 :]
-            # trailing cannot contain None here (n_none == 1 and rag_dim is the only None).
-            trailing_ints: list[int] = [d for d in trailing if d is not None]
-            trailing_size = int(np.prod(trailing_ints)) if trailing_ints else 1
-            # Skip the check when the offsets array is empty (no segments → empty Ragged).
-            if off_list[0].size > 0:
-                expected_size = int(off_list[0][-1]) * trailing_size
-                if data.size != expected_size:
-                    raise ValueError(
-                        f"Data size {data.size} does not match size implied by shape and contiguous offsets: {expected_size}"
-                    )
+        if validate:
+            # eager data-size check (only when validating)
+            n_none = shape.count(None)
+            if n_none == 1 and len(off_list) == 1 and off_list[0].ndim == 1:
+                rag_dim = shape.index(None)
+                trailing = shape[rag_dim + 1 :]
+                trailing_ints: list[int] = [d for d in trailing if d is not None]
+                trailing_size = int(np.prod(trailing_ints)) if trailing_ints else 1
+                if off_list[0].size > 0:
+                    expected_size = int(off_list[0][-1]) * trailing_size
+                    if data.size != expected_size:
+                        raise ValueError(
+                            f"Data size {data.size} does not match size implied by shape and contiguous offsets: {expected_size}"
+                        )
         return Ragged(_build_layout(data, shape, off_list), validate=validate)
 
     @staticmethod
@@ -434,10 +447,27 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def __getitem__(
         self, where: Any
     ) -> "NDArray[Any] | bytes | dict[str, Any] | Ragged[Any]":
+        # Fast path: a plain step-1 slice of a contiguous array becomes the
+        # already-packed slice (narrowed buffer + rebased (N+1,) offsets) with no
+        # gather, no (2,N) drift, no copy. Any other index uses the path below.
+        if (
+            isinstance(where, slice)
+            and self._layout.shape
+            and self._layout.shape[0] is not None
+            and self.is_contiguous
+        ):
+            start, stop, step = where.indices(self._layout.shape[0])
+            if step == 1:
+                if stop < start:
+                    stop = start  # numpy empty-slice semantics (e.g. a[5:2])
+                fast = self._slice_contiguous(start, stop)
+                if fast is not None:
+                    return (
+                        self._with_layout(fast._layout)
+                        if type(self) is not Ragged
+                        else fast
+                    )
         result = self._getitem(where)
-        # Preserve the concrete subclass for positional (structural) results.
-        # A string key is field extraction -> keep the bare field as base Ragged.
-        # Non-Ragged results (dict / bytes / ndarray / scalar) pass through.
         if (
             type(self) is not Ragged
             and not isinstance(where, str)
@@ -445,6 +475,147 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         ):
             return self._with_layout(result._layout)
         return result
+
+    def _outer_n_inner(self) -> int:
+        """Product of the fixed dims between the outer axis and the first ragged
+        axis (1 when the outer axis is immediately followed by the ragged axis)."""
+        shape = self._layout.shape
+        rag_dim = shape.index(None)
+        inner = [d for d in shape[1:rag_dim] if d is not None]
+        return int(np.prod(np.array(inner, dtype=np.int64))) if inner else 1
+
+    def _slice_contiguous(self, start: int, stop: int) -> "Ragged[Any] | None":
+        """Build the already-packed result of a contiguous step-1 outer slice, or
+        None to fall back. Caller guarantees self.is_contiguous and shape[0] int."""
+        layout = self._layout
+        if isinstance(layout, RecordLayout):
+            return self._slice_contig_record(start, stop)
+        rl = self._rl
+        if rl.is_string:
+            return self._slice_contig_string(start, stop)
+        if rl.n_ragged == 2:
+            return self._slice_contig_r2(start, stop)
+        if rl.n_ragged == 1:
+            return self._slice_contig_r1(start, stop)
+        return None
+
+    def _slice_contig_r1(self, start: int, stop: int) -> "Ragged[Any]":
+        rl = self._rl
+        n_inner = self._outer_n_inner()
+        o0 = rl.offsets[0]
+        g0, g1 = start * n_inner, stop * n_inner
+        base = int(o0[g0])
+        new_off = o0[g0 : g1 + 1] - base  # contiguous (M+1,) int64
+        new_data = rl.data[base : int(o0[g1])]  # narrowed view
+        new_shape = (stop - start, *rl.shape[1:])
+        return Ragged(RaggedLayout(data=new_data, offsets=[new_off], shape=new_shape))
+
+    def _slice_contig_string(self, start: int, stop: int) -> "Ragged[Any]":
+        rl = self._rl
+        so = rl.str_offsets
+        assert so is not None  # _slice_contig_string is only called for string layouts
+        if rl.n_ragged == 0:
+            # flat string collection: shape (N,), no axis offsets; slice str_offsets
+            b0, b1 = int(so[start]), int(so[stop])
+            new_so = so[start : stop + 1] - b0
+            new_data = rl.data[b0:b1]
+            return Ragged(
+                RaggedLayout(
+                    data=new_data, offsets=[], shape=(stop - start,), str_offsets=new_so
+                )
+            )
+        # string-under-axis: O0 (outer -> variant) then str_offsets (variant -> byte)
+        n_inner = self._outer_n_inner()
+        o0 = rl.offsets[0]
+        g0, g1 = start * n_inner, stop * n_inner
+        v0, v1 = int(o0[g0]), int(o0[g1])
+        new_o0 = o0[g0 : g1 + 1] - v0
+        b0, b1 = int(so[v0]), int(so[v1])
+        new_so = so[v0 : v1 + 1] - b0
+        new_data = rl.data[b0:b1]
+        new_shape = (stop - start, *rl.shape[1:])
+        return Ragged(
+            RaggedLayout(
+                data=new_data, offsets=[new_o0], shape=new_shape, str_offsets=new_so
+            )
+        )
+
+    def _slice_contig_r2(self, start: int, stop: int) -> "Ragged[Any]":
+        rl = self._rl
+        n_inner = self._outer_n_inner()
+        o0, o1 = rl.offsets
+        g0, g1 = start * n_inner, stop * n_inner
+        m0, m1 = int(o0[g0]), int(o0[g1])  # middle-segment range
+        new_o0 = o0[g0 : g1 + 1] - m0
+        d0, d1 = int(o1[m0]), int(o1[m1])  # data range
+        new_o1 = o1[m0 : m1 + 1] - d0
+        new_data = rl.data[d0:d1]
+        new_shape = (stop - start, *rl.shape[1:])
+        return Ragged(
+            RaggedLayout(data=new_data, offsets=[new_o0, new_o1], shape=new_shape)
+        )
+
+    def _slice_contig_record(self, start: int, stop: int) -> "Ragged[Any] | None":
+        rec = self._layout
+        assert isinstance(rec, RecordLayout)
+        if len(rec.offsets) == 2:
+            return self._slice_contig_record_r2(start, stop)
+        n_inner = self._outer_n_inner()
+        o0 = rec.offsets[0]
+        g0, g1 = start * n_inner, stop * n_inner
+        v0, v1 = int(o0[g0]), int(o0[g1])
+        shared = [o0[g0 : g1 + 1] - v0]  # one shared (M+1,) object for all
+        new_fields: dict[str, RaggedLayout[Any]] = {}
+        for name, fl in rec.fields.items():
+            fld_tail = fl.shape[1:]
+            if fl.str_offsets is not None:
+                so = fl.str_offsets
+                b0, b1 = int(so[v0]), int(so[v1])
+                new_fields[name] = RaggedLayout(
+                    data=fl.data[b0:b1],
+                    offsets=shared,
+                    shape=(stop - start, *fld_tail),
+                    str_offsets=so[v0 : v1 + 1] - b0,
+                )
+            else:
+                new_fields[name] = RaggedLayout(
+                    data=fl.data[v0:v1],
+                    offsets=shared,
+                    shape=(stop - start, *fld_tail),
+                )
+        return Ragged(
+            RecordLayout(
+                offsets=shared, shape=(stop - start, *rec.shape[1:]), fields=new_fields
+            )
+        )
+
+    def _slice_contig_record_r2(self, start: int, stop: int) -> "Ragged[Any] | None":
+        rec = self._layout
+        assert isinstance(rec, RecordLayout)
+        if any(fl.str_offsets is not None for fl in rec.fields.values()):
+            return None  # string-under-axis R=2 record: fall back to gather path
+        n_inner = self._outer_n_inner()
+        o0, o1 = rec.offsets
+        g0, g1 = start * n_inner, stop * n_inner
+        m0, m1 = int(o0[g0]), int(o0[g1])
+        d0, d1 = int(o1[m0]), int(o1[m1])
+        shared = [o0[g0 : g1 + 1] - m0, o1[m0 : m1 + 1] - d0]
+        out_tail = rec.shape[
+            1:
+        ]  # preserve any fixed dim(s) between outer and first None
+        new_fields = {
+            name: RaggedLayout(
+                data=fl.data[d0:d1],
+                offsets=shared,
+                shape=(stop - start, *fl.shape[1:]),
+            )
+            for name, fl in rec.fields.items()
+        }
+        return Ragged(
+            RecordLayout(
+                offsets=shared, shape=(stop - start, *out_tail), fields=new_fields
+            )
+        )
 
     def _getitem(self, where: Any) -> Any:
         # np.newaxis / None: insert a size-1 leading axis.
@@ -1023,7 +1194,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             lo, hi = int(starts[where]), int(stops[where])
             out: dict[str, Any] = {}
             for name, fl in rec.fields.items():
-                row = fl.data[lo:hi]
+                if fl.str_offsets is not None:
+                    so = fl.str_offsets
+                    row = fl.data[int(so[lo]) : int(so[hi])]
+                else:
+                    row = fl.data[lo:hi]
                 out[name] = row
             return out
         sel_starts, sel_stops = self._row_gather(where)
@@ -1550,7 +1725,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return result
 
     def to_numpy(
-        self, allow_missing: bool = False
+        self, allow_missing: bool = False, *, validate: bool = True
     ) -> "NDArray[Any] | dict[str, NDArray[Any]]":
         if isinstance(self._layout, RecordLayout):
             # _core contract: return a dict of dense per-field arrays.
@@ -1558,7 +1733,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 field: cast(
                     "NDArray[Any]",
                     cast("Ragged[Any]", self[field]).to_numpy(
-                        allow_missing=allow_missing
+                        allow_missing=allow_missing, validate=validate
                     ),
                 )
                 for field in self._layout.fields
@@ -1573,10 +1748,15 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             o0, o1 = packed._layout.offsets  # canonical 1-D after pack
             grp_lens = np.diff(o0)
             mid_lens = np.diff(o1)
-            if grp_lens.size and not np.all(grp_lens == grp_lens[0]):
-                raise ValueError("cannot convert a jagged outer axis to a dense array")
-            if mid_lens.size and not np.all(mid_lens == mid_lens[0]):
-                raise ValueError("cannot convert a jagged inner axis to a dense array")
+            if validate:
+                if grp_lens.size and not np.all(grp_lens == grp_lens[0]):
+                    raise ValueError(
+                        "cannot convert a jagged outer axis to a dense array"
+                    )
+                if mid_lens.size and not np.all(mid_lens == mid_lens[0]):
+                    raise ValueError(
+                        "cannot convert a jagged inner axis to a dense array"
+                    )
             result = packed.to_padded(
                 np.zeros((), self.dtype)[()]
             )  # rectangular -> pad is identity (both dense)
@@ -1589,13 +1769,26 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 "to_numpy() on a string-under-axis Ragged is not supported in Spec C; "
                 "convert via .to_chars() first."
             )
-        lengths = self.lengths
-        if lengths.size and not np.all(lengths == lengths.flat[0]):
-            raise ValueError("cannot convert a jagged Ragged to a dense array")
-        packed = self if self.is_base else self.to_packed()
-        row_len = int(lengths.flat[0]) if lengths.size else 0
+        if validate:
+            lengths = self.lengths
+            if lengths.size and not np.all(lengths == lengths.flat[0]):
+                raise ValueError("cannot convert a jagged Ragged to a dense array")
+            packed = self if self.is_base else self.to_packed()
+            row_len = int(lengths.flat[0]) if lengths.size else 0
+        else:
+            # trust the caller: infer row_len from total // n_rows, no uniformity
+            # scan. numpy's reshape still rejects a total-size mismatch for free.
+            packed = self if self.is_base else self.to_packed()
+            leading_dims = [d for d in packed.shape[: packed.rag_dim]]
+            n_rows = (
+                int(np.prod(np.array(leading_dims, dtype=np.int64)))
+                if leading_dims
+                else 1
+            )
+            total = packed._rl.data.shape[0]
+            row_len = total // n_rows if n_rows else 0
         leading = packed.shape[: packed.rag_dim]
-        return packed._rl.data.reshape(  # pyrefly: ignore[no-matching-overload] -- leading dims before rag_dim are always int; numpy stub can't verify this
+        return packed._rl.data.reshape(  # pyrefly: ignore[no-matching-overload]
             *(leading or (-1,)), row_len, *packed._rl.data.shape[1:]
         )
 

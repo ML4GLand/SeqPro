@@ -245,7 +245,7 @@ def test_getitem_slice_returns_ragged():
     rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
     sub = rag[1:3]
     assert isinstance(sub, Ragged)
-    assert sub.offsets.ndim == 2  # (2, M) start/stop gather
+    assert sub.is_contiguous  # fast path returns contiguous (1-D offsets)
     np.testing.assert_array_equal(sub[0], np.array([3, 4]))
     np.testing.assert_array_equal(sub[1], np.array([5, 6, 7, 8, 9]))
 
@@ -795,11 +795,12 @@ def test_getitem_slice_fast_path_returns_correct_values():
 
 
 def test_getitem_slice_returns_2d_offsets():
-    """Slice-indexed result still has (2, M) offsets (consistent contract)."""
+    """Slice-indexed result is now contiguous (1-D offsets) via the fast path."""
     rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
     sub = rag[0:2]
-    assert sub.offsets.ndim == 2
-    assert sub.offsets.shape == (2, 2)
+    assert sub.is_contiguous
+    assert sub.offsets.ndim == 1
+    assert sub.offsets.shape == (3,)  # N+1 offsets for N=2 elements
 
 
 def test_getitem_empty_slice():
@@ -807,4 +808,5 @@ def test_getitem_empty_slice():
     rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
     sub = rag[1:1]
     assert isinstance(sub, Ragged)
-    assert len(sub.offsets[0]) == 0
+    assert sub.is_contiguous
+    assert len(sub) == 0  # shape[0] == 0
