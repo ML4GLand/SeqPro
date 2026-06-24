@@ -18,8 +18,8 @@ def to_py(x):
 
 
 def assert_slice_parity(rag, sl):
-    new = rag[sl]                 # fast path (gate fires)
-    old = rag._getitem(sl)        # bypass gate -> original gather path
+    new = rag[sl]  # fast path (gate fires)
+    old = rag._getitem(sl)  # bypass gate -> original gather path
     if isinstance(new, Ragged):
         assert new.is_contiguous, "fast-path result must be contiguous"
     assert to_py(new) == to_py(old)
@@ -34,8 +34,10 @@ def _r1(lengths, dtype=np.int32, shape=None):
     return Ragged.from_offsets(data, shp, off)
 
 
-@pytest.mark.parametrize("sl", [slice(1, 4), slice(0, 5), slice(2, 2),
-                                slice(3, 1), slice(None), slice(-2, None)])
+@pytest.mark.parametrize(
+    "sl",
+    [slice(1, 4), slice(0, 5), slice(2, 2), slice(3, 1), slice(None), slice(-2, None)],
+)
 def test_r1_simple_parity(sl):
     assert_slice_parity(_r1([4, 2, 5, 3, 6]), sl)
 
@@ -63,8 +65,8 @@ def test_r1_result_is_narrowed_view():
     out = rag[1:3]
     assert out.is_contiguous
     assert out.offsets[0] == 0
-    assert np.shares_memory(out.data, rag.data)   # narrowed view, not a copy
-    assert out.data.shape[0] == 2 + 5             # only rows 1,2
+    assert np.shares_memory(out.data, rag.data)  # narrowed view, not a copy
+    assert out.data.shape[0] == 2 + 5  # only rows 1,2
 
 
 def _r2(group_counts, inner_lengths, dtype=np.int32):
@@ -115,15 +117,11 @@ def _record_r1():
     shape (3, None); rows have 2,1,3 variants."""
     o0 = lengths_to_offsets(np.array([2, 1, 3], np.int64))
     n_var = int(o0[-1])
-    start_field = Ragged.from_offsets(
-        np.arange(n_var, dtype=np.int32), (3, None), o0
-    )
+    start_field = Ragged.from_offsets(np.arange(n_var, dtype=np.int32), (3, None), o0)
     alts = [b"AC", b"G", b"T", b"CC", b"A", b"GG"]  # one per variant
     sdata = np.frombuffer(b"".join(alts), dtype="S1")
     sso = lengths_to_offsets(np.array([len(a) for a in alts], np.int64))
-    alt_field = Ragged.from_offsets(
-        sdata, (3, None), o0, str_offsets=sso
-    )
+    alt_field = Ragged.from_offsets(sdata, (3, None), o0, str_offsets=sso)
     return Ragged.from_fields({"start": start_field, "alt": alt_field})
 
 
@@ -134,7 +132,7 @@ def test_record_r1_parity(sl):
 
 def _record_r2():
     """Record R=2: two numeric fields sharing [O0, O1]. 3 outer groups."""
-    o0 = lengths_to_offsets(np.array([2, 1, 2], np.int64))   # middles per group
+    o0 = lengths_to_offsets(np.array([2, 1, 2], np.int64))  # middles per group
     o1 = lengths_to_offsets(np.array([3, 2, 4, 1, 5], np.int64))  # data per middle
     n = int(o1[-1])
     a = Ragged.from_offsets(np.arange(n, dtype=np.int32), (3, None, None), [o0, o1])
@@ -148,30 +146,30 @@ def test_record_r2_parity(sl):
 
 
 def test_to_numpy_validate_false_matches_true():
-    off = np.arange(4 + 1, dtype=np.int64) * 3        # 4 uniform rows of len 3
+    off = np.arange(4 + 1, dtype=np.int64) * 3  # 4 uniform rows of len 3
     data = np.arange(4 * 3, dtype=np.int32)
     rag = Ragged.from_offsets(data, (4, None), off)
-    a = rag.to_numpy()                  # validate=True (default)
-    b = rag.to_numpy(validate=False)    # trust-me
+    a = rag.to_numpy()  # validate=True (default)
+    b = rag.to_numpy(validate=False)  # trust-me
     np.testing.assert_array_equal(a, b)
-    assert np.shares_memory(b, rag.data)   # zero-copy reshape
+    assert np.shares_memory(b, rag.data)  # zero-copy reshape
 
 
 def test_to_numpy_validate_true_still_raises_on_jagged():
     rag = _r1([4, 2, 5])
     with pytest.raises(ValueError):
-        rag.to_numpy()                  # jagged -> raise (unchanged default)
+        rag.to_numpy()  # jagged -> raise (unchanged default)
 
 
 def test_to_numpy_validate_false_multidim():
-    rag = _r1([3, 3, 3, 3], shape=(2, 2, None))   # (2,2,None) uniform len 3
+    rag = _r1([3, 3, 3, 3], shape=(2, 2, None))  # (2,2,None) uniform len 3
     out = rag.to_numpy(validate=False)
     assert out.shape == (2, 2, 3)
 
 
 def test_from_offsets_validate_true_raises_on_size_mismatch():
     data = np.arange(10, dtype=np.int32)
-    bad = np.array([0, 4, 20], np.int64)   # implies 20 elements, data has 10
+    bad = np.array([0, 4, 20], np.int64)  # implies 20 elements, data has 10
     with pytest.raises(ValueError):
         Ragged.from_offsets(data, (2, None), bad, validate=True)
 
@@ -186,6 +184,6 @@ def test_from_offsets_default_skips_size_check():
 
 def test_from_offsets_preserves_already_canonical_offsets():
     data = np.arange(7, dtype=np.int32)
-    off = np.array([0, 4, 7], np.int64)    # already C-contiguous int64
+    off = np.array([0, 4, 7], np.int64)  # already C-contiguous int64
     rag = Ragged.from_offsets(data, (2, None), off)
-    assert rag.offsets is off              # no ascontiguousarray copy
+    assert rag.offsets is off  # no ascontiguousarray copy

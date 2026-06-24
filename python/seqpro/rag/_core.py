@@ -452,7 +452,8 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         # gather, no (2,N) drift, no copy. Any other index uses the path below.
         if (
             isinstance(where, slice)
-            and self._layout.shape and self._layout.shape[0] is not None
+            and self._layout.shape
+            and self._layout.shape[0] is not None
             and self.is_contiguous
         ):
             start, stop, step = where.indices(self._layout.shape[0])
@@ -504,16 +505,15 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         o0 = rl.offsets[0]
         g0, g1 = start * n_inner, stop * n_inner
         base = int(o0[g0])
-        new_off = o0[g0 : g1 + 1] - base                 # contiguous (M+1,) int64
-        new_data = rl.data[base : int(o0[g1])]           # narrowed view
+        new_off = o0[g0 : g1 + 1] - base  # contiguous (M+1,) int64
+        new_data = rl.data[base : int(o0[g1])]  # narrowed view
         new_shape = (stop - start, *rl.shape[1:])
-        return Ragged(
-            RaggedLayout(data=new_data, offsets=[new_off], shape=new_shape)
-        )
+        return Ragged(RaggedLayout(data=new_data, offsets=[new_off], shape=new_shape))
 
     def _slice_contig_string(self, start: int, stop: int) -> "Ragged[Any]":
         rl = self._rl
         so = rl.str_offsets
+        assert so is not None  # _slice_contig_string is only called for string layouts
         if rl.n_ragged == 0:
             # flat string collection: shape (N,), no axis offsets; slice str_offsets
             b0, b1 = int(so[start]), int(so[stop])
@@ -545,9 +545,9 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         n_inner = self._outer_n_inner()
         o0, o1 = rl.offsets
         g0, g1 = start * n_inner, stop * n_inner
-        m0, m1 = int(o0[g0]), int(o0[g1])      # middle-segment range
+        m0, m1 = int(o0[g0]), int(o0[g1])  # middle-segment range
         new_o0 = o0[g0 : g1 + 1] - m0
-        d0, d1 = int(o1[m0]), int(o1[m1])      # data range
+        d0, d1 = int(o1[m0]), int(o1[m1])  # data range
         new_o1 = o1[m0 : m1 + 1] - d0
         new_data = rl.data[d0:d1]
         new_shape = (stop - start, *rl.shape[1:])
@@ -564,7 +564,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         o0 = rec.offsets[0]
         g0, g1 = start * n_inner, stop * n_inner
         v0, v1 = int(o0[g0]), int(o0[g1])
-        shared = [o0[g0 : g1 + 1] - v0]            # one shared (M+1,) object for all
+        shared = [o0[g0 : g1 + 1] - v0]  # one shared (M+1,) object for all
         new_fields: dict[str, RaggedLayout[Any]] = {}
         for name, fl in rec.fields.items():
             fld_tail = fl.shape[1:]
@@ -600,12 +600,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         m0, m1 = int(o0[g0]), int(o0[g1])
         d0, d1 = int(o1[m0]), int(o1[m1])
         shared = [o0[g0 : g1 + 1] - m0, o1[m0 : m1 + 1] - d0]
-        out_tail = rec.shape[rec.shape.index(None):]
+        out_tail = rec.shape[rec.shape.index(None) :]
         new_fields = {
             name: RaggedLayout(
                 data=fl.data[d0:d1],
                 offsets=shared,
-                shape=(stop - start, *fl.shape[fl.shape.index(None):]),
+                shape=(stop - start, *fl.shape[fl.shape.index(None) :]),
             )
             for name, fl in rec.fields.items()
         }
@@ -1748,9 +1748,13 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             mid_lens = np.diff(o1)
             if validate:
                 if grp_lens.size and not np.all(grp_lens == grp_lens[0]):
-                    raise ValueError("cannot convert a jagged outer axis to a dense array")
+                    raise ValueError(
+                        "cannot convert a jagged outer axis to a dense array"
+                    )
                 if mid_lens.size and not np.all(mid_lens == mid_lens[0]):
-                    raise ValueError("cannot convert a jagged inner axis to a dense array")
+                    raise ValueError(
+                        "cannot convert a jagged inner axis to a dense array"
+                    )
             result = packed.to_padded(
                 np.zeros((), self.dtype)[()]
             )  # rectangular -> pad is identity (both dense)

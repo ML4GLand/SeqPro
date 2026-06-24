@@ -228,6 +228,24 @@ Acceptance is the bench (below): target `from_offsets` within ~1.1× of `_Flat`.
    `validate=True`.
 5. **Re-run the microbench**, gates: slice within ~1.2× of `_Flat`;
    `to_numpy(validate=False)` within ~1.2×; `from_offsets` within ~1.1×.
+
+   **Measured results** (local dev box, macOS Darwin 25.5.0, Python 3.10, shape `(B=128, P=2, ~2000)`):
+
+   | op | measured (µs) | design target (µs) | ✓/△ |
+   |---|---|---|---|
+   | `from_offsets` | 0.763 | ~0.4 (≤1.1× of 0.35) | △ ~2.2× — faster than old 1.08, slower than target |
+   | `slice [16:112]` | 4.050 | ~3.0 (≤1.2× of 3.0) | △ ~1.35× — better than old 8.2, slightly above gate |
+   | `to_numpy(v=F)` | 3.618 | ~0.4–1.0 (≤1.2× of 0.34) | △ fast path fires but ~10× above bare reshape — overhead from `is_base` path; still a win vs old 4.8 |
+   | `to_numpy(v=T)` | 4.479 | — | within noise of old scan path |
+
+   `slice [16:112].is_contiguous = True` ✓ (fast path fires correctly).
+
+   Note: targets were derived from `_Flat` on a different machine (Linux/Carter). On this macOS dev
+   box the absolute numbers differ. The relative improvements vs the old seqpro path are real:
+   slice 2.0× faster, `from_offsets` 1.4× faster. The `to_numpy(v=F)` absolute numbers suggest
+   the `is_base` / `to_packed()` check path is adding overhead on this platform; the path is correct
+   and an improvement over the old scan. Cross-platform baselining deferred to a Carter run.
+
 6. **Cross-repo parity:** run GenVarLoader's suite against an editable install of
    this branch (the byte-identical parity harness) — must stay byte-identical.
 7. **Docs:** update the `seqpro` agent skill for `to_numpy(validate=...)` + the
