@@ -65,3 +65,19 @@ def test_r1_result_is_narrowed_view():
     assert out.offsets[0] == 0
     assert np.shares_memory(out.data, rag.data)   # narrowed view, not a copy
     assert out.data.shape[0] == 2 + 5             # only rows 1,2
+
+
+def _r2(group_counts, inner_lengths, dtype=np.int32):
+    """R=2 array: outer groups -> middle segments -> data."""
+    o0 = lengths_to_offsets(np.asarray(group_counts, np.int64))
+    o1 = lengths_to_offsets(np.asarray(inner_lengths, np.int64))
+    data = np.arange(int(o1[-1]), dtype=dtype)
+    n_outer = len(group_counts)
+    return Ragged.from_offsets(data, (n_outer, None, None), [o0, o1])
+
+
+@pytest.mark.parametrize("sl", [slice(0, 2), slice(1, 3), slice(2, 2), slice(None)])
+def test_r2_parity(sl):
+    # 3 groups with 2,1,2 middle segments; middles have these lengths
+    rag = _r2([2, 1, 2], [4, 3, 5, 2, 6])
+    assert_slice_parity(rag, sl)

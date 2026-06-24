@@ -480,7 +480,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         if rl.is_string:
             return None  # Task 3
         if rl.n_ragged == 2:
-            return None  # Task 2
+            return self._slice_contig_r2(start, stop)
         if rl.n_ragged == 1:
             return self._slice_contig_r1(start, stop)
         return None
@@ -496,6 +496,21 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         new_shape = (stop - start, *rl.shape[1:])
         return Ragged(
             RaggedLayout(data=new_data, offsets=[new_off], shape=new_shape)
+        )
+
+    def _slice_contig_r2(self, start: int, stop: int) -> "Ragged[Any]":
+        rl = self._rl
+        n_inner = self._outer_n_inner()
+        o0, o1 = rl.offsets
+        g0, g1 = start * n_inner, stop * n_inner
+        m0, m1 = int(o0[g0]), int(o0[g1])      # middle-segment range
+        new_o0 = o0[g0 : g1 + 1] - m0
+        d0, d1 = int(o1[m0]), int(o1[m1])      # data range
+        new_o1 = o1[m0 : m1 + 1] - d0
+        new_data = rl.data[d0:d1]
+        new_shape = (stop - start, *rl.shape[1:])
+        return Ragged(
+            RaggedLayout(data=new_data, offsets=[new_o0, new_o1], shape=new_shape)
         )
 
     def _getitem(self, where: Any) -> Any:
