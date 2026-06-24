@@ -434,10 +434,26 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     def __getitem__(
         self, where: Any
     ) -> "NDArray[Any] | bytes | dict[str, Any] | Ragged[Any]":
+        # Fast path: a plain step-1 slice of a contiguous array becomes the
+        # already-packed slice (narrowed buffer + rebased (N+1,) offsets) with no
+        # gather, no (2,N) drift, no copy. Any other index uses the path below.
+        if (
+            isinstance(where, slice)
+            and self._layout.shape and self._layout.shape[0] is not None
+            and self.is_contiguous
+        ):
+            start, stop, step = where.indices(self._layout.shape[0])
+            if step == 1:
+                if stop < start:
+                    stop = start  # numpy empty-slice semantics (e.g. a[5:2])
+                fast = self._slice_contiguous(start, stop)
+                if fast is not None:
+                    return (
+                        self._with_layout(fast._layout)
+                        if type(self) is not Ragged
+                        else fast
+                    )
         result = self._getitem(where)
-        # Preserve the concrete subclass for positional (structural) results.
-        # A string key is field extraction -> keep the bare field as base Ragged.
-        # Non-Ragged results (dict / bytes / ndarray / scalar) pass through.
         if (
             type(self) is not Ragged
             and not isinstance(where, str)
@@ -445,6 +461,42 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         ):
             return self._with_layout(result._layout)
         return result
+
+    def _outer_n_inner(self) -> int:
+        """Product of the fixed dims between the outer axis and the first ragged
+        axis (1 when the outer axis is immediately followed by the ragged axis)."""
+        shape = self._layout.shape
+        rag_dim = shape.index(None)
+        inner = [d for d in shape[1:rag_dim] if d is not None]
+        return int(np.prod(np.array(inner, dtype=np.int64))) if inner else 1
+
+    def _slice_contiguous(self, start: int, stop: int) -> "Ragged[Any] | None":
+        """Build the already-packed result of a contiguous step-1 outer slice, or
+        None to fall back. Caller guarantees self.is_contiguous and shape[0] int."""
+        layout = self._layout
+        if isinstance(layout, RecordLayout):
+            return None  # Task 4/5
+        rl = self._rl
+        if rl.is_string:
+            return None  # Task 3
+        if rl.n_ragged == 2:
+            return None  # Task 2
+        if rl.n_ragged == 1:
+            return self._slice_contig_r1(start, stop)
+        return None
+
+    def _slice_contig_r1(self, start: int, stop: int) -> "Ragged[Any]":
+        rl = self._rl
+        n_inner = self._outer_n_inner()
+        o0 = rl.offsets[0]
+        g0, g1 = start * n_inner, stop * n_inner
+        base = int(o0[g0])
+        new_off = o0[g0 : g1 + 1] - base                 # contiguous (M+1,) int64
+        new_data = rl.data[base : int(o0[g1])]           # narrowed view
+        new_shape = (stop - start, *rl.shape[1:])
+        return Ragged(
+            RaggedLayout(data=new_data, offsets=[new_off], shape=new_shape)
+        )
 
     def _getitem(self, where: Any) -> Any:
         # np.newaxis / None: insert a size-1 leading axis.
