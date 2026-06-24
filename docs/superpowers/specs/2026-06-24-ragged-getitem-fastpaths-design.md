@@ -42,6 +42,9 @@ shadow layer, which exists *only* to avoid these costs on the getitem hot path.
   µs-scale, so FFI overhead would erode the benefit.
 - **Uniform densify API:** new explicit `Ragged.to_fixed(length)` method (mirrors
   gvl `_Flat.to_fixed`), not implicit magic inside `to_numpy`.
+- **`from_offsets` size check:** gated behind `validate` (default `validate=False`
+  does no size validation) — accepted default-safety regression for the full
+  construction win. See §3.
 - **Fast-path layout coverage:** all layouts this round — R=1, R=2, opaque-string
   (flat and under-axis), record R=1, record R=2 — including string-under-axis
   records (which `to_packed` currently rejects under Spec C; the slice fast path
@@ -149,18 +152,30 @@ def to_fixed(self, length: int) -> NDArray:
 
 ## §3 — Lean `from_offsets`
 
-Close most of the 3.1× construction gap without weakening the default safety
-contract:
+Close the 3.1× construction gap:
 
 - Skip the `np.ascontiguousarray(o, dtype=OFFSET_TYPE)` copy-check when an offsets
   array is **already** C-contiguous `int64` (use it as-is).
-- Keep the eager data-size check on by default — it is a single integer compare and
-  catches real user error.
+- **Gate the eager data-size check behind `validate`.** Today the check at
+  `_core.py:130-144` runs unconditionally; move it inside the `validate` branch so
+  the default (`validate=False`) path does no size validation.
 
-Acceptance is the bench (below). If profiling shows the size-check itself dominates
-the residual gap, gate it behind `validate` with a documented default change — but
-default-safe is the goal, and the `ascontiguousarray` elision is expected to be the
-bulk of the win.
+### Behavior change (documented)
+
+With `validate=False` (the default), `from_offsets` no longer raises on a
+data/offsets size mismatch — a malformed array is constructed and the error
+surfaces later (e.g. an out-of-bounds index or a wrong slice). Callers that want
+the eager guard pass `validate=True`. This trades a small default-safety regression
+for the full construction win and matches the "trusted internal constructor"
+role the hot path needs.
+
+- `validate=True` keeps **all** checks (size check + `_ragged_validate` + monotonic
+  offsets, as today).
+- The same elision applies to `str_offsets` (`ascontiguousarray` only when not
+  already canonical) and to the `validate`-gated size check for the string and R≥1
+  paths.
+
+Acceptance is the bench (below): target `from_offsets` within ~1.1× of `_Flat`.
 
 ## Testing & acceptance
 
@@ -173,11 +188,15 @@ bulk of the win.
 3. **Full existing seqpro suite green** (update any test asserting `(2, N)` /
    full-buffer post-slice; `test_ragged_core.py`, `test_ragged_core_records.py`,
    `test_rag_to_packed.py`).
-4. **Re-run the microbench**, gates: slice and `to_fixed` within ~1.2× of `_Flat`;
-   `from_offsets` gap < 1.5×.
-5. **Cross-repo parity:** run GenVarLoader's suite against an editable install of
+4. **`from_offsets` validate gate:** `validate=True` still raises `ValueError` on a
+   data/offsets size mismatch; `validate=False` (default) constructs without raising.
+   Update any existing test that relied on the eager default raise to pass
+   `validate=True`.
+5. **Re-run the microbench**, gates: slice within ~1.2× of `_Flat`; `to_fixed`
+   within ~1.2×; `from_offsets` within ~1.1×.
+6. **Cross-repo parity:** run GenVarLoader's suite against an editable install of
    this branch (the byte-identical parity harness) — must stay byte-identical.
-6. **Docs:** update the `seqpro` agent skill for `to_fixed` + the slice-contiguity
+7. **Docs:** update the `seqpro` agent skill for `to_fixed` + the slice-contiguity
    note; file the deferred-Rust tracking issue.
 
 ## Out of scope (this round)
