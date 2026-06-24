@@ -145,3 +145,25 @@ def _record_r2():
 @pytest.mark.parametrize("sl", [slice(0, 2), slice(1, 3), slice(2, 2), slice(None)])
 def test_record_r2_parity(sl):
     assert_slice_parity(_record_r2(), sl)
+
+
+def test_to_numpy_validate_false_matches_true():
+    off = np.arange(4 + 1, dtype=np.int64) * 3        # 4 uniform rows of len 3
+    data = np.arange(4 * 3, dtype=np.int32)
+    rag = Ragged.from_offsets(data, (4, None), off)
+    a = rag.to_numpy()                  # validate=True (default)
+    b = rag.to_numpy(validate=False)    # trust-me
+    np.testing.assert_array_equal(a, b)
+    assert np.shares_memory(b, rag.data)   # zero-copy reshape
+
+
+def test_to_numpy_validate_true_still_raises_on_jagged():
+    rag = _r1([4, 2, 5])
+    with pytest.raises(ValueError):
+        rag.to_numpy()                  # jagged -> raise (unchanged default)
+
+
+def test_to_numpy_validate_false_multidim():
+    rag = _r1([3, 3, 3, 3], shape=(2, 2, None))   # (2,2,None) uniform len 3
+    out = rag.to_numpy(validate=False)
+    assert out.shape == (2, 2, 3)

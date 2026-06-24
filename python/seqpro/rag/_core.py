@@ -1710,7 +1710,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return result
 
     def to_numpy(
-        self, allow_missing: bool = False
+        self, allow_missing: bool = False, *, validate: bool = True
     ) -> "NDArray[Any] | dict[str, NDArray[Any]]":
         if isinstance(self._layout, RecordLayout):
             # _core contract: return a dict of dense per-field arrays.
@@ -1718,7 +1718,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 field: cast(
                     "NDArray[Any]",
                     cast("Ragged[Any]", self[field]).to_numpy(
-                        allow_missing=allow_missing
+                        allow_missing=allow_missing, validate=validate
                     ),
                 )
                 for field in self._layout.fields
@@ -1733,10 +1733,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             o0, o1 = packed._layout.offsets  # canonical 1-D after pack
             grp_lens = np.diff(o0)
             mid_lens = np.diff(o1)
-            if grp_lens.size and not np.all(grp_lens == grp_lens[0]):
-                raise ValueError("cannot convert a jagged outer axis to a dense array")
-            if mid_lens.size and not np.all(mid_lens == mid_lens[0]):
-                raise ValueError("cannot convert a jagged inner axis to a dense array")
+            if validate:
+                if grp_lens.size and not np.all(grp_lens == grp_lens[0]):
+                    raise ValueError("cannot convert a jagged outer axis to a dense array")
+                if mid_lens.size and not np.all(mid_lens == mid_lens[0]):
+                    raise ValueError("cannot convert a jagged inner axis to a dense array")
             result = packed.to_padded(
                 np.zeros((), self.dtype)[()]
             )  # rectangular -> pad is identity (both dense)
@@ -1749,13 +1750,26 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 "to_numpy() on a string-under-axis Ragged is not supported in Spec C; "
                 "convert via .to_chars() first."
             )
-        lengths = self.lengths
-        if lengths.size and not np.all(lengths == lengths.flat[0]):
-            raise ValueError("cannot convert a jagged Ragged to a dense array")
-        packed = self if self.is_base else self.to_packed()
-        row_len = int(lengths.flat[0]) if lengths.size else 0
+        if validate:
+            lengths = self.lengths
+            if lengths.size and not np.all(lengths == lengths.flat[0]):
+                raise ValueError("cannot convert a jagged Ragged to a dense array")
+            packed = self if self.is_base else self.to_packed()
+            row_len = int(lengths.flat[0]) if lengths.size else 0
+        else:
+            # trust the caller: infer row_len from total // n_rows, no uniformity
+            # scan. numpy's reshape still rejects a total-size mismatch for free.
+            packed = self if self.is_base else self.to_packed()
+            leading_dims = [d for d in packed.shape[: packed.rag_dim]]
+            n_rows = (
+                int(np.prod(np.array(leading_dims, dtype=np.int64)))
+                if leading_dims
+                else 1
+            )
+            total = packed._rl.data.shape[0]
+            row_len = total // n_rows if n_rows else 0
         leading = packed.shape[: packed.rag_dim]
-        return packed._rl.data.reshape(  # pyrefly: ignore[no-matching-overload] -- leading dims before rag_dim are always int; numpy stub can't verify this
+        return packed._rl.data.reshape(  # pyrefly: ignore[no-matching-overload]
             *(leading or (-1,)), row_len, *packed._rl.data.shape[1:]
         )
 
