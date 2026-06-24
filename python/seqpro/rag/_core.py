@@ -546,7 +546,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         rec = self._layout
         assert isinstance(rec, RecordLayout)
         if len(rec.offsets) == 2:
-            return None  # Task 5: _slice_contig_record_r2 not yet implemented
+            return self._slice_contig_record_r2(start, stop)
         n_inner = self._outer_n_inner()
         o0 = rec.offsets[0]
         g0, g1 = start * n_inner, stop * n_inner
@@ -573,6 +573,32 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         return Ragged(
             RecordLayout(
                 offsets=shared, shape=(stop - start, *rec.shape[1:]), fields=new_fields
+            )
+        )
+
+    def _slice_contig_record_r2(self, start: int, stop: int) -> "Ragged[Any] | None":
+        rec = self._layout
+        assert isinstance(rec, RecordLayout)
+        if any(fl.str_offsets is not None for fl in rec.fields.values()):
+            return None  # string-under-axis R=2 record: fall back to gather path
+        n_inner = self._outer_n_inner()
+        o0, o1 = rec.offsets
+        g0, g1 = start * n_inner, stop * n_inner
+        m0, m1 = int(o0[g0]), int(o0[g1])
+        d0, d1 = int(o1[m0]), int(o1[m1])
+        shared = [o0[g0 : g1 + 1] - m0, o1[m0 : m1 + 1] - d0]
+        out_tail = rec.shape[rec.shape.index(None):]
+        new_fields = {
+            name: RaggedLayout(
+                data=fl.data[d0:d1],
+                offsets=shared,
+                shape=(stop - start, *fl.shape[fl.shape.index(None):]),
+            )
+            for name, fl in rec.fields.items()
+        }
+        return Ragged(
+            RecordLayout(
+                offsets=shared, shape=(stop - start, *out_tail), fields=new_fields
             )
         )
 

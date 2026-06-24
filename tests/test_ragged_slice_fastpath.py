@@ -130,3 +130,18 @@ def _record_r1():
 @pytest.mark.parametrize("sl", [slice(0, 2), slice(1, 3), slice(2, 2), slice(None)])
 def test_record_r1_parity(sl):
     assert_slice_parity(_record_r1(), sl)
+
+
+def _record_r2():
+    """Record R=2: two numeric fields sharing [O0, O1]. 3 outer groups."""
+    o0 = lengths_to_offsets(np.array([2, 1, 2], np.int64))   # middles per group
+    o1 = lengths_to_offsets(np.array([3, 2, 4, 1, 5], np.int64))  # data per middle
+    n = int(o1[-1])
+    a = Ragged.from_offsets(np.arange(n, dtype=np.int32), (3, None, None), [o0, o1])
+    b = Ragged.from_offsets(np.arange(n, dtype=np.float32), (3, None, None), [o0, o1])
+    return Ragged.from_fields({"a": a, "b": b})
+
+
+@pytest.mark.parametrize("sl", [slice(0, 2), slice(1, 3), slice(2, 2), slice(None)])
+def test_record_r2_parity(sl):
+    assert_slice_parity(_record_r2(), sl)
