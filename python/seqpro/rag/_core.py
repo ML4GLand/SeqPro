@@ -475,7 +475,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         None to fall back. Caller guarantees self.is_contiguous and shape[0] int."""
         layout = self._layout
         if isinstance(layout, RecordLayout):
-            return None  # Task 4/5
+            return self._slice_contig_record(start, stop)
         rl = self._rl
         if rl.is_string:
             return self._slice_contig_string(start, stop)
@@ -540,6 +540,40 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         new_shape = (stop - start, *rl.shape[1:])
         return Ragged(
             RaggedLayout(data=new_data, offsets=[new_o0, new_o1], shape=new_shape)
+        )
+
+    def _slice_contig_record(self, start: int, stop: int) -> "Ragged[Any] | None":
+        rec = self._layout
+        assert isinstance(rec, RecordLayout)
+        if len(rec.offsets) == 2:
+            return None  # Task 5: _slice_contig_record_r2 not yet implemented
+        n_inner = self._outer_n_inner()
+        o0 = rec.offsets[0]
+        g0, g1 = start * n_inner, stop * n_inner
+        v0, v1 = int(o0[g0]), int(o0[g1])
+        shared = [o0[g0 : g1 + 1] - v0]            # one shared (M+1,) object for all
+        new_fields: dict[str, RaggedLayout[Any]] = {}
+        for name, fl in rec.fields.items():
+            fld_tail = fl.shape[1:]
+            if fl.str_offsets is not None:
+                so = fl.str_offsets
+                b0, b1 = int(so[v0]), int(so[v1])
+                new_fields[name] = RaggedLayout(
+                    data=fl.data[b0:b1],
+                    offsets=shared,
+                    shape=(stop - start, *fld_tail),
+                    str_offsets=so[v0 : v1 + 1] - b0,
+                )
+            else:
+                new_fields[name] = RaggedLayout(
+                    data=fl.data[v0:v1],
+                    offsets=shared,
+                    shape=(stop - start, *fld_tail),
+                )
+        return Ragged(
+            RecordLayout(
+                offsets=shared, shape=(stop - start, *rec.shape[1:]), fields=new_fields
+            )
         )
 
     def _getitem(self, where: Any) -> Any:
@@ -1119,7 +1153,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             lo, hi = int(starts[where]), int(stops[where])
             out: dict[str, Any] = {}
             for name, fl in rec.fields.items():
-                row = fl.data[lo:hi]
+                if fl.str_offsets is not None:
+                    so = fl.str_offsets
+                    row = fl.data[int(so[lo]) : int(so[hi])]
+                else:
+                    row = fl.data[lo:hi]
                 out[name] = row
             return out
         sel_starts, sel_stops = self._row_gather(where)

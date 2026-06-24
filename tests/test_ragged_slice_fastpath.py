@@ -108,3 +108,25 @@ def test_string_flat_parity(sl):
 def test_string_under_axis_parity(sl):
     rows = [[b"AC", b"G"], [b"TT"], [b"CCG", b"A", b"T"]]
     assert_slice_parity(_str_under_axis(rows), sl)
+
+
+def _record_r1():
+    """Record R=1 with a numeric field and a string-under-axis field sharing O0.
+    shape (3, None); rows have 2,1,3 variants."""
+    o0 = lengths_to_offsets(np.array([2, 1, 3], np.int64))
+    n_var = int(o0[-1])
+    start_field = Ragged.from_offsets(
+        np.arange(n_var, dtype=np.int32), (3, None), o0
+    )
+    alts = [b"AC", b"G", b"T", b"CC", b"A", b"GG"]  # one per variant
+    sdata = np.frombuffer(b"".join(alts), dtype="S1")
+    sso = lengths_to_offsets(np.array([len(a) for a in alts], np.int64))
+    alt_field = Ragged.from_offsets(
+        sdata, (3, None), o0, str_offsets=sso
+    )
+    return Ragged.from_fields({"start": start_field, "alt": alt_field})
+
+
+@pytest.mark.parametrize("sl", [slice(0, 2), slice(1, 3), slice(2, 2), slice(None)])
+def test_record_r1_parity(sl):
+    assert_slice_parity(_record_r1(), sl)
