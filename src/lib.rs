@@ -64,13 +64,20 @@ fn _k_shuffle<'py>(
     seed: Option<u64>,
 ) -> Bound<'py, PyArray<u8, IxDyn>> {
     let seqs = seqs.as_array();
-    let out = kshuffle::k_shuffle(seqs, k, seed, alphabet_size, alphabet_bytes);
+    let out = py.detach(|| kshuffle::k_shuffle(seqs, k, seed, alphabet_size, alphabet_bytes));
     out.into_pyarray(py)
 }
 
 #[pyfunction]
-fn _ragged_validate(offsets: PyReadonlyArray1<i64>, n_data: i64, n_segments: i64) -> PyResult<()> {
-    ragged::validate(offsets.as_array(), n_data, n_segments).map_err(PyValueError::new_err)
+fn _ragged_validate(
+    py: Python<'_>,
+    offsets: PyReadonlyArray1<i64>,
+    n_data: i64,
+    n_segments: i64,
+) -> PyResult<()> {
+    let offsets = offsets.as_array();
+    py.detach(|| ragged::validate(offsets, n_data, n_segments))
+        .map_err(PyValueError::new_err)
 }
 
 #[pyfunction]
@@ -80,9 +87,12 @@ fn _ragged_nested_gather<'py>(
     o0_stops: PyReadonlyArray1<'py, i64>,
     mask: PyReadonlyArray1<'py, bool>,
 ) -> RaggedSelectResult<'py> {
-    let (counts, idx) =
-        ragged::nested_gather(o0_starts.as_array(), o0_stops.as_array(), mask.as_array())
-            .map_err(PyValueError::new_err)?;
+    let o0_starts = o0_starts.as_array();
+    let o0_stops = o0_stops.as_array();
+    let mask = mask.as_array();
+    let (counts, idx) = py
+        .detach(|| ragged::nested_gather(o0_starts, o0_stops, mask))
+        .map_err(PyValueError::new_err)?;
     Ok((counts.into_pyarray(py), idx.into_pyarray(py)))
 }
 
@@ -96,15 +106,14 @@ fn _ragged_nested_pack<'py>(
     src: PyReadonlyArray1<'py, u8>,
     elem: i64,
 ) -> NestedPackResult<'py> {
-    let (o0, o1, out_bytes) = ragged::nested_pack(
-        o0_starts.as_array(),
-        o0_stops.as_array(),
-        o1_starts.as_array(),
-        o1_stops.as_array(),
-        src.as_array(),
-        elem,
-    )
-    .map_err(PyValueError::new_err)?;
+    let o0_starts = o0_starts.as_array();
+    let o0_stops = o0_stops.as_array();
+    let o1_starts = o1_starts.as_array();
+    let o1_stops = o1_stops.as_array();
+    let src = src.as_array();
+    let (o0, o1, out_bytes) = py
+        .detach(|| ragged::nested_pack(o0_starts, o0_stops, o1_starts, o1_stops, src, elem))
+        .map_err(PyValueError::new_err)?;
     Ok((
         o0.into_pyarray(py),
         o1.into_pyarray(py),
@@ -114,22 +123,22 @@ fn _ragged_nested_pack<'py>(
 
 #[pyfunction]
 fn _ragged_pack<'py>(
+    py: Python<'py>,
     starts: PyReadonlyArray1<'py, i64>,
     stops: PyReadonlyArray1<'py, i64>,
     src: PyReadonlyArray1<'py, u8>,
     elem: i64,
     mut out: PyReadwriteArray1<'py, u8>,
 ) -> PyResult<()> {
-    ragged::pack_into(
-        starts.as_array(),
-        stops.as_array(),
-        src.as_array(),
-        elem,
-        out.as_array_mut()
-            .as_slice_mut()
-            .ok_or_else(|| PyValueError::new_err("out must be contiguous"))?,
-    )
-    .map_err(PyValueError::new_err)
+    let starts = starts.as_array();
+    let stops = stops.as_array();
+    let src = src.as_array();
+    let mut out = out.as_array_mut();
+    let out = out
+        .as_slice_mut()
+        .ok_or_else(|| PyValueError::new_err("out must be contiguous"))?;
+    py.detach(|| ragged::pack_into(starts, stops, src, elem, out))
+        .map_err(PyValueError::new_err)
 }
 
 #[pyfunction]
@@ -139,13 +148,18 @@ fn _ragged_select<'py>(
     stops: PyReadonlyArray1<'py, i64>,
     idx: PyReadonlyArray1<'py, i64>,
 ) -> RaggedSelectResult<'py> {
-    let (s, e) = ragged::select(starts.as_array(), stops.as_array(), idx.as_array())
+    let starts = starts.as_array();
+    let stops = stops.as_array();
+    let idx = idx.as_array();
+    let (s, e) = py
+        .detach(|| ragged::select(starts, stops, idx))
         .map_err(PyValueError::new_err)?;
     Ok((s.into_pyarray(py), e.into_pyarray(py)))
 }
 
 #[pyfunction]
 fn _ragged_to_padded(
+    py: Python<'_>,
     data: PyReadonlyArray1<u8>,
     offsets: PyReadonlyArray1<i64>,
     mut out: PyReadwriteArray1<u8>,
@@ -157,13 +171,15 @@ fn _ragged_to_padded(
     let out = out
         .as_slice_mut()
         .map_err(|_| PyValueError::new_err("out must be contiguous"))?;
-    seqpro_core::Ragged::new(offsets, data, itemsize)
-        .to_padded_into(out, itemsize, out_len)
-        .map_err(PyValueError::new_err)
+    py.detach(|| {
+        seqpro_core::Ragged::new(offsets, data, itemsize).to_padded_into(out, itemsize, out_len)
+    })
+    .map_err(PyValueError::new_err)
 }
 
 #[pyfunction]
 fn _ragged_reverse_complement(
+    py: Python<'_>,
     mut data: PyReadwriteArray1<u8>,
     offsets: PyReadonlyArray1<i64>,
     comp_lut: PyReadonlyArray1<u8>,
@@ -172,13 +188,11 @@ fn _ragged_reverse_complement(
     let data = data
         .as_slice_mut()
         .map_err(|_| PyValueError::new_err("data must be contiguous"))?;
-    seqpro_core::ragged::reverse_complement_inplace(
-        data,
-        offsets.as_slice()?,
-        comp_lut.as_slice()?,
-        mask.as_slice()?,
-    )
-    .map_err(PyValueError::new_err)
+    let offsets = offsets.as_slice()?;
+    let comp_lut = comp_lut.as_slice()?;
+    let mask = mask.as_slice()?;
+    py.detach(|| seqpro_core::ragged::reverse_complement_inplace(data, offsets, comp_lut, mask))
+        .map_err(PyValueError::new_err)
 }
 
 type RaggedConcatResult<'py> =
@@ -243,8 +257,9 @@ fn _ragged_concat<'py>(
         })
         .collect::<PyResult<_>>()?;
 
-    let (out_data, out_offsets) =
-        ragged::ragged_concat(data_slices, off_slices, elem).map_err(PyValueError::new_err)?;
+    let (out_data, out_offsets) = py
+        .detach(|| ragged::ragged_concat(data_slices, off_slices, elem))
+        .map_err(PyValueError::new_err)?;
 
     Ok((
         Array1::from_vec(out_data).into_pyarray(py),

@@ -74,6 +74,11 @@ Only `kshuffle.rs` is compiled. It's exposed as `seqpro._k_shuffle` (called by `
 - Conventional commits are enforced — use `feat:`, `fix:`, `ci:`, `bump:`, `refactor:`, `docs:`, etc. prefixes.
 - **Validation is opt-in and front-loaded.** Add fast-fail/input validation via a `validate=` flag (or equivalent single opt-in), not per-feature `error` modes. There must be one obvious way to ask "is this input clean?" — don't duplicate the check across parameters.
 - **No naive NumPy in hot paths.** Never use raw Python loops or naive NumPy (e.g. per-segment `np.concatenate`, Python `for` over sequences) where a Numba kernel is faster and leaner — unless the NumPy version is *verifiably* comparable in time and memory. When Numba is a poor fit (graph algorithms like k-shuffle), use the Rust/PyO3 extension (`src/`).
+- **PyO3 perf tips for `src/` boundary code** (per the [PyO3 performance guide](https://github.com/PyO3/pyo3/blob/main/guide/src/performance.md)). When writing or editing a `#[pyfunction]`:
+  - **Detach the interpreter during compute.** Any kernel doing real work (>~1ms, especially rayon-parallel ones) must run inside `py.detach(|| ...)`. Pattern: take slices/views (`as_slice`/`as_array`) and do all Python-touching work *while attached*, run the compute in `detach` capturing only `Ungil` slices/views (never a `PyReadonlyArray`/`Bound`/`Py`), then `into_pyarray(py)` *after* re-attaching. Add a `py: Python` param if the function lacks one.
+  - Use the existing `py` token / `Bound::py()` — never `Python::attach` when a token is already in scope.
+  - Prefer `cast::<T>()` over `extract::<T>()` for *native* Python types (`PyList`/`PyTuple`/etc.). Does not apply to numpy `PyReadonlyArray` extraction.
+  - Pass Rust tuples (not `Bound<PyTuple>`) when calling back into Python, to hit the faster `vectorcall` path.
 
 ## Skills
 

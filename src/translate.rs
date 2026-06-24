@@ -228,11 +228,13 @@ pub fn _translate_bytes<'py>(
     match lut {
         Some(lut) => {
             let lut = lut.as_slice()?;
-            if parallel {
-                translate_lut_into_par(buf, codon_size, lut, marker, &mut out);
-            } else {
-                translate_lut_into(buf, codon_size, lut, marker, &mut out);
-            }
+            py.detach(|| {
+                if parallel {
+                    translate_lut_into_par(buf, codon_size, lut, marker, &mut out);
+                } else {
+                    translate_lut_into(buf, codon_size, lut, marker, &mut out);
+                }
+            });
         }
         None => {
             let keys = keys.ok_or_else(|| PyValueError::new_err("keys required without lut"))?;
@@ -240,11 +242,13 @@ pub fn _translate_bytes<'py>(
                 values.ok_or_else(|| PyValueError::new_err("values required without lut"))?;
             let keys = keys.as_slice()?;
             let values = values.as_slice()?;
-            if parallel {
-                translate_scan_into_par(buf, codon_size, keys, values, marker, &mut out);
-            } else {
-                translate_scan_into(buf, codon_size, keys, values, marker, &mut out);
-            }
+            py.detach(|| {
+                if parallel {
+                    translate_scan_into_par(buf, codon_size, keys, values, marker, &mut out);
+                } else {
+                    translate_scan_into(buf, codon_size, keys, values, marker, &mut out);
+                }
+            });
         }
     }
     Ok(out.into_pyarray(py))
@@ -264,18 +268,21 @@ pub fn _translate_stop_ends<'py>(
     let data = data.as_slice()?;
     let starts = starts.as_slice()?;
     let full_ends = full_ends.as_slice()?;
-    let n = starts.len();
-    let mut ends = vec![0i64; n];
-    for i in 0..n {
-        let mut end = full_ends[i];
-        for j in starts[i]..full_ends[i] {
-            if data[j as usize] == stop_char {
-                end = j + 1;
-                break;
+    let ends = py.detach(|| {
+        let n = starts.len();
+        let mut ends = vec![0i64; n];
+        for i in 0..n {
+            let mut end = full_ends[i];
+            for j in starts[i]..full_ends[i] {
+                if data[j as usize] == stop_char {
+                    end = j + 1;
+                    break;
+                }
             }
+            ends[i] = end;
         }
-        ends[i] = end;
-    }
+        ends
+    });
     Ok(ndarray::Array1::from(ends).into_pyarray(py))
 }
 
@@ -294,30 +301,34 @@ pub fn _translate_drop<'py>(
     let codons = codons.as_array(); // (n_codons, codon_size)
     let offsets = offsets.as_slice()?;
     let valid = valid_upper.as_slice()?;
-    let k = codons.shape()[1];
-    let n = offsets.len() - 1;
 
-    let mut out: Vec<u8> = Vec::with_capacity(translated.len());
-    let mut new_offsets: Vec<i64> = Vec::with_capacity(n + 1);
-    new_offsets.push(0);
-    for s in 0..n {
-        let start = offsets[s] as usize;
-        let end = offsets[s + 1] as usize;
-        for c in start..end {
-            let mut keep = true;
-            for j in 0..k {
-                let b = codons[[c, j]] & 0xDF;
-                if !valid.contains(&b) {
-                    keep = false;
-                    break;
+    let (out, new_offsets) = py.detach(|| {
+        let k = codons.shape()[1];
+        let n = offsets.len() - 1;
+
+        let mut out: Vec<u8> = Vec::with_capacity(translated.len());
+        let mut new_offsets: Vec<i64> = Vec::with_capacity(n + 1);
+        new_offsets.push(0);
+        for s in 0..n {
+            let start = offsets[s] as usize;
+            let end = offsets[s + 1] as usize;
+            for c in start..end {
+                let mut keep = true;
+                for j in 0..k {
+                    let b = codons[[c, j]] & 0xDF;
+                    if !valid.contains(&b) {
+                        keep = false;
+                        break;
+                    }
+                }
+                if keep {
+                    out.push(translated[c]);
                 }
             }
-            if keep {
-                out.push(translated[c]);
-            }
+            new_offsets.push(out.len() as i64);
         }
-        new_offsets.push(out.len() as i64);
-    }
+        (out, new_offsets)
+    });
     Ok((
         out.into_pyarray(py),
         ndarray::Array1::from(new_offsets).into_pyarray(py),
@@ -372,41 +383,54 @@ pub fn _translate_ohe<'py>(
         ));
     }
 
-    // 1) Decode each OHE row to a nucleotide byte (all-zero row -> 0 sentinel).
-    let nuc_buf = decode_ohe_rows(data, nuc);
+    // Resolve translate-table slices up front (Python-touching work) so the
+    // compute below can run with the interpreter detached.
+    let lut_slice = lut.as_ref().map(|l| l.as_slice()).transpose()?;
+    let (keys_slice, values_slice) = if lut_slice.is_none() {
+        let keys = keys
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("keys required without lut"))?;
+        let values = values
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("values required without lut"))?;
+        (Some(keys.as_slice()?), Some(values.as_slice()?))
+    } else {
+        (None, None)
+    };
 
-    // 2) Translate all codons to AA bytes.
-    // NOTE: serial path intentional — surrounding decode/compaction loops are serial;
-    // parallel translate could be wired here in a future pass if OHE becomes a bottleneck.
     let n_codons = total / codon_size;
-    let mut aa = vec![0u8; n_codons];
-    match lut {
-        Some(lut) => translate_lut_into(&nuc_buf, codon_size, lut.as_slice()?, marker, &mut aa),
-        None => {
-            let keys = keys.ok_or_else(|| PyValueError::new_err("keys required without lut"))?;
-            let values =
-                values.ok_or_else(|| PyValueError::new_err("values required without lut"))?;
-            translate_scan_into(
+    let out = py.detach(|| {
+        // 1) Decode each OHE row to a nucleotide byte (all-zero row -> 0 sentinel).
+        let nuc_buf = decode_ohe_rows(data, nuc);
+
+        // 2) Translate all codons to AA bytes.
+        // NOTE: serial path intentional — surrounding decode/compaction loops are serial;
+        // parallel translate could be wired here in a future pass if OHE becomes a bottleneck.
+        let mut aa = vec![0u8; n_codons];
+        match lut_slice {
+            Some(lut) => translate_lut_into(&nuc_buf, codon_size, lut, marker, &mut aa),
+            None => translate_scan_into(
                 &nuc_buf,
                 codon_size,
-                keys.as_slice()?,
-                values.as_slice()?,
+                keys_slice.unwrap(),
+                values_slice.unwrap(),
                 marker,
                 &mut aa,
-            );
+            ),
         }
-    }
 
-    // 3) Re-encode AA bytes one-hot against aa_bytes (no match -> all-zero row).
-    let mut out = ndarray::Array2::<u8>::zeros((n_codons, n_aa));
-    for i in 0..n_codons {
-        for (j, &ab) in aa_bytes.iter().enumerate() {
-            if ab == aa[i] {
-                out[[i, j]] = 1;
-                break;
+        // 3) Re-encode AA bytes one-hot against aa_bytes (no match -> all-zero row).
+        let mut out = ndarray::Array2::<u8>::zeros((n_codons, n_aa));
+        for i in 0..n_codons {
+            for (j, &ab) in aa_bytes.iter().enumerate() {
+                if ab == aa[i] {
+                    out[[i, j]] = 1;
+                    break;
+                }
             }
         }
-    }
+        out
+    });
     Ok(out.into_pyarray(py))
 }
 
@@ -445,67 +469,80 @@ pub fn _translate_ohe_drop<'py>(
         ));
     }
 
-    // 1) Decode rows to nucleotide bytes.
-    let nuc_buf = decode_ohe_rows(data, nuc);
+    // Resolve translate-table slices up front (Python-touching work) so the
+    // compute below can run with the interpreter detached.
+    let lut_slice = lut.as_ref().map(|l| l.as_slice()).transpose()?;
+    let (keys_slice, values_slice) = if lut_slice.is_none() {
+        let keys = keys
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("keys required without lut"))?;
+        let values = values
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("values required without lut"))?;
+        (Some(keys.as_slice()?), Some(values.as_slice()?))
+    } else {
+        (None, None)
+    };
 
-    // 2) Translate all codons to AA bytes.
-    // NOTE: serial path intentional — surrounding decode/compaction loops are serial;
-    // parallel translate could be wired here in a future pass if OHE becomes a bottleneck.
     let n_codons = total / codon_size;
-    let mut aa = vec![0u8; n_codons];
-    match lut {
-        Some(lut) => translate_lut_into(&nuc_buf, codon_size, lut.as_slice()?, marker, &mut aa),
-        None => {
-            let keys = keys.ok_or_else(|| PyValueError::new_err("keys required without lut"))?;
-            let values =
-                values.ok_or_else(|| PyValueError::new_err("values required without lut"))?;
-            translate_scan_into(
+    let (out, new_offsets) = py.detach(|| {
+        // 1) Decode rows to nucleotide bytes.
+        let nuc_buf = decode_ohe_rows(data, nuc);
+
+        // 2) Translate all codons to AA bytes.
+        // NOTE: serial path intentional — surrounding decode/compaction loops are serial;
+        // parallel translate could be wired here in a future pass if OHE becomes a bottleneck.
+        let mut aa = vec![0u8; n_codons];
+        match lut_slice {
+            Some(lut) => translate_lut_into(&nuc_buf, codon_size, lut, marker, &mut aa),
+            None => translate_scan_into(
                 &nuc_buf,
                 codon_size,
-                keys.as_slice()?,
-                values.as_slice()?,
+                keys_slice.unwrap(),
+                values_slice.unwrap(),
                 marker,
                 &mut aa,
-            );
+            ),
         }
-    }
 
-    // 3) Per sequence, keep codons whose every nucleotide row is valid; collect
-    //    kept AA bytes; build codon-indexed new offsets.
-    let n_seq = offsets.len() - 1;
-    let mut kept_aa: Vec<u8> = Vec::new();
-    let mut new_offsets: Vec<i64> = Vec::with_capacity(n_seq + 1);
-    new_offsets.push(0);
-    for s in 0..n_seq {
-        let codon_start = (offsets[s] as usize) / codon_size;
-        let codon_end = (offsets[s + 1] as usize) / codon_size;
-        for c in codon_start..codon_end {
-            let mut keep = true;
-            for j in 0..codon_size {
-                let b = nuc_buf[c * codon_size + j] & 0xDF;
-                if !valid.contains(&b) {
-                    keep = false;
+        // 3) Per sequence, keep codons whose every nucleotide row is valid; collect
+        //    kept AA bytes; build codon-indexed new offsets.
+        let n_seq = offsets.len() - 1;
+        let mut kept_aa: Vec<u8> = Vec::new();
+        let mut new_offsets: Vec<i64> = Vec::with_capacity(n_seq + 1);
+        new_offsets.push(0);
+        for s in 0..n_seq {
+            let codon_start = (offsets[s] as usize) / codon_size;
+            let codon_end = (offsets[s + 1] as usize) / codon_size;
+            for c in codon_start..codon_end {
+                let mut keep = true;
+                for j in 0..codon_size {
+                    let b = nuc_buf[c * codon_size + j] & 0xDF;
+                    if !valid.contains(&b) {
+                        keep = false;
+                        break;
+                    }
+                }
+                if keep {
+                    kept_aa.push(aa[c]);
+                }
+            }
+            new_offsets.push(kept_aa.len() as i64);
+        }
+
+        // 4) One-hot encode kept AA bytes against aa_bytes (no match -> all-zero row).
+        let n_kept = kept_aa.len();
+        let mut out = ndarray::Array2::<u8>::zeros((n_kept, n_aa));
+        for (i, &ab_byte) in kept_aa.iter().enumerate() {
+            for (j, &ab) in aa_bytes.iter().enumerate() {
+                if ab == ab_byte {
+                    out[[i, j]] = 1;
                     break;
                 }
             }
-            if keep {
-                kept_aa.push(aa[c]);
-            }
         }
-        new_offsets.push(kept_aa.len() as i64);
-    }
-
-    // 4) One-hot encode kept AA bytes against aa_bytes (no match -> all-zero row).
-    let n_kept = kept_aa.len();
-    let mut out = ndarray::Array2::<u8>::zeros((n_kept, n_aa));
-    for (i, &ab_byte) in kept_aa.iter().enumerate() {
-        for (j, &ab) in aa_bytes.iter().enumerate() {
-            if ab == ab_byte {
-                out[[i, j]] = 1;
-                break;
-            }
-        }
-    }
+        (out, new_offsets)
+    });
     Ok((
         out.into_pyarray(py),
         ndarray::Array1::from(new_offsets).into_pyarray(py),
