@@ -116,9 +116,23 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         if shape.count(None) >= 3:
             raise NotImplementedError("nested raggedness with R >= 3 is unsupported")
         off_list = offsets if isinstance(offsets, list) else [offsets]
-        off_list = [np.ascontiguousarray(o, dtype=OFFSET_TYPE) for o in off_list]
+        off_list = [
+            o
+            if (
+                isinstance(o, np.ndarray)
+                and o.dtype == OFFSET_TYPE
+                and o.flags.c_contiguous
+            )
+            else np.ascontiguousarray(o, dtype=OFFSET_TYPE)
+            for o in off_list
+        ]
         if str_offsets is not None:
-            str_offsets = np.ascontiguousarray(str_offsets, dtype=OFFSET_TYPE)
+            if not (
+                isinstance(str_offsets, np.ndarray)
+                and str_offsets.dtype == OFFSET_TYPE
+                and str_offsets.flags.c_contiguous
+            ):
+                str_offsets = np.ascontiguousarray(str_offsets, dtype=OFFSET_TYPE)
             return Ragged(
                 RaggedLayout(
                     data=data, offsets=off_list, shape=shape, str_offsets=str_offsets
@@ -127,21 +141,20 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             )
         if shape.count(None) == 0 and data.dtype.kind != "S":
             raise ValueError("shape must have a None ragged dimension")
-        # Eager data-size check for the R=1 / 1-D offsets path (parity with _array backend).
-        n_none = shape.count(None)
-        if n_none == 1 and len(off_list) == 1 and off_list[0].ndim == 1:
-            rag_dim = shape.index(None)
-            trailing = shape[rag_dim + 1 :]
-            # trailing cannot contain None here (n_none == 1 and rag_dim is the only None).
-            trailing_ints: list[int] = [d for d in trailing if d is not None]
-            trailing_size = int(np.prod(trailing_ints)) if trailing_ints else 1
-            # Skip the check when the offsets array is empty (no segments → empty Ragged).
-            if off_list[0].size > 0:
-                expected_size = int(off_list[0][-1]) * trailing_size
-                if data.size != expected_size:
-                    raise ValueError(
-                        f"Data size {data.size} does not match size implied by shape and contiguous offsets: {expected_size}"
-                    )
+        if validate:
+            # eager data-size check (only when validating)
+            n_none = shape.count(None)
+            if n_none == 1 and len(off_list) == 1 and off_list[0].ndim == 1:
+                rag_dim = shape.index(None)
+                trailing = shape[rag_dim + 1 :]
+                trailing_ints: list[int] = [d for d in trailing if d is not None]
+                trailing_size = int(np.prod(trailing_ints)) if trailing_ints else 1
+                if off_list[0].size > 0:
+                    expected_size = int(off_list[0][-1]) * trailing_size
+                    if data.size != expected_size:
+                        raise ValueError(
+                            f"Data size {data.size} does not match size implied by shape and contiguous offsets: {expected_size}"
+                        )
         return Ragged(_build_layout(data, shape, off_list), validate=validate)
 
     @staticmethod

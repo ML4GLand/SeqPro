@@ -167,3 +167,25 @@ def test_to_numpy_validate_false_multidim():
     rag = _r1([3, 3, 3, 3], shape=(2, 2, None))   # (2,2,None) uniform len 3
     out = rag.to_numpy(validate=False)
     assert out.shape == (2, 2, 3)
+
+
+def test_from_offsets_validate_true_raises_on_size_mismatch():
+    data = np.arange(10, dtype=np.int32)
+    bad = np.array([0, 4, 20], np.int64)   # implies 20 elements, data has 10
+    with pytest.raises(ValueError):
+        Ragged.from_offsets(data, (2, None), bad, validate=True)
+
+
+def test_from_offsets_default_skips_size_check():
+    data = np.arange(10, dtype=np.int32)
+    bad = np.array([0, 4, 20], np.int64)
+    # default validate=False: constructs without raising (caller's contract)
+    rag = Ragged.from_offsets(data, (2, None), bad)
+    assert rag.shape == (2, None)
+
+
+def test_from_offsets_preserves_already_canonical_offsets():
+    data = np.arange(7, dtype=np.int32)
+    off = np.array([0, 4, 7], np.int64)    # already C-contiguous int64
+    rag = Ragged.from_offsets(data, (2, None), off)
+    assert rag.offsets is off              # no ascontiguousarray copy
