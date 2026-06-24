@@ -16,7 +16,14 @@ avoidable cost on three operations. Best-of-5, dev env, shape `(B=128, P=2, ~200
 | leading-axis slice | 3.0 | 8.2 | 2.7× |
 | `view(dtype)` | 0.37 | 0.77 | 2.1× |
 | slice **+ to_packed** | — | 25–43 | — |
-| uniform densify | 0.34 (`to_fixed`) | 128 (`to_padded`) | 378× |
+| uniform densify | 0.34 (`to_fixed`) | 4.8 (`to_numpy`) | 14× |
+
+> **Correction.** An earlier draft of this table reported densify as 378× vs
+> `to_padded` (128 µs). That was a wrong-baseline artifact: `to_numpy()` *already*
+> does a zero-copy uniform reshape (verified: it shares the data buffer) at 4.8 µs.
+> The honest gap is 14×, and it is entirely `to_numpy`'s uniformity scan
+> (`np.diff` + `np.all(lengths == lengths[0])`) plus the `is_base` check — not the
+> reshape. See §2.
 
 The wins are **algorithmic, not language-bound** (per-op costs are 0.3–8 µs; a pyo3
 FFI hop is ~0.1–0.5 µs of overhead, which would eat much of the gain). Two root
@@ -28,9 +35,10 @@ causes:
    `data` pointed at the *entire* parent buffer. Any downstream code that needs
    contiguous `(N+1,)` offsets must then call `to_packed()` — a full copy (the
    25–43 µs row).
-2. **No uniform-length fast path for densify.** When every row has the same length
-   (fixed-output mode), the only tool is `to_padded`, which runs the pad kernel
-   (128 µs) where a pure reshape (0.34 µs) suffices.
+2. **`to_numpy()`'s uniform reshape always pays a uniformity scan.** The reshape
+   itself is zero-copy, but `to_numpy()` unconditionally scans `np.diff(offsets)` to
+   verify every row is the same length before reshaping — ~4.5 µs the caller can't
+   skip even when it constructed the buffer and *knows* it is uniform.
 
 This blocks GenVarLoader from retiring its `_Flat`/`_FlatAnnotatedHaps`/`FlatIntervals`
 shadow layer, which exists *only* to avoid these costs on the getitem hot path.
@@ -40,8 +48,10 @@ shadow layer, which exists *only* to avoid these costs on the getitem hot path.
 - **Substrate:** Python fast-paths in `_core.py` now; defer any Rust port to a
   tracking issue (hybrid). Rationale: the wins are algorithmic and the ops are
   µs-scale, so FFI overhead would erode the benefit.
-- **Uniform densify API:** new explicit `Ragged.to_fixed(length)` method (mirrors
-  gvl `_Flat.to_fixed`), not implicit magic inside `to_numpy`.
+- **Uniform densify:** **no new method.** `to_numpy()` already does the zero-copy
+  uniform reshape; add a `validate: bool = True` keyword to it that, when `False`,
+  skips the uniformity scan and trusts the caller (the "trust-me" path for callers
+  that control buffer construction, like gvl). See §2.
 - **`from_offsets` size check:** gated behind `validate` (default `validate=False`
   does no size validation) — accepted default-safety regression for the full
   construction win. See §3.
@@ -131,24 +141,46 @@ property test asserting `fast_path(x, sl)` equals `force_old_path(x, sl)`
 element-wise (compare `to_packed` data + per-row lengths) over randomized shapes and
 dtypes. A bug in any variant is caught before merge, never shipped.
 
-## §2 — `Ragged.to_fixed(length: int) -> NDArray`
+## §2 — `to_numpy(..., *, validate: bool = True)`
 
-Same contract as `to_padded`: non-record, ragged-axis-last.
+No new method. `to_numpy()` already reshapes a uniform Ragged zero-copy
+(`_core.py:1592-1600`); the only avoidable cost is its mandatory uniformity scan.
+Add a keyword-only `validate` flag that gates that scan.
 
 ```python
-def to_fixed(self, length: int) -> NDArray:
-    rag = self if self.is_contiguous else self.to_packed()
-    lengths = np.diff(rag.offsets)            # cheap; O(n_segments)
-    if rag.offsets.size and not (lengths == length).all():
-        raise ValueError(...)                 # non-uniform
-    return rag._rl.data.reshape(*leading, length)   # zero-copy when contiguous+uniform
+def to_numpy(self, allow_missing: bool = False, *, validate: bool = True):
+    ...
+    # single-level (R=1) path:
+    if validate:
+        lengths = self.lengths
+        if lengths.size and not np.all(lengths == lengths.flat[0]):
+            raise ValueError("cannot convert a jagged Ragged to a dense array")
+        row_len = int(lengths.flat[0]) if lengths.size else 0
+    else:
+        # trust the caller: infer row_len from offsets without scanning for uniformity.
+        # numpy's reshape still total-checks for free, so a grossly wrong buffer raises;
+        # a non-uniform buffer whose total happens to match is the caller's contract to avoid.
+        n_rows = <product of leading fixed dims>
+        row_len = (self.offsets[-1] // n_rows) if n_rows else 0
+    packed = self if self.is_base else self.to_packed()
+    leading = packed.shape[: packed.rag_dim]
+    return packed._rl.data.reshape(*(leading or (-1,)), row_len, *packed._rl.data.shape[1:])
 ```
 
-- Raises `ValueError` on any row whose length `!= length`.
-- Zero-copy reshape when already contiguous + uniform (the hot-path case); one
-  `to_packed` copy first if the input drifted to `(2, N)`.
-- Record / non-ragged-axis-last inputs raise `NotImplementedError`, matching
-  `to_padded`.
+- **`validate=True` (default):** unchanged behavior — scans and raises `ValueError`
+  on a jagged array. Safe.
+- **`validate=False`:** skips the `np.diff`/`np.all` uniformity scan; infers
+  `row_len` from offsets and reshapes. numpy's reshape still rejects a total-size
+  mismatch for free, so the only thing the caller takes responsibility for is
+  per-row uniformity. This is the ~0.34 µs hot path.
+- The flag threads through the **R=2** path (gate the `grp_lens`/`mid_lens`
+  uniformity `ValueError`s) and the **record** path (passed through to per-field
+  recursion), so `validate=False` is consistent across layouts.
+- `allow_missing` is unchanged and orthogonal.
+
+**Consumer (gvl, separate change):** replace `_Flat.to_fixed(L)` with
+`ragged.to_numpy(validate=False)` — gvl controls buffer construction in
+fixed-output mode, so it can assert uniformity by construction and skip the scan.
 
 ## §3 — Lean `from_offsets`
 
@@ -183,8 +215,10 @@ Acceptance is the bench (below): target `from_offsets` within ~1.1× of `_Flat`.
    result, element-wise (`to_packed` data + lengths), across random shapes/dtypes,
    including `rag_dim>1`, R=2, all string and record kinds, empty slices, and
    `step != 1` / non-contiguous → fallback.
-2. **`to_fixed`:** equals `to_padded` for uniform input; raises on non-uniform;
-   zero-copy (shares base) when contiguous+uniform.
+2. **`to_numpy(validate=...)`:** `validate=True` (default) result equals
+   `validate=False` result on uniform input and shares the data buffer (zero-copy);
+   `validate=True` still raises `ValueError` on a jagged array while `validate=False`
+   does not scan; consistent across R=1, R=2, and record layouts.
 3. **Full existing seqpro suite green** (update any test asserting `(2, N)` /
    full-buffer post-slice; `test_ragged_core.py`, `test_ragged_core_records.py`,
    `test_rag_to_packed.py`).
@@ -192,14 +226,15 @@ Acceptance is the bench (below): target `from_offsets` within ~1.1× of `_Flat`.
    data/offsets size mismatch; `validate=False` (default) constructs without raising.
    Update any existing test that relied on the eager default raise to pass
    `validate=True`.
-5. **Re-run the microbench**, gates: slice within ~1.2× of `_Flat`; `to_fixed`
-   within ~1.2×; `from_offsets` within ~1.1×.
+5. **Re-run the microbench**, gates: slice within ~1.2× of `_Flat`;
+   `to_numpy(validate=False)` within ~1.2×; `from_offsets` within ~1.1×.
 6. **Cross-repo parity:** run GenVarLoader's suite against an editable install of
    this branch (the byte-identical parity harness) — must stay byte-identical.
-7. **Docs:** update the `seqpro` agent skill for `to_fixed` + the slice-contiguity
-   note; file the deferred-Rust tracking issue.
+7. **Docs:** update the `seqpro` agent skill for `to_numpy(validate=...)` + the
+   slice-contiguity note; file the deferred-Rust tracking issue.
 
 ## Out of scope (this round)
 
-Rust port of any of this; changes to `to_numpy` / `to_padded` semantics; fast paths
-for non-step-1 or already-`(2, N)` slices (they keep using the gather path).
+Rust port of any of this; changes to `to_padded` semantics or to `to_numpy`'s
+default (`validate=True`) behavior beyond the new opt-in flag; fast paths for
+non-step-1 or already-`(2, N)` slices (they keep using the gather path).
