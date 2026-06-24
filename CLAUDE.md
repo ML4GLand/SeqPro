@@ -60,7 +60,7 @@ Most functions require callers to specify `length_axis` (which axis is sequence 
 
 ### Rust extension (`src/`)
 
-Only `kshuffle.rs` is compiled. It's exposed as `seqpro._k_shuffle` (called by `_modifiers.k_shuffle`). The Rust layer expects a contiguous `uint8` ndarray with the last dimension as sequence length.
+Several modules are compiled and registered in the `seqpro` PyO3 module (`lib.rs`): `kshuffle.rs` (k-mer shuffle, `_k_shuffle`, called by `_modifiers.k_shuffle`), `translate.rs` (codon translation, the `_translate_*` functions), and `ragged.rs` (re-exports `seqpro-core::ragged` for the `_ragged_*` functions). `kmer_encode.rs` provides a rolling k-mer integer encoder used internally. Kernels expect contiguous arrays (e.g. k-shuffle takes a `uint8` ndarray with the last dimension as sequence length) and release the GIL via `py.detach()` during compute.
 
 ### Ragged arrays (`rag/`)
 
