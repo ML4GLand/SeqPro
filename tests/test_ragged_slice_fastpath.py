@@ -145,6 +145,38 @@ def test_record_r2_parity(sl):
     assert_slice_parity(_record_r2(), sl)
 
 
+def _record_r2_multidim_outer():
+    """Record R=2 with a middle fixed dim: shape (B=2, P=2, None, None).
+    _outer_n_inner() returns 2; there are B*P=4 offset entries in o0."""
+    o0 = lengths_to_offsets(np.array([1, 2, 1, 1], np.int64))  # 4 entries for B*P
+    o1 = lengths_to_offsets(np.array([3, 2, 4, 1, 5], np.int64))
+    n = int(o1[-1])
+    a = Ragged.from_offsets(np.arange(n, dtype=np.int32), (2, 2, None, None), [o0, o1])
+    b = Ragged.from_offsets(
+        np.arange(n, dtype=np.float32), (2, 2, None, None), [o0, o1]
+    )
+    return Ragged.from_fields({"a": a, "b": b})
+
+
+def test_record_r2_multidim_outer_preserves_middle_dim():
+    """Slicing a (B, P, None, None) record must keep P in the result shape."""
+    rag = _record_r2_multidim_outer()
+    sl = slice(0, 1)
+    result = rag[sl]
+    # shape must be (1, 2, None, None) — NOT (1, None, None)
+    assert result.shape == (1, 2, None, None), (
+        f"expected (1, 2, None, None), got {result.shape}"
+    )
+    assert result.is_contiguous
+    # per-element ground-truth oracle (old gather path broken for multidim-outer)
+    assert to_py(result) == [to_py(rag[i]) for i in range(0, 1)]
+
+    # also check full-range slice
+    result_all = rag[slice(None)]
+    assert result_all.shape == (2, 2, None, None)
+    assert to_py(result_all) == [to_py(rag[i]) for i in range(2)]
+
+
 def test_to_numpy_validate_false_matches_true():
     off = np.arange(4 + 1, dtype=np.int64) * 3  # 4 uniform rows of len 3
     data = np.arange(4 * 3, dtype=np.int32)

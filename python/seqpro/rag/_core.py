@@ -600,12 +600,14 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         m0, m1 = int(o0[g0]), int(o0[g1])
         d0, d1 = int(o1[m0]), int(o1[m1])
         shared = [o0[g0 : g1 + 1] - m0, o1[m0 : m1 + 1] - d0]
-        out_tail = rec.shape[rec.shape.index(None) :]
+        out_tail = rec.shape[
+            1:
+        ]  # preserve any fixed dim(s) between outer and first None
         new_fields = {
             name: RaggedLayout(
                 data=fl.data[d0:d1],
                 offsets=shared,
-                shape=(stop - start, *fl.shape[fl.shape.index(None) :]),
+                shape=(stop - start, *fl.shape[1:]),
             )
             for name, fl in rec.fields.items()
         }
