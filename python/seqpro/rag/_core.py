@@ -478,7 +478,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             return None  # Task 4/5
         rl = self._rl
         if rl.is_string:
-            return None  # Task 3
+            return self._slice_contig_string(start, stop)
         if rl.n_ragged == 2:
             return self._slice_contig_r2(start, stop)
         if rl.n_ragged == 1:
@@ -496,6 +496,35 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         new_shape = (stop - start, *rl.shape[1:])
         return Ragged(
             RaggedLayout(data=new_data, offsets=[new_off], shape=new_shape)
+        )
+
+    def _slice_contig_string(self, start: int, stop: int) -> "Ragged[Any]":
+        rl = self._rl
+        so = rl.str_offsets
+        if rl.n_ragged == 0:
+            # flat string collection: shape (N,), no axis offsets; slice str_offsets
+            b0, b1 = int(so[start]), int(so[stop])
+            new_so = so[start : stop + 1] - b0
+            new_data = rl.data[b0:b1]
+            return Ragged(
+                RaggedLayout(
+                    data=new_data, offsets=[], shape=(stop - start,), str_offsets=new_so
+                )
+            )
+        # string-under-axis: O0 (outer -> variant) then str_offsets (variant -> byte)
+        n_inner = self._outer_n_inner()
+        o0 = rl.offsets[0]
+        g0, g1 = start * n_inner, stop * n_inner
+        v0, v1 = int(o0[g0]), int(o0[g1])
+        new_o0 = o0[g0 : g1 + 1] - v0
+        b0, b1 = int(so[v0]), int(so[v1])
+        new_so = so[v0 : v1 + 1] - b0
+        new_data = rl.data[b0:b1]
+        new_shape = (stop - start, *rl.shape[1:])
+        return Ragged(
+            RaggedLayout(
+                data=new_data, offsets=[new_o0], shape=new_shape, str_offsets=new_so
+            )
         )
 
     def _slice_contig_r2(self, start: int, stop: int) -> "Ragged[Any]":

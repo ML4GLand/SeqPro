@@ -81,3 +81,30 @@ def test_r2_parity(sl):
     # 3 groups with 2,1,2 middle segments; middles have these lengths
     rag = _r2([2, 1, 2], [4, 3, 5, 2, 6])
     assert_slice_parity(rag, sl)
+
+
+def _str_flat(strings):
+    """Flat opaque-string collection: shape (N,)."""
+    data = np.frombuffer(b"".join(strings), dtype="S1")
+    so = lengths_to_offsets(np.array([len(s) for s in strings], np.int64))
+    return Ragged.from_offsets(data, (len(strings),), so, str_offsets=so)
+
+
+def _str_under_axis(rows):
+    """String-under-axis: shape (N, None); each row is a list of byte strings."""
+    flat = [s for row in rows for s in row]
+    data = np.frombuffer(b"".join(flat), dtype="S1")
+    so = lengths_to_offsets(np.array([len(s) for s in flat], np.int64))
+    o0 = lengths_to_offsets(np.array([len(r) for r in rows], np.int64))
+    return Ragged.from_offsets(data, (len(rows), None), o0, str_offsets=so)
+
+
+@pytest.mark.parametrize("sl", [slice(1, 3), slice(0, 4), slice(2, 2), slice(None)])
+def test_string_flat_parity(sl):
+    assert_slice_parity(_str_flat([b"AC", b"GGG", b"T", b"CCGT"]), sl)
+
+
+@pytest.mark.parametrize("sl", [slice(0, 2), slice(1, 3), slice(2, 2)])
+def test_string_under_axis_parity(sl):
+    rows = [[b"AC", b"G"], [b"TT"], [b"CCG", b"A", b"T"]]
+    assert_slice_parity(_str_under_axis(rows), sl)
