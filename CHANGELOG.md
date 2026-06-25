@@ -1,3 +1,23 @@
+## 0.20.0 (2026-06-25)
+
+### Feat
+
+- **rag**: to_numpy(validate=False) skips the uniformity scan
+- **rag**: contiguous-slice fast path for record R=2 getitem
+- **rag**: contiguous-slice fast path for record R=1 getitem
+- **rag**: contiguous-slice fast path for opaque-string getitem
+- **rag**: contiguous-slice fast path for R=2 getitem
+- **rag**: contiguous-slice fast path for R=1 getitem
+
+### Fix
+
+- **rag**: preserve middle fixed dim in record R=2 slice shape-tail
+
+### Perf
+
+- **rust**: release the GIL during PyO3 kernel compute
+- **rag**: lean from_offsets — elide ascontiguousarray, gate size-check behind validate
+
 ## 0.19.1 (2026-06-23)
 
 ## 0.19.0 (2026-06-23)
