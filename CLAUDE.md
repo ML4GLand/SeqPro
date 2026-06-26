@@ -71,6 +71,12 @@ Several modules are compiled and registered in the `seqpro` PyO3 module (`lib.rs
 - All sequence arrays use `|S1` (single-byte ASCII) as the canonical in-memory format for string sequences, and `uint8` for OHE.
 - Axis arguments (`length_axis`, `ohe_axis`) are always integers referring to the NumPy axis index; negative indexing is supported.
 - The `transforms/` module wraps functional ops into callable objects with `__call__` for use in data pipelines.
+- **Ragged operations: free function is canonical, method delegates.** Public
+  Ragged/sequence operations live as free functions in the relevant `_ops`-style
+  module (the implementation home, e.g. `rag/_ops.py`); the corresponding
+  `Ragged` method is a thin one-line delegator to it (e.g. `Ragged.hash` →
+  `rag._ops.hash`). Add new operations this way. This matches
+  `reverse_complement` and `concatenate`.
 - Conventional commits are enforced — use `feat:`, `fix:`, `ci:`, `bump:`, `refactor:`, `docs:`, etc. prefixes.
 - **Validation is opt-in and front-loaded.** Add fast-fail/input validation via a `validate=` flag (or equivalent single opt-in), not per-feature `error` modes. There must be one obvious way to ask "is this input clean?" — don't duplicate the check across parameters.
 - **No naive NumPy in hot paths.** Never use raw Python loops or naive NumPy (e.g. per-segment `np.concatenate`, Python `for` over sequences) where a Numba kernel is faster and leaner — unless the NumPy version is *verifiably* comparable in time and memory. When Numba is a poor fit (graph algorithms like k-shuffle), use the Rust/PyO3 extension (`src/`).

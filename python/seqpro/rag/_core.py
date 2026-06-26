@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Generic, Sequence, TypeVar, cast
+from typing import Any, Generic, Literal, Sequence, TypeVar, cast
 
 import numpy as np
 from numpy.lib.mixins import NDArrayOperatorsMixin
@@ -1723,6 +1723,17 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             result, np.ndarray
         )  # outer_view is R=1 with trailing dim, always dense
         return result
+
+    def hash(
+        self,
+        algo: "Literal['md5', 'sha256', 'rapidhash']",
+        *,
+        seed: "int | None" = None,
+    ) -> "NDArray[Any] | Ragged[Any]":
+        """Hash each string element. Thin delegator to :func:`seqpro.rag.hash`."""
+        from ._ops import hash as _hash
+
+        return _hash(self, algo, seed=seed)
 
     def to_numpy(
         self, allow_missing: bool = False, *, validate: bool = True
