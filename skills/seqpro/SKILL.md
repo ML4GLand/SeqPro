@@ -43,6 +43,7 @@ Python/Rust package for fast biological-sequence processing. Python+NumPy+Numba 
 | Nucleotide content | `sp.nucleotide_content(x, alphabet, length_axis=-1)` | |
 | Coverage binning | `sp.bin_coverage(arr, bin_width, length_axis)` | |
 | BED / GTF I/O | `sp.bed.read_bedlike(...)`, `sp.gtf.read_gtf(...)` | polars/pyranges-backed |
+| Hash ragged strings | `rag.hash("sha256"\|"md5"\|"rapidhash")` |
 
 For exact signatures and kwargs, read the docstring directly (`sp.<fn>?` in a REPL, or open the source — files are short).
 
@@ -126,6 +127,25 @@ The inputs **must share the same offsets object** (pass the same `shared_offsets
 - `rag["field"]` gives zero-copy single-field access and shares the parent's offsets object. Its `.data` is the flat NumPy buffer for that field.
 - `rag.to_numpy()` on a record layout returns a **dict `{field: dense ndarray}`** (raises if any field is still jagged — lengths must be uniform for a dense conversion).
 - `view` and `apply` are **not defined** on record layouts — operate per-field.
+
+### Hashing strings
+
+Hash each string in a `Ragged` (opaque-string or S1-chars leaf, any depth) with
+a parallel Rust kernel:
+
+```python
+digests = rag.hash("sha256")        # (N, 32) uint8, one digest per string
+md5s    = rag.hash("md5")           # (N, 16) uint8
+fast    = rag.hash("rapidhash")     # (N,) uint64
+seeded  = rag.hash("rapidhash", seed=42)   # seed valid for rapidhash only
+# equivalently: sp.rag.hash(rag, "sha256")
+```
+
+Output mirrors the structure *above* the string level: a regular NumPy array
+when strings aren't grouped (flat `(N, …)` / leading fixed dims), or a `Ragged`
+reusing the outer offsets when they are (`(G, None, 16/32)` for md5/sha256,
+`(G, None)` uint64 for rapidhash). Numeric and record-layout Rageds are
+rejected.
 
 ### NumPy interop — what you can rely on
 
