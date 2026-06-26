@@ -1,3 +1,4 @@
+pub mod hashing;
 pub mod kmer_encode;
 pub mod kshuffle;
 #[cfg(test)]
@@ -36,6 +37,7 @@ fn seqpro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_ragged_concat, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_to_padded, m)?)?;
     m.add_function(wrap_pyfunction!(_ragged_reverse_complement, m)?)?;
+    m.add_function(wrap_pyfunction!(hashing::_ragged_hash, m)?)?;
     Ok(())
 }
 

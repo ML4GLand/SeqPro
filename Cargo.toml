@@ -18,7 +18,11 @@ anyhow = "1.0.99"
 ndarray = { version = "0.17", features = ["rayon"] }
 numpy = "0.28.0"
 rand = { version = "0.8.5", features = ["small_rng"] }
+digest = "0.10"
+md-5 = "0.10"
+rapidhash = "4"
 rayon = "1.11.0"
+sha2 = "0.10"
 thiserror = "1.0.69"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
