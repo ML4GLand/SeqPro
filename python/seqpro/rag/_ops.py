@@ -8,7 +8,7 @@ through awkward-array ops, which is the hot path for per-batch transforms
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 from ._core import Ragged, is_rag_dtype
 from ._utils import OFFSET_TYPE
 
-__all__ = ["concatenate", "reverse_complement", "to_packed", "to_padded"]
+__all__ = ["concatenate", "hash", "reverse_complement", "to_packed", "to_padded"]
 
 
 def reverse_complement(
@@ -405,3 +405,100 @@ def concatenate(rags: Any, axis: int) -> "Ragged[Any]":
     if trailing_ints:
         out_data = out_data.reshape(-1, *trailing_ints)
     return Ragged.from_offsets(out_data, ref.shape, out_offsets)
+
+
+def hash(  # noqa: A001
+    rag: "Ragged[Any]",
+    algo: Literal["md5", "sha256", "rapidhash"],
+    *,
+    seed: int | None = None,
+) -> "NDArray[Any] | Ragged[Any]":
+    """Hash each string in a Ragged container (md5, sha256, or rapidhash).
+
+    Each string is hashed independently by a rayon-parallel Rust kernel. Works
+    for both string representations — an opaque-string leaf (dtype ``'S'``) and
+    a chars/S1 leaf (dtype ``|S1``) — at any ragged depth.
+
+    Parameters
+    ----------
+    rag
+        A string Ragged (opaque or S1 chars). Numeric leaves and record-layout
+        arrays are rejected.
+    algo
+        ``"md5"`` (16-byte digest), ``"sha256"`` (32-byte digest), or
+        ``"rapidhash"`` (8-byte ``uint64``).
+    seed
+        Only valid for ``"rapidhash"``; seeds the portable hash. Supplying it
+        for md5/sha256 raises ``ValueError``.
+
+    Returns
+    -------
+    NDArray or Ragged
+        One digest per string, in packed order. When the input has no ragged
+        level above the string level, a regular array: ``(*leading, 16/32)``
+        ``uint8`` (md5/sha256) or ``(*leading,)`` ``uint64`` (rapidhash). When
+        the input groups strings under an outer axis, a single-level ``Ragged``
+        reusing those outer offsets, with a fixed-size digest leaf.
+    """
+    if not isinstance(rag, Ragged):
+        rag = Ragged(rag)
+    if rag._is_record:
+        raise NotImplementedError(
+            "hash is not defined on record-layout Ragged arrays; "
+            "hash fields individually."
+        )
+
+    valid = ("md5", "sha256", "rapidhash")
+    if algo not in valid:
+        raise ValueError(f"unknown algo {algo!r}; expected one of {valid}")
+    if seed is not None and algo != "rapidhash":
+        raise ValueError(f"seed is only valid for algo='rapidhash', not {algo!r}")
+
+    rl = rag._rl
+    if rl.str_offsets is None:
+        # chars / S1 leaf: must be single-byte and have a ragged axis.
+        if rl.data.dtype.kind != "S" or rl.data.dtype.itemsize != 1:
+            raise ValueError(
+                "hashing requires string/char data (opaque 'S' or |S1), "
+                f"got dtype {rl.data.dtype!r}"
+            )
+        if not rag._layout.offsets:
+            raise ValueError(
+                "hashing requires a string collection (a ragged axis or opaque "
+                "str_offsets); got a flat regular array"
+            )
+
+    packed = rag.to_packed()
+    prl = packed._rl
+    if prl.str_offsets is not None:
+        delimiters = prl.str_offsets
+        outer_offsets = list(packed._layout.offsets)
+    else:
+        delimiters = packed._layout.offsets[-1]
+        outer_offsets = list(packed._layout.offsets[:-1])
+
+    data_u1 = np.ascontiguousarray(prl.data).reshape(-1).view(np.uint8)
+    delimiters = np.ascontiguousarray(delimiters, dtype=OFFSET_TYPE)
+
+    from seqpro.seqpro import _ragged_hash  # type: ignore[missing-import]  # rust
+
+    digests = _ragged_hash(data_u1, delimiters, algo, seed)
+
+    if not outer_offsets:
+        # No grouping above the string level -> regular array, reshaped to any
+        # leading fixed dims (mirrors Ragged.lengths).
+        shape = packed._layout.shape
+        str_axis = shape.index(None) if None in shape else len(shape)
+        leading = [d for d in shape[:str_axis] if d is not None]
+        if leading:
+            return digests.reshape(*leading, *digests.shape[1:])
+        return digests
+
+    # Grouped -> single-level Ragged reusing the input's outer offsets.
+    o0 = outer_offsets[0]
+    g = int(o0.shape[0]) - 1
+    if digests.ndim == 2:
+        out_shape: tuple[int | None, ...] = (g, None, digests.shape[1])
+    else:
+        out_shape = (g, None)
+    return Ragged.from_offsets(digests, out_shape, o0)
