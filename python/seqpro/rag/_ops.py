@@ -407,7 +407,7 @@ def concatenate(rags: Any, axis: int) -> "Ragged[Any]":
     return Ragged.from_offsets(out_data, ref.shape, out_offsets)
 
 
-def hash(  # noqa: A001
+def hash(  # noqa: A001  (intentional hashlib-style name; mirrors rag.zip)
     rag: "Ragged[Any]",
     algo: Literal["md5", "sha256", "rapidhash"],
     *,

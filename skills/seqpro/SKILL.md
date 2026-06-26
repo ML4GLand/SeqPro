@@ -43,7 +43,7 @@ Python/Rust package for fast biological-sequence processing. Python+NumPy+Numba 
 | Nucleotide content | `sp.nucleotide_content(x, alphabet, length_axis=-1)` | |
 | Coverage binning | `sp.bin_coverage(arr, bin_width, length_axis)` | |
 | BED / GTF I/O | `sp.bed.read_bedlike(...)`, `sp.gtf.read_gtf(...)` | polars/pyranges-backed |
-| Hash ragged strings | `rag.hash("sha256"\|"md5"\|"rapidhash")` |
+| Hash ragged strings | `rag.hash("sha256"\|"md5"\|"rapidhash")` | calls Rust kernel; seed for rapidhash only |
 
 For exact signatures and kwargs, read the docstring directly (`sp.<fn>?` in a REPL, or open the source — files are short).
 

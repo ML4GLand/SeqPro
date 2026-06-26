@@ -133,14 +133,37 @@ def test_crypto_grouped_returns_ragged(algo, hl, ctor):
     np.testing.assert_array_equal(packed, expected)
 
 
-def test_rapidhash_grouped_returns_ragged_uint64():
+@pytest.mark.parametrize("ctor", [_chars_r2, _opaque_under_axis])
+def test_rapidhash_grouped_returns_ragged_uint64(ctor):
     groups = [[b"AA", b"B"], [b"CCC"]]
-    r = _chars_r2(groups)
+    r = ctor(groups)
     out = r.hash("rapidhash")
     assert isinstance(out, Ragged)
     assert out.to_packed().data.dtype == np.uint64
     o0 = np.cumsum([0] + [len(g) for g in groups]).astype(np.int64)
     np.testing.assert_array_equal(out.offsets, o0)
+
+
+def test_leading_fixed_dims_regular_output():
+    """Exercises the reshape branch in hash() for inputs with leading fixed dims.
+
+    Constructs a chars Ragged with shape (B, M, None) — one ragged dim, two
+    leading fixed dims — and confirms the output is reshaped to (B, M, 16).
+    """
+    B, M = 2, 2
+    strings = [b"ACGT", b"hello", b"foo", b"bar"]
+    data = np.frombuffer(b"".join(strings), dtype="S1")
+    offsets = np.concatenate([[0], np.cumsum([len(s) for s in strings])]).astype(
+        np.int64
+    )
+    r = Ragged.from_offsets(data, (B, M, None), offsets)
+    out = r.hash("md5")
+    assert not isinstance(out, Ragged), "expected a regular NDArray, got Ragged"
+    assert out.shape == (B, M, 16), f"expected ({B}, {M}, 16), got {out.shape}"
+    flat = out.reshape(B * M, 16)
+    for i, s in enumerate(strings):
+        expected = np.frombuffer(hashlib.md5(s).digest(), dtype=np.uint8)
+        np.testing.assert_array_equal(flat[i], expected)
 
 
 # --- equivalences and edges -------------------------------------------------
