@@ -1,3 +1,10 @@
+## 0.21.0 (2026-06-26)
+
+### Feat
+
+- **rag**: add Ragged.hash / sp.rag.hash (md5/sha256/rapidhash)
+- **rust**: add _ragged_hash kernel (md5/sha256/rapidhash, rayon)
+
 ## 0.20.0 (2026-06-25)
 
 ### Feat
