@@ -330,6 +330,19 @@ def test_to_numpy_jagged_raises():
         rag.to_numpy()
 
 
+@pytest.mark.parametrize("validate", [True, False])
+def test_to_numpy_indexed_empty_row(validate):
+    # Regression for #67: an empty row (length 0) obtained by indexing a
+    # multi-dimensional Ragged (is_base=False) must convert to an empty dense
+    # array instead of raising on the final reshape.
+    data = np.array([5, 7], np.int32)
+    rag = Ragged.from_lengths(data, np.array([[[2], [0]]]))
+    empty = rag[0, 1, 0]
+    assert not empty.is_base
+    out = empty.to_numpy(validate=validate)
+    assert out.shape == (1, 0)
+
+
 def test_ingest_from_ak_numeric():
     arr = ak.Array([[1, 2, 3], [4, 5]])
     rag = Ragged(arr)

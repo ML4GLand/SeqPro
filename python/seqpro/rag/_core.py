@@ -1786,6 +1786,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 raise ValueError("cannot convert a jagged Ragged to a dense array")
             packed = self if self.is_base else self.to_packed()
             row_len = int(lengths.flat[0]) if lengths.size else 0
+            n_rows = lengths.size
         else:
             # trust the caller: infer row_len from total // n_rows, no uniformity
             # scan. numpy's reshape still rejects a total-size mismatch for free.
@@ -1799,8 +1800,11 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             total = packed._rl.data.shape[0]
             row_len = total // n_rows if n_rows else 0
         leading = packed.shape[: packed.rag_dim]
+        # When fully indexed to a single ragged axis, `leading` is empty; use the
+        # explicit row count instead of -1 so an empty row (row_len == 0) reshapes
+        # cleanly (numpy cannot infer -1 against a 0 dimension). See #67.
         return packed._rl.data.reshape(  # pyrefly: ignore[no-matching-overload]
-            *(leading or (-1,)), row_len, *packed._rl.data.shape[1:]
+            *(leading or (n_rows,)), row_len, *packed._rl.data.shape[1:]
         )
 
     def __array__(self, dtype: Any = None) -> NDArray[Any]:
