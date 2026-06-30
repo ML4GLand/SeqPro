@@ -1,3 +1,9 @@
+## 0.21.1 (2026-06-30)
+
+### Fix
+
+- **rag**: handle indexed empty row in Ragged.to_numpy
+
 ## 0.21.0 (2026-06-26)
 
 ### Feat
