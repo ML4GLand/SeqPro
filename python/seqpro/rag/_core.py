@@ -1042,12 +1042,19 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             # negatives and bounds-check over just the k selected indices,
             # raising IndexError (numpy contract) — this also unifies the
             # error type across the Rust and numpy-fallback gather paths.
-            idx = np.atleast_1d(np.asarray(where))
-            if idx.dtype.kind not in "iu":
-                raise IndexError(
-                    "only integers, slices (`:`), and integer arrays are valid indices"
-                )
-            idx = idx.astype(np.int64, copy=False)
+            arr = np.asarray(where)
+            if arr.dtype.kind not in "iu":
+                # An empty untyped sequence (e.g. `[]`) coerces to float64 but
+                # is a valid empty index — numpy allows `a[[]]`. A non-empty or
+                # ndarray-typed non-integer index stays rejected (numpy rejects
+                # both `a[[0.0]]` and `a[np.array([])]`).
+                if arr.size == 0 and not isinstance(where, np.ndarray):
+                    arr = arr.astype(np.int64)
+                else:
+                    raise IndexError(
+                        "only integers, slices (`:`), and integer arrays are valid indices"
+                    )
+            idx = np.atleast_1d(arr).astype(np.int64, copy=False)
             neg = idx < 0
             if neg.any():
                 idx = np.where(neg, idx + n, idx)

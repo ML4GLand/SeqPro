@@ -30,12 +30,15 @@ def reference_resolve(where: Any, n: int) -> np.ndarray:
 def candidate_resolve(where: Any, n: int) -> np.ndarray:
     """Proposed O(k) integer-array resolution. Body is copied verbatim into
     Ragged._gather_indices in Task 3."""
-    idx = np.atleast_1d(np.asarray(where))
-    if idx.dtype.kind not in "iu":
-        raise IndexError(
-            "only integers, slices (`:`), and integer arrays are valid indices"
-        )
-    idx = idx.astype(np.int64, copy=False)
+    arr = np.asarray(where)
+    if arr.dtype.kind not in "iu":
+        if arr.size == 0 and not isinstance(where, np.ndarray):
+            arr = arr.astype(np.int64)
+        else:
+            raise IndexError(
+                "only integers, slices (`:`), and integer arrays are valid indices"
+            )
+    idx = np.atleast_1d(arr).astype(np.int64, copy=False)
     neg = idx < 0
     if neg.any():
         idx = np.where(neg, idx + n, idx)
@@ -58,6 +61,7 @@ def _check_oracle() -> None:
         3,  # scalar int
         np.array([-1, -2, -32]),  # negatives -> normalized
         np.array([], dtype=np.int64),  # empty
+        [],  # bare empty python list -> empty selection
         [0, 2, 4],  # python list
         np.array([1, 1, 1, 1]),  # repeated (k can exceed n)
         np.arange(64) % n,  # k > n

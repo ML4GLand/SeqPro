@@ -435,6 +435,14 @@ def test_getitem_int_array_empty():
     assert got.shape == (0, None)
 
 
+def test_getitem_empty_list_selects_nothing():
+    # Bare Python empty list must behave like numpy `a[[]]` (empty selection),
+    # not raise — regression guard for the O(k) gather refactor (issue #69).
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    got = rag[[]]
+    assert got.shape == (0, None)
+
+
 def test_getitem_scalar_and_list_parity():
     rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
     from_list = rag[[1]]
