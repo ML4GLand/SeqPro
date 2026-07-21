@@ -1038,8 +1038,24 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 )
             idx = np.flatnonzero(where).astype(np.int64)
         else:
-            idx = np.atleast_1d(np.asarray(np.arange(n)[where], dtype=np.int64))
-            idx = np.where(idx < 0, idx + n, idx)
+            # O(k) resolution: no full-range arange allocation. Normalize
+            # negatives and bounds-check over just the k selected indices,
+            # raising IndexError (numpy contract) — this also unifies the
+            # error type across the Rust and numpy-fallback gather paths.
+            idx = np.atleast_1d(np.asarray(where))
+            if idx.dtype.kind not in "iu":
+                raise IndexError(
+                    "only integers, slices (`:`), and integer arrays are valid indices"
+                )
+            idx = idx.astype(np.int64, copy=False)
+            neg = idx < 0
+            if neg.any():
+                idx = np.where(neg, idx + n, idx)
+            oob = (idx < 0) | (idx >= n)
+            if oob.any():
+                raise IndexError(
+                    f"index {int(idx[oob][0])} is out of bounds for axis 0 with size {n}"
+                )
         try:
             from seqpro.seqpro import _ragged_select  # type: ignore[missing-import]
 
