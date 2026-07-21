@@ -399,6 +399,54 @@ def test_getitem_undersized_bool_mask_raises():
         rag[np.array([True, False])]
 
 
+def test_getitem_int_array_selects_rows():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    got = rag[np.array([0, 2])]
+    assert got.shape == (2, None)
+    np.testing.assert_array_equal(got[0], np.array([0, 1, 2]))  # row 0 -> data 0:3
+    np.testing.assert_array_equal(
+        got[1], np.array([5, 6, 7, 8, 9])
+    )  # row 2 -> data 5:10
+
+
+def test_getitem_int_array_negative_normalization_parity():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    pos = rag[np.array([0, 2])]
+    neg = rag[np.array([-3, -1])]  # same rows via negative indexing
+    np.testing.assert_array_equal(neg[0], pos[0])
+    np.testing.assert_array_equal(neg[1], pos[1])
+
+
+def test_getitem_int_array_out_of_bounds_positive_raises():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    with pytest.raises(IndexError):
+        rag[np.array([0, 3])]  # 3 rows, index 3 is OOB
+
+
+def test_getitem_int_array_out_of_bounds_negative_raises():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    with pytest.raises(IndexError):
+        rag[np.array([-4])]  # 3 rows, -4 normalizes to -1 -> OOB
+
+
+def test_getitem_int_array_empty():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    got = rag[np.array([], dtype=np.int64)]
+    assert got.shape == (0, None)
+
+
+def test_getitem_scalar_and_list_parity():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    from_list = rag[[1]]
+    np.testing.assert_array_equal(from_list[0], np.array([3, 4]))  # row 1 -> data 3:5
+
+
+def test_getitem_float_index_raises():
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    with pytest.raises(IndexError):
+        rag[np.array([0.0, 1.0])]
+
+
 def test_is_string_predicate():
     s = Ragged.from_lengths(np.frombuffer(b"catdog", "S1"), np.array([3, 3]))
     n = Ragged.from_lengths(np.arange(6, dtype=np.int32), np.array([3, 3]))
