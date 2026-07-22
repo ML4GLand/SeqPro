@@ -443,6 +443,19 @@ def test_getitem_empty_list_selects_nothing():
     assert got.shape == (0, None)
 
 
+def test_getitem_bool_list_raises():
+    # A boolean *mask* must be an np.ndarray (see _where_is_bool); a plain
+    # Python list of bools is intentionally NOT treated as a mask. It falls
+    # through to the integer-index path and is rejected as a non-integer index.
+    # This is a deliberate, documented narrowing vs. raw-numpy's `a[[True, ...]]`
+    # masking (issue #69) — masks go through np.ndarray, keeping the integer
+    # gather O(k). The supported ndarray-mask path is covered by the
+    # test_getitem_*bool_mask* tests.
+    rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
+    with pytest.raises(IndexError):
+        rag[[True, False, True]]
+
+
 def test_getitem_scalar_and_list_parity():
     rag = Ragged.from_lengths(np.arange(10, dtype=np.int32), np.array([3, 2, 5]))
     from_list = rag[[1]]
