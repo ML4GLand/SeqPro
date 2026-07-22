@@ -1,3 +1,15 @@
+## 0.21.2 (2026-07-22)
+
+### Fix
+
+- **translate**: satisfy clippy byte_char_slices lint in test
+- **rag**: preserve empty-list indexing in O(k) gather (issue #69)
+
+### Perf
+
+- **rag**: O(k) integer-array gather in _gather_indices (closes #69)
+- **rag**: benchmark harness for O(k) ragged fancy-index gather (issue #69)
+
 ## 0.21.1 (2026-06-30)
 
 ### Fix
