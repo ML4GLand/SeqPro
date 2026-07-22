@@ -172,9 +172,7 @@ mod tests {
     fn parallel_lut_matches_serial() {
         // Build a ~50k-codon random-ish ACGT buffer
         let codons = 50_000usize;
-        let buf: Vec<u8> = (0..codons * 3)
-            .map(|i| [b'A', b'C', b'G', b'T'][i % 4])
-            .collect();
+        let buf: Vec<u8> = (0..codons * 3).map(|i| b"ACGT"[i % 4]).collect();
         let mut out_serial = vec![0u8; codons];
         let mut out_par = vec![0u8; codons];
         translate_lut_into(&buf, 3, &lut(), b'X', &mut out_serial);
