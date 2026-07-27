@@ -1,3 +1,18 @@
+## 0.22.0 (2026-07-27)
+
+### BREAKING CHANGE
+
+- peeling a record row returns opaque-string fields as a
+Ragged of strings, not a concatenated S1 array.
+- Ragged.__getitem__ with an integer on a string-under-axis
+array returns a Ragged of strings, not one concatenated bytes. Use
+b"".join(s[i]) for the old value.
+
+### Fix
+
+- **rag**: preserve string boundaries in peeled record rows
+- **rag**: preserve string boundaries when indexing string-under-axis
+
 ## 0.21.2 (2026-07-22)
 
 ### Fix
