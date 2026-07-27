@@ -1242,11 +1242,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             out: dict[str, Any] = {}
             for name, fl in rec.fields.items():
                 if fl.str_offsets is not None:
-                    so = fl.str_offsets
-                    row = fl.data[int(so[lo]) : int(so[hi])]
+                    # Each field carries its own str_offsets (Spec C Section 5);
+                    # peel it against the shared lo/hi so every field of the row
+                    # has the same length (issue #71).
+                    out[name] = Ragged(_peel_string_row(fl, lo, hi))
                 else:
-                    row = fl.data[lo:hi]
-                out[name] = row
+                    out[name] = fl.data[lo:hi]
             return out
         sel_starts, sel_stops = self._row_gather(where)
         new_offsets = np.stack([sel_starts, sel_stops], 0)

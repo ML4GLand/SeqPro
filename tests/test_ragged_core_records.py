@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from seqpro.rag._core import Ragged
 from seqpro.rag._layout import RaggedLayout, RecordLayout, validate_layout
-from seqpro.rag._utils import lengths_to_offsets
+from seqpro.rag._utils import OFFSET_TYPE, lengths_to_offsets
 
 
 def _two_field_record():
@@ -680,3 +680,65 @@ def test_record_string_under_axis_to_packed():
     packed = rec.to_packed()
     assert packed["ref"].to_ak().to_list() == [[b"A"], [b"CG"]]
     assert packed["alt"].to_ak().to_list() == [[b"TT"], [b"GG"]]
+
+
+# ---------------------------------------------------------------------------
+# Issue #71: string fields of a peeled record row keep their boundaries
+# ---------------------------------------------------------------------------
+
+
+def _issue71_record():
+    """Record with an opaque-string field and a numeric field sharing offsets.
+
+    Groups: 0 -> ('A', 'GG') / starts (1, 2), 1 -> ('TC',) / starts (3,).
+    Group 0's second allele is multi-byte, so a 1-byte coincidence cannot
+    mask a regression.
+    """
+    outer = np.array([0, 2, 3], dtype=OFFSET_TYPE)
+    alt = Ragged.from_offsets(
+        np.frombuffer(b"AGGTC", dtype="S1"),
+        (2, None),
+        outer,
+        str_offsets=np.array([0, 1, 3, 5], dtype=OFFSET_TYPE),
+    )
+    start = Ragged.from_offsets(np.array([1, 2, 3], dtype=np.int32), (2, None), outer)
+    return Ragged.from_fields({"alt": alt, "start": start})
+
+
+def test_record_row_string_field_preserves_boundaries():
+    """Issue #71: a string field peeled from a record row keeps its boundaries."""
+    row = _issue71_record()[0]
+    assert isinstance(row, dict)
+    assert list(row["alt"]) == [b"A", b"GG"]
+    np.testing.assert_array_equal(row["start"], np.array([1, 2], dtype=np.int32))
+
+
+def test_record_row_fields_have_matching_lengths():
+    """Every field of a peeled row must have the same length, so zip aligns."""
+    rec = _issue71_record()
+    for i in range(len(rec)):
+        row = rec[i]
+        assert len(row["alt"]) == len(row["start"])
+    row0 = rec[0]
+    assert list(zip(row0["start"], row0["alt"])) == [(1, b"A"), (2, b"GG")]
+
+
+def test_record_row_string_field_is_zero_copy():
+    rec = _issue71_record()
+    assert np.shares_memory(rec[0]["alt"].data, rec["alt"].data)
+
+
+def test_record_multidim_row_string_field_preserves_boundaries():
+    """(batch, ploidy, ~variants) record: rec[0][h] routes via _getitem_record_rows_r2."""
+    outer = np.array([0, 2, 3, 4, 6], dtype=OFFSET_TYPE)
+    alt = Ragged.from_offsets(
+        np.frombuffer(b"AGGTCNNAC", dtype="S1"),
+        (2, 2, None),
+        outer,
+        str_offsets=np.array([0, 1, 3, 5, 7, 9], dtype=OFFSET_TYPE),
+    )
+    start = Ragged.from_offsets(np.arange(6, dtype=np.int32), (2, 2, None), outer)
+    rec = Ragged.from_fields({"alt": alt, "start": start})
+    row = rec[0][0]
+    assert list(row["alt"]) == [b"A", b"GG"]
+    assert len(row["alt"]) == len(row["start"])
