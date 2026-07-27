@@ -89,6 +89,7 @@ rag = sp.rag.Ragged.empty((10, None, 4), dtype=np.uint8)   # batch of 10 OHE seq
 | Bulk numeric op on the flat data | `rag.data[:] = ...` or `rag.data.view(...)` — zero-copy | Iterate `for seq in rag:` |
 | Apply a `np.ufunc` | Just call it: `np.exp(rag)` — dispatched via `__array_ufunc__` (NDArrayOperatorsMixin) to return a `Ragged` | Manually unpack and rebuild |
 | Count top-level rows | `len(rag)` — returns `shape[0]` (raises if `shape[0]` is the ragged axis) | `rag.shape[0]` with manual int-cast |
+| Index one group of an opaque-string `Ragged` | `rag[i]` → a `Ragged` of `bytes`, one per string (`len(rag[i]) == rag.lengths[i]`); `rag[i][j]` is one `bytes` | Expect one concatenated `bytes` — that was the pre-0.22 behavior and it silently dropped the per-string boundaries |
 | Insert a leading size-1 axis | `rag[np.newaxis]` — returns `Ragged` with shape `(1, *old_shape)` | Manual `from_offsets` rebuild |
 | Reinterpret bytes/dtype | `rag.view(np.uint8)` | `np.asarray(rag).view(...)` (loses ragged structure) |
 | Reshape non-ragged axes | `rag.reshape(batch, None, k, 4)` | Touch `rag.data.shape` directly |
@@ -127,6 +128,7 @@ The inputs **must share the same offsets object** (pass the same `shared_offsets
 - `rag["field"]` gives zero-copy single-field access and shares the parent's offsets object. Its `.data` is the flat NumPy buffer for that field.
 - `rag.to_numpy()` on a record layout returns a **dict `{field: dense ndarray}`** (raises if any field is still jagged — lengths must be uniform for a dense conversion).
 - `view` and `apply` are **not defined** on record layouts — operate per-field.
+- Peeling a row (`rag[i]` with an integer `i`) returns a **dict** whose entries all have the same length: numeric/char fields as `ndarray`, opaque-string fields as a `Ragged` of `bytes`. That's what makes `zip(row["start"], row["alt"])` correct.
 
 ### Hashing strings
 

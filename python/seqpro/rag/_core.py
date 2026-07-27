@@ -59,6 +59,29 @@ def _build_layout(
     return RaggedLayout(data=data, offsets=off_list, shape=shape)
 
 
+def _peel_string_row(rl: "RaggedLayout[Any]", lo: int, hi: int) -> "RaggedLayout[Any]":
+    """Peel strings ``[lo, hi)`` off a string-under-axis leaf.
+
+    Returns the standalone opaque-string layout (``offsets == []``,
+    ``str_offsets`` set, ``shape == (hi - lo,)``) — the zero-real-level special
+    case of string-under-axis (Spec C Section 2). The data buffer is a view;
+    only the ``(k + 1,)`` offsets slice is copied, rebased to zero as
+    ``is_contiguous`` requires.
+
+    ``lo``/``hi`` are indices in *string* space, so this is correct whether the
+    parent's ``offsets[0]`` is 1-D canonical or a lazy ``(2, M)`` gather layout.
+    """
+    so = rl.str_offsets
+    assert so is not None  # caller guarantees a string leaf
+    b0 = int(so[lo])
+    return RaggedLayout(
+        data=rl.data[b0 : int(so[hi])],
+        offsets=[],
+        shape=(hi - lo,),
+        str_offsets=so[lo : hi + 1] - b0,
+    )
+
+
 class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
     """A non-branching ragged array with a single ragged axis (Spec A)."""
 
@@ -722,9 +745,10 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         if isinstance(where, (int, np.integer)):
             lo, hi = int(starts[where]), int(stops[where])
             if self._rl.str_offsets is not None and self._layout.offsets:
-                # string-under-axis: outer offsets index variants -> map to bytes via str_offsets
-                so = self._rl.str_offsets
-                return self._rl.data[int(so[lo]) : int(so[hi])].tobytes()
+                # string-under-axis: peel the real level -> standalone opaque
+                # string (k,), preserving the per-string boundaries that live in
+                # str_offsets. Concatenating here would drop them (issue #71).
+                return Ragged(_peel_string_row(self._rl, lo, hi))
             row = self._rl.data[lo:hi]
             if self._rl.is_string:
                 return row.tobytes()
@@ -1218,11 +1242,12 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             out: dict[str, Any] = {}
             for name, fl in rec.fields.items():
                 if fl.str_offsets is not None:
-                    so = fl.str_offsets
-                    row = fl.data[int(so[lo]) : int(so[hi])]
+                    # Each field carries its own str_offsets (Spec C Section 5);
+                    # peel it against the shared lo/hi so every field of the row
+                    # has the same length (issue #71).
+                    out[name] = Ragged(_peel_string_row(fl, lo, hi))
                 else:
-                    row = fl.data[lo:hi]
-                out[name] = row
+                    out[name] = fl.data[lo:hi]
             return out
         sel_starts, sel_stops = self._row_gather(where)
         new_offsets = np.stack([sel_starts, sel_stops], 0)
