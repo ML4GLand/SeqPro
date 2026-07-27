@@ -731,14 +731,103 @@ def test_r2_reshape_leading():
 
 
 def test_string_under_axis_integer_index():
+    """Peeling one group yields the standalone opaque-string layout (Spec C)."""
     rag = Ragged.from_offsets(
         np.frombuffer(b"TTGG", "S1"),
         (2, None),
         np.array([0, 1, 2]),
         str_offsets=np.array([0, 2, 4]),
     )
-    assert rag[0] == b"TT"
-    assert rag[1] == b"GG"
+    row = rag[0]
+    assert isinstance(row, Ragged)
+    assert row.is_string and row.shape == (1,)
+    assert len(row) == 1
+    assert row[0] == b"TT"
+    assert rag[1][0] == b"GG"
+
+
+def _issue71_pair():
+    """String-under-axis and numeric Ragged sharing one offsets object.
+
+    Groups: 0 -> ('A', 'GG'), 1 -> ('TC',).
+    """
+    data = np.frombuffer(b"AGGTC", dtype="S1")
+    outer = np.array([0, 2, 3], dtype=OFFSET_TYPE)  # group  -> string index
+    inner = np.array([0, 1, 3, 5], dtype=OFFSET_TYPE)  # string -> byte index
+    s = Ragged.from_offsets(data, (2, None), outer, str_offsets=inner)
+    n = Ragged.from_offsets(np.array([10, 20, 30], dtype=np.int32), (2, None), outer)
+    return s, n
+
+
+def test_string_under_axis_index_preserves_boundaries():
+    """Issue #71: interior str_offsets boundaries must survive an integer index."""
+    s, _ = _issue71_pair()
+    row = s[0]
+    assert len(row) == 2
+    assert row[0] == b"A"
+    assert row[1] == b"GG"
+    assert list(s[1]) == [b"TC"]
+
+
+def test_string_under_axis_index_matches_lengths():
+    """len(s[i]) must equal s.lengths[i] and the numeric row length."""
+    s, n = _issue71_pair()
+    for i in range(len(s)):
+        assert len(s[i]) == int(s.lengths[i])
+        assert len(s[i]) == len(n[i])
+
+
+def test_string_under_axis_index_is_zero_copy():
+    s, _ = _issue71_pair()
+    assert np.shares_memory(s[0].data, s.data)
+
+
+def test_string_under_axis_index_empty_group():
+    """A group holding zero strings peels to a length-0 result."""
+    rag = Ragged.from_offsets(
+        np.frombuffer(b"AC", "S1"),
+        (2, None),
+        np.array([0, 0, 2], dtype=OFFSET_TYPE),  # group 0 empty
+        str_offsets=np.array([0, 1, 2], dtype=OFFSET_TYPE),
+    )
+    assert len(rag[0]) == 0
+    assert len(rag[1]) == 2
+
+
+def test_string_under_axis_index_agrees_with_to_chars():
+    s, _ = _issue71_pair()
+    chars = s.to_chars()
+    for i in range(len(s)):
+        for j in range(len(s[i])):
+            assert s[i][j] == chars[i][j].tobytes()
+
+
+def test_string_under_axis_index_negative_and_oob():
+    s, _ = _issue71_pair()
+    assert list(s[-1]) == [b"TC"]
+    with pytest.raises(IndexError):
+        s[5]
+
+
+def test_string_under_axis_index_multidim():
+    """(batch, ploidy, ~variants): reaches the flat branch via _getitem_multidim."""
+    data = np.frombuffer(b"AGGTCNNAC", dtype="S1")
+    o0 = np.array([0, 2, 3, 4, 6], dtype=OFFSET_TYPE)  # 4 segments -> string idx
+    i0 = np.array([0, 1, 3, 5, 7, 9], dtype=OFFSET_TYPE)  # 6 boundaries -> bytes
+    rag = Ragged.from_offsets(data, (2, 2, None), o0, str_offsets=i0)
+    row = rag[0]  # -> (2, None) string-under-axis
+    assert list(row[0]) == [b"A", b"GG"]
+    assert list(row[1]) == [b"TC"]
+
+
+def test_standalone_string_index_still_returns_bytes():
+    """Regression guard: the zero-real-level case is the terminal peel."""
+    flat = Ragged.from_offsets(
+        np.frombuffer(b"cathithere", "S1"), (3,), np.array([0, 3, 5, 10])
+    )
+    assert flat[0] == b"cat"
+    assert flat[-1] == b"there"
+    assert list(flat) == [b"cat", b"hi", b"there"]
 
 
 # ---------------------------------------------------------------------------
