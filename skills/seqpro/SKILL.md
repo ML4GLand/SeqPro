@@ -129,6 +129,7 @@ The inputs **must share the same offsets object** (pass the same `shared_offsets
 - `rag["field"]` gives zero-copy single-field access and shares the parent's offsets object. Its `.data` is the flat NumPy buffer for that field.
 - `rag.to_numpy()` on a record layout returns a **dict `{field: dense ndarray}`** (raises if any field is still jagged — lengths must be uniform for a dense conversion).
 - `view` and `apply` are **not defined** on record layouts — operate per-field.
+- `batch.to_ak()` puts the record at the leaf, like `ak.zip`'s default: `(2, None)` → `2 * var * {seq, score}`. Before 0.23 a record with one leading axis zipped per row (`depth_limit=1`) instead.
 - Peeling a row (`rag[i]` with an integer `i`) returns a **dict** whose entries all have the same length: numeric/char fields as `ndarray`, opaque-string fields as a `Ragged` of `bytes`. That's what makes `zip(row["start"], row["alt"])` correct.
 
 ### Hashing strings

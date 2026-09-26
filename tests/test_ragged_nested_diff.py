@@ -231,7 +231,7 @@ def test_diff_record(t):
 
     ora_a = _oracle(outer, inner, data)
     ora_b = _oracle(outer, inner, data2)
-    ora_rec = ak.zip({"a": ora_a, "b": ora_b}, depth_limit=1)
+    ora_rec = ak.zip({"a": ora_a, "b": ora_b})  # leaf-level records (#75)
 
     assert rec.to_ak().to_list() == ora_rec.to_list()
     assert rec.to_packed().to_ak().to_list() == ak.to_packed(ora_rec).to_list()

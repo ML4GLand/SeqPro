@@ -654,7 +654,8 @@ def test_bridge_r2_record_roundtrip():
     rec = Ragged(arr)
     assert rec._is_record and rec.shape == (2, None, None)
     assert rec["a"]._layout.offsets[0] is rec["b"]._layout.offsets[0]  # shared O0
-    assert rec.to_ak().to_list() == arr.to_list()
+    # to_ak() always emits leaf-level records, whatever depth was ingested (#75)
+    assert rec.to_ak().to_list() == ak.zip({"a": arr["a"], "b": arr["b"]}).to_list()
 
 
 # ---------------------------------------------------------------------------
