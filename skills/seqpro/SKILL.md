@@ -49,15 +49,15 @@ For exact signatures and kwargs, read the docstring directly (`sp.<fn>?` in a RE
 
 ## `Ragged` — variable-length sequence batches
 
-`sp.Ragged` (backed by `python/seqpro/rag/_core.py`) is the canonical container for batches where sequences differ in length. It is a Rust-native class implementing `NDArrayOperatorsMixin` (NOT a subclass of `ak.Array`) with **exactly one ragged dimension**, plus zero-copy access to the underlying flat NumPy buffer and offsets.
+`sp.Ragged` (backed by `python/seqpro/rag/_core.py`) is the canonical container for batches where sequences differ in length. It is a Rust-native class implementing `NDArrayOperatorsMixin` (NOT a subclass of `ak.Array`) with **one ragged dimension, or two adjacent ones (nested, e.g. `(batch, ploidy, None, None)`)**, plus zero-copy access to the underlying flat NumPy buffer and offsets.
 
 ### Mental model
 
 A `Ragged` has three things:
 
 - **`data`**: a flat contiguous `NDArray` of shape `(total_elements, *fixed_trailing_dims)`. Zero-copy access via `rag.data`.
-- **`offsets`**: an `int64` array. Shape `(N+1,)` (contiguous, the common case) **or** `(2, N)` starts/stops (after some slices). Access via `rag.offsets`.
-- **`shape`**: a tuple like `(batch, None, ohe_dim)` where exactly one entry is `None` — that's the ragged axis. `rag.rag_dim` gives its index.
+- **`offsets`**: an `int64` array. Shape `(N+1,)` (contiguous, the common case) **or** `(2, N)` starts/stops (after some slices). Access via `rag.offsets`. A nested array has one such array per ragged axis, outermost first.
+- **`shape`**: a tuple like `(batch, None, ohe_dim)` where one entry is `None` — that's the ragged axis — or two adjacent entries for a nested array. `rag.rag_dim` gives the index of the first.
 
 `rag.lengths` derives segment lengths from offsets (cheap, returns an `ndarray`).
 
@@ -90,6 +90,7 @@ rag = sp.rag.Ragged.empty((10, None, 4), dtype=np.uint8)   # batch of 10 OHE seq
 | Apply a `np.ufunc` | Just call it: `np.exp(rag)` — dispatched via `__array_ufunc__` (NDArrayOperatorsMixin) to return a `Ragged` | Manually unpack and rebuild |
 | Count top-level rows | `len(rag)` — returns `shape[0]` (raises if `shape[0]` is the ragged axis) | `rag.shape[0]` with manual int-cast |
 | Index one group of an opaque-string `Ragged` | `rag[i]` → a `Ragged` of `bytes`, one per string (`len(rag[i]) == rag.lengths[i]`); `rag[i][j]` is one `bytes` | Expect one concatenated `bytes` — that was the pre-0.22 behavior and it silently dropped the per-string boundaries |
+| Index a nested array with fixed leading axes, e.g. `(b, p, ~v, ~w)` | NumPy-style keys on the fixed axes: `rag[i]` → `(p, ~v, ~w)`, `rag[:, j]` → `(b, ~v, ~w)`; `rag[i, j] == rag[i][j]` peels to `(n_v, ~w)` | Read `rag.offsets` by hand to find a row's ploid |
 | Insert a leading size-1 axis | `rag[np.newaxis]` — returns `Ragged` with shape `(1, *old_shape)` | Manual `from_offsets` rebuild |
 | Reinterpret bytes/dtype | `rag.view(np.uint8)` | `np.asarray(rag).view(...)` (loses ragged structure) |
 | Reshape non-ragged axes | `rag.reshape(batch, None, k, 4)` | Touch `rag.data.shape` directly |
@@ -163,7 +164,7 @@ When in doubt, read `python/seqpro/rag/_core.py` — it's the live backend and t
 
 - **Offsets layout drifts after slicing.** `rag.offsets` may become `(2, N)` starts/stops instead of `(N+1,)`. Check `rag.is_contiguous` / call `rag.to_packed()` before any code that assumes `(N+1,)`.
 - **`rag.data` on a record layout is a dict.** Code like `rag.data.shape` will fail; branch on `isinstance(rag.data, dict)` or use `rag.parts` and inspect.
-- **`Ragged` must have exactly one `None` in `shape`.** Constructing from data whose ragged structure doesn't match raises in `__init__`. Use `from_lengths` / `from_offsets` when in doubt.
+- **`Ragged` must have one `None` in `shape`, or two adjacent ones (nested).** Constructing from data whose ragged structure doesn't match raises in `__init__`. Use `from_lengths` / `from_offsets` when in doubt.
 - **The Rust k-shuffle expects contiguous `uint8` with the last axis as sequence length.** `sp.k_shuffle` handles this for you; if calling `seqpro._k_shuffle` directly, ensure layout.
 
 ## Where to look (don't memorize — read the source)

@@ -223,7 +223,12 @@ def to_ak(rag: Any) -> ak.Array:
             )
         else:
             leaf = NumpyArray(np.ascontiguousarray(data))  # type: ignore[arg-type]
-        return ak.Array(_wrap_list(o0, _wrap_list(o1, leaf)))
+        content = _wrap_list(o0, _wrap_list(o1, leaf))
+        # Fixed dims between the outer axis and the first ragged axis (e.g. ploidy
+        # in (b, p, ~v, ~w)) partition O0's segments into regular groups.
+        for size in reversed(rag._layout.shape[1 : rag.rag_dim]):
+            content = RegularArray(content, size)
+        return ak.Array(content)
 
     # --- string-under-axis path (shape (L0, None), is_string=True) ---
     if rag._rl.str_offsets is not None and rag._layout.offsets:

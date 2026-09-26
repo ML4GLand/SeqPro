@@ -83,7 +83,12 @@ def _peel_string_row(rl: "RaggedLayout[Any]", lo: int, hi: int) -> "RaggedLayout
 
 
 class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
-    """A non-branching ragged array with a single ragged axis (Spec A)."""
+    """A non-branching ragged array with one ragged axis, or two adjacent ones.
+
+    Shape is ``(*leading_int, None x R, *trailing_int)`` with ``R`` in ``{1, 2}``.
+    Fixed leading axes may sit between the outermost axis and the ragged axes,
+    e.g. ``(batch, ploidy, ~variants, ~window)``.
+    """
 
     __slots__ = ("_layout",)
 
@@ -657,6 +662,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             and len(where) == 2
             and not self._is_record
             and self._rl.n_ragged == 2
+            and self.rag_dim == 1
             and self._is_full_slice(where[0])
         ):
             return self._getitem_inner(where[1])
@@ -670,7 +676,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             # combining path would mis-handle the trailing fixed dim (e.g. a
             # (d0, None, K) array padded by to_padded), so fall through to the
             # sequential per-key path below.
-            if self._layout.shape.count(None) == 1 and self.rag_dim > 1:
+            if None in self._layout.shape and self.rag_dim > 1:
                 return self._getitem_tuple_multidim(where)
             # Sequential per-key path.  np.newaxis (None) keys are handled here:
             # track their positions, strip them from the tuple, apply the remaining
@@ -719,6 +725,8 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         if isinstance(self._layout, RecordLayout):
             return self._getitem_record(where)
         if self._layout.n_ragged == 2:
+            if self.rag_dim > 1:
+                return self._getitem_tuple_multidim((where,))
             return self._getitem_r2(where)
         # Multi-dim leading shape: when rag_dim > 1 (e.g. shape (d0, d1, ..., None))
         # index the first axis treating each "row" as a block of n_inner contiguous
@@ -848,12 +856,18 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
         )
 
     def _getitem_tuple_multidim(self, where: tuple[Any, ...]) -> Any:
-        """Handle a tuple index on a single-ragged Ragged (record or non-record) with rag_dim > 1.
+        """Handle a tuple index on a Ragged (record or non-record) with rag_dim > 1.
 
         Each key in ``where`` targets successive leading integer axes (like NumPy
         multi-dim indexing).  All leading-dim keys are resolved simultaneously into
         a single flat segment selection so that e.g. ``rag[:, [0]]`` correctly
         selects from axis 1 (samples), not axis 0 (ranges).
+
+        For R=2 the leading keys select outer (O0) segments; O1 stays global, the
+        same lazy gather as ``_getitem_r2``. When every leading axis of an R=2
+        array gets an int key, the one selected outer segment is peeled like
+        ``rag[i]`` on a ``rag_dim == 1`` array, so ``rag[i, j] == rag[i][j]``.
+        (R=1 keeps its 1-segment ``(None, ...)`` result.)
 
         Keys that reach the ragged ``None`` axis or beyond are not handled here
         (fall through to normal single-key dispatch after leading dims are consumed).
@@ -973,14 +987,17 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 grid_combined = grid_combined + grids[j] * strides[j]
             flat_seg_idx = np.asarray(grid_combined.reshape(-1), dtype=np.int64)
 
-        # Gather segment starts/stops
-        starts, stops = self._starts_stops()
+        # Gather the outer segments' starts/stops; deeper levels stay global.
+        outer, *inner_offsets = self._layout.offsets
+        starts, stops = _level_bounds(outer)
         new_starts = np.ascontiguousarray(starts[flat_seg_idx], dtype=OFFSET_TYPE)
         new_stops = np.ascontiguousarray(stops[flat_seg_idx], dtype=OFFSET_TYPE)
-        new_offsets = np.stack([new_starts, new_stops], 0)
+        new_offsets = [np.stack([new_starts, new_stops], 0), *inner_offsets]
 
-        # Build new shape: scalar axes squeezed, array-selected axes kept
-        new_leading: tuple[int | None, ...] = tuple(out_leading)
+        # Build new shape: scalar axes squeezed, array-selected axes kept. An R=2
+        # array with every leading axis squeezed keeps a size-1 axis to peel below.
+        all_int = not out_leading and len(new_offsets) == 2
+        new_leading: tuple[int | None, ...] = (1,) if all_int else tuple(out_leading)
         new_shape: tuple[int | None, ...] = (*new_leading, *trailing)
 
         # Build result: record Ragged or non-record Ragged depending on layout type
@@ -989,7 +1006,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             new_fields = {
                 name: RaggedLayout(
                     data=fl.data,
-                    offsets=[new_offsets],
+                    offsets=new_offsets,
                     shape=(
                         *new_leading,
                         *fl.shape[fl.shape.index(None) :],
@@ -1000,7 +1017,7 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             }
             result: Any = Ragged(
                 RecordLayout(
-                    offsets=[new_offsets],
+                    offsets=new_offsets,
                     shape=new_shape,
                     fields=new_fields,
                 )
@@ -1009,11 +1026,13 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
             result = Ragged(
                 RaggedLayout(
                     data=self._rl.data,
-                    offsets=[new_offsets],
+                    offsets=new_offsets,
                     shape=new_shape,
                     str_offsets=self._rl.str_offsets,
                 )
             )
+        if all_int:
+            result = result[0]
 
         # Apply any remainder keys (reaching into or past the ragged axis)
         for k in remainder_keys:
@@ -1031,15 +1050,9 @@ class Ragged(NDArrayOperatorsMixin, Generic[RDTYPE_co]):
                 raise KeyError(where)
             return Ragged(field)  # field.offsets[0] is the shared object (zero-copy)
         # numpy contract: a non-tuple key is treated as a 1-tuple (A[x] == A[(x,)]).
-        # For a single-ragged-axis record with >1 leading fixed axis, route through
-        # the multidim peel path directly (under the SAME guard it requires, so we
-        # never re-dispatch through __getitem__ and risk recursion). Records that are
-        # not single-None fall through to the flat record-rows path unchanged.
-        if (
-            not isinstance(where, tuple)
-            and self.rag_dim > 1
-            and rec.shape.count(None) == 1
-        ):
+        # A record with >1 leading fixed axis routes through the multidim path
+        # directly (never re-dispatching through __getitem__, so no recursion).
+        if not isinstance(where, tuple) and self.rag_dim > 1:
             return self._getitem_tuple_multidim((where,))
         return self._getitem_record_rows(where)
 
