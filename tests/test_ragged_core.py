@@ -631,15 +631,15 @@ def test_r2_per_group_inner_slice():
     np.testing.assert_array_equal(sub[1, 0], np.array([5, 6, 7]))
 
 
-def test_r2_per_group_inner_slice_negative_raises():
+def test_r2_per_group_inner_slice_negative():
     data = np.arange(10, dtype=np.int32)
     rag = Ragged.from_offsets(
         data,
         (2, None, None),
-        [np.array([0, 2, 4]), np.array([0, 3, 5, 8, 10])],
+        [np.array([0, 1, 4]), np.array([0, 3, 5, 8, 10])],
     )
-    with pytest.raises(NotImplementedError, match="negative"):
-        rag[:, -2:]
+    # Python slice semantics per group (#74): group0 has 1 middle, group1 has 3
+    assert rag[:, -2:].to_ak().tolist() == rag.to_ak()[:, -2:].tolist()
 
 
 # ---------------------------------------------------------------------------
