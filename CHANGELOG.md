@@ -1,3 +1,20 @@
+## 0.23.0 (2026-09-26)
+
+### BREAKING CHANGE
+
+- rag[:, k] and similar tuple keys now follow NumPy and
+awkward semantics; code relying on the old axis-0 behavior must index
+rows directly (rag[k]).
+- Ragged record to_ak() for arrays with one leading axis
+now returns records at the leaf (e.g. 2 * var * {a, b}) instead of one
+record of lists per row.
+
+### Fix
+
+- **rag**: apply each tuple key to the next output axis
+- **rag**: emit leaf-level records from to_ak() for every rag_dim
+- **rag**: honor fixed axes between the outer axis and nested ragged axes
+
 ## 0.22.0 (2026-07-27)
 
 ### BREAKING CHANGE
